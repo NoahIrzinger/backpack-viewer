@@ -1,0 +1,39 @@
+{
+  "name": "backpack-viewer",
+  "version": "0.1.0",
+  "description": "Web-based graph visualizer for backpack-ontology — Canvas 2D, force-directed layout, live reload",
+  "license": "Apache-2.0",
+  "author": "Noah Irzinger",
+  "type": "module",
+  "bin": {
+    "backpack-viewer": "./bin/serve.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "index.html",
+    "vite.config.ts",
+    "tsconfig.json",
+    "tsconfig.node.json"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "serve": "node bin/serve.js",
+    "release:patch": "npm version patch && git push && git push --tags",
+    "release:minor": "npm version minor && git push && git push --tags",
+    "release:major": "npm version major && git push && git push --tags"
+  },
+  "dependencies": {
+    "backpack-ontology": "file:../backpack-ontology",
+    "vite": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.8.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
