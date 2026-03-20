@@ -100,8 +100,8 @@ export function initCanvas(
       ctx.moveTo(source.x, source.y);
       ctx.lineTo(target.x, target.y);
       ctx.strokeStyle = isConnected
-        ? "rgba(255, 255, 255, 0.5)"
-        : "rgba(255, 255, 255, 0.15)";
+        ? "rgba(212, 162, 127, 0.5)"
+        : "rgba(255, 255, 255, 0.08)";
       ctx.lineWidth = isConnected ? 2.5 : 1.5;
       ctx.stroke();
 
@@ -112,8 +112,8 @@ export function initCanvas(
       const mx = (source.x + target.x) / 2;
       const my = (source.y + target.y) / 2;
       ctx.fillStyle = isConnected
-        ? "rgba(255, 255, 255, 0.7)"
-        : "rgba(255, 255, 255, 0.35)";
+        ? "rgba(212, 162, 127, 0.7)"
+        : "rgba(255, 255, 255, 0.2)";
       ctx.font = "9px system-ui, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "bottom";
@@ -154,8 +154,8 @@ export function initCanvas(
       ctx.globalAlpha = dimmed ? 0.3 : 1;
       ctx.fill();
       ctx.strokeStyle = isSelected
-        ? "#ffffff"
-        : "rgba(255, 255, 255, 0.6)";
+        ? "#d4d4d4"
+        : "rgba(255, 255, 255, 0.15)";
       ctx.lineWidth = isSelected ? 3 : 1.5;
       ctx.stroke();
 
@@ -163,8 +163,8 @@ export function initCanvas(
       const label =
         node.label.length > 24 ? node.label.slice(0, 22) + "..." : node.label;
       ctx.fillStyle = dimmed
-        ? "rgba(224, 224, 224, 0.3)"
-        : "#e0e0e0";
+        ? "rgba(212, 212, 212, 0.2)"
+        : "#a3a3a3";
       ctx.font = "11px system-ui, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
@@ -172,8 +172,8 @@ export function initCanvas(
 
       // Type badge above
       ctx.fillStyle = dimmed
-        ? "rgba(255, 255, 255, 0.15)"
-        : "rgba(255, 255, 255, 0.4)";
+        ? "rgba(115, 115, 115, 0.15)"
+        : "rgba(115, 115, 115, 0.5)";
       ctx.font = "9px system-ui, sans-serif";
       ctx.textBaseline = "bottom";
       ctx.fillText(node.type, node.x, node.y - NODE_RADIUS - 3);
@@ -209,8 +209,8 @@ export function initCanvas(
     );
     ctx.closePath();
     ctx.fillStyle = highlighted
-      ? "rgba(255, 255, 255, 0.6)"
-      : "rgba(255, 255, 255, 0.3)";
+      ? "rgba(212, 162, 127, 0.5)"
+      : "rgba(255, 255, 255, 0.12)";
     ctx.fill();
   }
 
@@ -224,14 +224,14 @@ export function initCanvas(
     ctx.beginPath();
     ctx.arc(cx, cy, 15, 0, Math.PI * 2);
     ctx.strokeStyle = highlighted
-      ? "rgba(255, 255, 255, 0.5)"
-      : "rgba(255, 255, 255, 0.15)";
+      ? "rgba(212, 162, 127, 0.5)"
+      : "rgba(255, 255, 255, 0.08)";
     ctx.lineWidth = highlighted ? 2.5 : 1.5;
     ctx.stroke();
 
     ctx.fillStyle = highlighted
-      ? "rgba(255, 255, 255, 0.7)"
-      : "rgba(255, 255, 255, 0.35)";
+      ? "rgba(212, 162, 127, 0.7)"
+      : "rgba(255, 255, 255, 0.2)";
     ctx.font = "9px system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText(type, cx, cy - 18);
