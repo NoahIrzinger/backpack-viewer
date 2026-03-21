@@ -10,28 +10,25 @@
   },
   "files": [
     "bin",
-    "src",
-    "index.html",
-    "vite.config.ts",
-    "tsconfig.json",
-    "tsconfig.node.json"
+    "dist"
   ],
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "serve": "node bin/serve.js",
+    "prepublishOnly": "npm run build",
     "release:patch": "npm version patch && git push && git push --tags",
     "release:minor": "npm version minor && git push && git push --tags",
     "release:major": "npm version major && git push && git push --tags"
   },
   "dependencies": {
-    "backpack-ontology": "^0.1.3",
-    "vite": "^6.0.0"
+    "backpack-ontology": "^0.1.3"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "vite": "^6.0.0"
   },
   "engines": {
     "node": ">=18"
