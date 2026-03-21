@@ -24,6 +24,12 @@ export function initCanvas(
   let alpha = 1;
   let animFrame = 0;
   let selectedNodeId: string | null = null;
+  let filteredNodeIds: Set<string> | null = null; // null = no filter (show all)
+
+  // Pan animation state
+  let panTarget: { x: number; y: number } | null = null;
+  let panStart: { x: number; y: number; time: number } | null = null;
+  const PAN_DURATION = 300;
 
   // --- Sizing ---
 
@@ -85,13 +91,23 @@ export function initCanvas(
       const target = state.nodeMap.get(edge.targetId);
       if (!source || !target) continue;
 
+      const sourceMatch = filteredNodeIds === null || filteredNodeIds.has(edge.sourceId);
+      const targetMatch = filteredNodeIds === null || filteredNodeIds.has(edge.targetId);
+      const bothMatch = sourceMatch && targetMatch;
+
+      // Hide edges where neither endpoint matches the filter
+      if (filteredNodeIds !== null && !sourceMatch && !targetMatch) continue;
+
       const isConnected =
         selectedNodeId !== null &&
         (edge.sourceId === selectedNodeId || edge.targetId === selectedNodeId);
 
+      const highlighted = isConnected || (filteredNodeIds !== null && bothMatch);
+      const edgeDimmed = filteredNodeIds !== null && !bothMatch;
+
       // Self-loop
       if (edge.sourceId === edge.targetId) {
-        drawSelfLoop(source, edge.type, isConnected);
+        drawSelfLoop(source, edge.type, highlighted);
         continue;
       }
 
@@ -99,21 +115,25 @@ export function initCanvas(
       ctx.beginPath();
       ctx.moveTo(source.x, source.y);
       ctx.lineTo(target.x, target.y);
-      ctx.strokeStyle = isConnected
+      ctx.strokeStyle = highlighted
         ? "rgba(212, 162, 127, 0.5)"
-        : "rgba(255, 255, 255, 0.08)";
-      ctx.lineWidth = isConnected ? 2.5 : 1.5;
+        : edgeDimmed
+          ? "rgba(255, 255, 255, 0.03)"
+          : "rgba(255, 255, 255, 0.08)";
+      ctx.lineWidth = highlighted ? 2.5 : 1.5;
       ctx.stroke();
 
       // Arrowhead
-      drawArrowhead(source.x, source.y, target.x, target.y, isConnected);
+      drawArrowhead(source.x, source.y, target.x, target.y, highlighted);
 
       // Edge label at midpoint
       const mx = (source.x + target.x) / 2;
       const my = (source.y + target.y) / 2;
-      ctx.fillStyle = isConnected
+      ctx.fillStyle = highlighted
         ? "rgba(212, 162, 127, 0.7)"
-        : "rgba(255, 255, 255, 0.2)";
+        : edgeDimmed
+          ? "rgba(255, 255, 255, 0.05)"
+          : "rgba(255, 255, 255, 0.2)";
       ctx.font = "9px system-ui, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "bottom";
@@ -131,8 +151,11 @@ export function initCanvas(
             (e.sourceId === selectedNodeId && e.targetId === node.id) ||
             (e.targetId === selectedNodeId && e.sourceId === node.id)
         );
+      const filteredOut =
+        filteredNodeIds !== null && !filteredNodeIds.has(node.id);
       const dimmed =
-        selectedNodeId !== null && !isSelected && !isNeighbor;
+        filteredOut ||
+        (selectedNodeId !== null && !isSelected && !isNeighbor);
 
       // Glow for selected node
       if (isSelected) {
@@ -151,7 +174,7 @@ export function initCanvas(
       ctx.beginPath();
       ctx.arc(node.x, node.y, NODE_RADIUS, 0, Math.PI * 2);
       ctx.fillStyle = color;
-      ctx.globalAlpha = dimmed ? 0.3 : 1;
+      ctx.globalAlpha = filteredOut ? 0.1 : dimmed ? 0.3 : 1;
       ctx.fill();
       ctx.strokeStyle = isSelected
         ? "#d4d4d4"
@@ -238,6 +261,23 @@ export function initCanvas(
   }
 
   // --- Simulation loop ---
+
+  function animatePan() {
+    if (!panTarget || !panStart) return;
+    const elapsed = performance.now() - panStart.time;
+    const t = Math.min(elapsed / PAN_DURATION, 1);
+    // Ease out cubic
+    const ease = 1 - Math.pow(1 - t, 3);
+    camera.x = panStart.x + (panTarget.x - panStart.x) * ease;
+    camera.y = panStart.y + (panTarget.y - panStart.y) * ease;
+    render();
+    if (t < 1) {
+      requestAnimationFrame(animatePan);
+    } else {
+      panTarget = null;
+      panStart = null;
+    }
+  }
 
   function simulate() {
     if (!state || alpha < ALPHA_MIN) return;
@@ -379,6 +419,7 @@ export function initCanvas(
       state = createLayout(data);
       alpha = 1;
       selectedNodeId = null;
+      filteredNodeIds = null;
 
       // Center camera on the graph
       camera = { x: 0, y: 0, scale: 1 };
@@ -399,6 +440,29 @@ export function initCanvas(
       }
 
       simulate();
+    },
+
+    setFilteredNodeIds(ids: Set<string> | null) {
+      filteredNodeIds = ids;
+      render();
+    },
+
+    panToNode(nodeId: string) {
+      if (!state) return;
+      const node = state.nodeMap.get(nodeId);
+      if (!node) return;
+
+      selectedNodeId = nodeId;
+      onNodeClick?.(nodeId);
+
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      panStart = { x: camera.x, y: camera.y, time: performance.now() };
+      panTarget = {
+        x: node.x - w / (2 * camera.scale),
+        y: node.y - h / (2 * camera.scale),
+      };
+      animatePan();
     },
 
     destroy() {

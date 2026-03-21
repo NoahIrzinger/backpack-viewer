@@ -3,26 +3,37 @@ import { listOntologies, loadOntology } from "./api";
 import { initSidebar } from "./sidebar";
 import { initCanvas } from "./canvas";
 import { initInfoPanel } from "./info-panel";
+import { initSearch } from "./search";
 import "./style.css";
 
 let activeOntology = "";
 let currentData: OntologyData | null = null;
 
 async function main() {
-  const infoPanel = initInfoPanel(
-    document.getElementById("canvas-container")!
-  );
+  const canvasContainer = document.getElementById("canvas-container")!;
 
-  const canvas = initCanvas(
-    document.getElementById("canvas-container")!,
-    (nodeId) => {
-      if (nodeId && currentData) {
-        infoPanel.show(nodeId, currentData);
-      } else {
-        infoPanel.hide();
-      }
+  const infoPanel = initInfoPanel(canvasContainer);
+
+  const canvas = initCanvas(canvasContainer, (nodeId) => {
+    if (nodeId && currentData) {
+      infoPanel.show(nodeId, currentData);
+    } else {
+      infoPanel.hide();
     }
-  );
+  });
+
+  const search = initSearch(canvasContainer);
+
+  search.onFilterChange((ids) => {
+    canvas.setFilteredNodeIds(ids);
+  });
+
+  search.onNodeSelect((nodeId) => {
+    canvas.panToNode(nodeId);
+    if (currentData) {
+      infoPanel.show(nodeId, currentData);
+    }
+  });
 
   const sidebar = initSidebar(
     document.getElementById("sidebar")!,
@@ -30,8 +41,10 @@ async function main() {
       activeOntology = name;
       sidebar.setActive(name);
       infoPanel.hide();
+      search.clear();
       currentData = await loadOntology(name);
       canvas.loadGraph(currentData);
+      search.setOntologyData(currentData);
     }
   );
 
@@ -45,7 +58,19 @@ async function main() {
     sidebar.setActive(activeOntology);
     currentData = await loadOntology(activeOntology);
     canvas.loadGraph(currentData);
+    search.setOntologyData(currentData);
   }
+
+  // Keyboard shortcut: / or Ctrl+K to focus search
+  document.addEventListener("keydown", (e) => {
+    // Don't hijack if typing in an input
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+    if (e.key === "/" || (e.key === "k" && (e.metaKey || e.ctrlKey))) {
+      e.preventDefault();
+      search.focus();
+    }
+  });
 
   // Live reload — when Claude adds nodes via MCP, re-fetch and re-render
   if (import.meta.hot) {
@@ -57,6 +82,7 @@ async function main() {
         try {
           currentData = await loadOntology(activeOntology);
           canvas.loadGraph(currentData);
+          search.setOntologyData(currentData);
         } catch {
           // Ontology may have been deleted
         }
