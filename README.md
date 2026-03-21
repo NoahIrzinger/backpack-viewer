@@ -51,6 +51,10 @@ backpack-viewer ──reads─────────────────�
 
 For questions, feedback, or sponsorship inquiries: **support@backpackontology.com**
 
+## Privacy
+
+See the [Backpack Ontology Privacy Policy](https://github.com/noahirzinger/backpack-ontology/blob/main/PRIVACY.md). The viewer itself collects no data.
+
 ## License
 
 Licensed under the [Apache License, Version 2.0](./LICENSE).
