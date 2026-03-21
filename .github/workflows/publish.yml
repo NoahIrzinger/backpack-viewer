@@ -57,6 +57,7 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - run: npm rebuild
       - run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
