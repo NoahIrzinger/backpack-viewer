@@ -8,12 +8,17 @@ interface Camera {
   scale: number;
 }
 
+/** Read a CSS custom property from :root. */
+function cssVar(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
 const NODE_RADIUS = 20;
 const ALPHA_MIN = 0.001;
 
 export function initCanvas(
   container: HTMLElement,
-  onNodeClick?: (nodeId: string | null) => void
+  onNodeClick?: (nodeIds: string[] | null) => void
 ) {
   const canvas = container.querySelector("canvas") as HTMLCanvasElement;
   const ctx = canvas.getContext("2d")!;
@@ -23,7 +28,7 @@ export function initCanvas(
   let state: LayoutState | null = null;
   let alpha = 1;
   let animFrame = 0;
-  let selectedNodeId: string | null = null;
+  let selectedNodeIds: Set<string> = new Set();
   let filteredNodeIds: Set<string> | null = null; // null = no filter (show all)
 
   // Pan animation state
@@ -77,6 +82,22 @@ export function initCanvas(
       return;
     }
 
+    // Read theme colors from CSS variables each frame
+    const edgeColor = cssVar("--canvas-edge");
+    const edgeHighlight = cssVar("--canvas-edge-highlight");
+    const edgeDimColor = cssVar("--canvas-edge-dim");
+    const edgeLabel = cssVar("--canvas-edge-label");
+    const edgeLabelHighlight = cssVar("--canvas-edge-label-highlight");
+    const edgeLabelDim = cssVar("--canvas-edge-label-dim");
+    const arrowColor = cssVar("--canvas-arrow");
+    const arrowHighlight = cssVar("--canvas-arrow-highlight");
+    const nodeLabel = cssVar("--canvas-node-label");
+    const nodeLabelDim = cssVar("--canvas-node-label-dim");
+    const typeBadge = cssVar("--canvas-type-badge");
+    const typeBadgeDim = cssVar("--canvas-type-badge-dim");
+    const selectionBorder = cssVar("--canvas-selection-border");
+    const nodeBorder = cssVar("--canvas-node-border");
+
     ctx.save();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
@@ -99,15 +120,15 @@ export function initCanvas(
       if (filteredNodeIds !== null && !sourceMatch && !targetMatch) continue;
 
       const isConnected =
-        selectedNodeId !== null &&
-        (edge.sourceId === selectedNodeId || edge.targetId === selectedNodeId);
+        selectedNodeIds.size > 0 &&
+        (selectedNodeIds.has(edge.sourceId) || selectedNodeIds.has(edge.targetId));
 
       const highlighted = isConnected || (filteredNodeIds !== null && bothMatch);
       const edgeDimmed = filteredNodeIds !== null && !bothMatch;
 
       // Self-loop
       if (edge.sourceId === edge.targetId) {
-        drawSelfLoop(source, edge.type, highlighted);
+        drawSelfLoop(source, edge.type, highlighted, edgeColor, edgeHighlight, edgeLabel, edgeLabelHighlight);
         continue;
       }
 
@@ -116,24 +137,24 @@ export function initCanvas(
       ctx.moveTo(source.x, source.y);
       ctx.lineTo(target.x, target.y);
       ctx.strokeStyle = highlighted
-        ? "rgba(212, 162, 127, 0.5)"
+        ? edgeHighlight
         : edgeDimmed
-          ? "rgba(255, 255, 255, 0.03)"
-          : "rgba(255, 255, 255, 0.08)";
+          ? edgeDimColor
+          : edgeColor;
       ctx.lineWidth = highlighted ? 2.5 : 1.5;
       ctx.stroke();
 
       // Arrowhead
-      drawArrowhead(source.x, source.y, target.x, target.y, highlighted);
+      drawArrowhead(source.x, source.y, target.x, target.y, highlighted, arrowColor, arrowHighlight);
 
       // Edge label at midpoint
       const mx = (source.x + target.x) / 2;
       const my = (source.y + target.y) / 2;
       ctx.fillStyle = highlighted
-        ? "rgba(212, 162, 127, 0.7)"
+        ? edgeLabelHighlight
         : edgeDimmed
-          ? "rgba(255, 255, 255, 0.05)"
-          : "rgba(255, 255, 255, 0.2)";
+          ? edgeLabelDim
+          : edgeLabel;
       ctx.font = "9px system-ui, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "bottom";
@@ -143,19 +164,19 @@ export function initCanvas(
     // Draw nodes
     for (const node of state.nodes) {
       const color = getColor(node.type);
-      const isSelected = node.id === selectedNodeId;
+      const isSelected = selectedNodeIds.has(node.id);
       const isNeighbor =
-        selectedNodeId !== null &&
+        selectedNodeIds.size > 0 &&
         state.edges.some(
           (e) =>
-            (e.sourceId === selectedNodeId && e.targetId === node.id) ||
-            (e.targetId === selectedNodeId && e.sourceId === node.id)
+            (selectedNodeIds.has(e.sourceId) && e.targetId === node.id) ||
+            (selectedNodeIds.has(e.targetId) && e.sourceId === node.id)
         );
       const filteredOut =
         filteredNodeIds !== null && !filteredNodeIds.has(node.id);
       const dimmed =
         filteredOut ||
-        (selectedNodeId !== null && !isSelected && !isNeighbor);
+        (selectedNodeIds.size > 0 && !isSelected && !isNeighbor);
 
       // Glow for selected node
       if (isSelected) {
@@ -176,27 +197,21 @@ export function initCanvas(
       ctx.fillStyle = color;
       ctx.globalAlpha = filteredOut ? 0.1 : dimmed ? 0.3 : 1;
       ctx.fill();
-      ctx.strokeStyle = isSelected
-        ? "#d4d4d4"
-        : "rgba(255, 255, 255, 0.15)";
+      ctx.strokeStyle = isSelected ? selectionBorder : nodeBorder;
       ctx.lineWidth = isSelected ? 3 : 1.5;
       ctx.stroke();
 
       // Label below
       const label =
         node.label.length > 24 ? node.label.slice(0, 22) + "..." : node.label;
-      ctx.fillStyle = dimmed
-        ? "rgba(212, 212, 212, 0.2)"
-        : "#a3a3a3";
+      ctx.fillStyle = dimmed ? nodeLabelDim : nodeLabel;
       ctx.font = "11px system-ui, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       ctx.fillText(label, node.x, node.y + NODE_RADIUS + 4);
 
       // Type badge above
-      ctx.fillStyle = dimmed
-        ? "rgba(115, 115, 115, 0.15)"
-        : "rgba(115, 115, 115, 0.5)";
+      ctx.fillStyle = dimmed ? typeBadgeDim : typeBadge;
       ctx.font = "9px system-ui, sans-serif";
       ctx.textBaseline = "bottom";
       ctx.fillText(node.type, node.x, node.y - NODE_RADIUS - 3);
@@ -213,7 +228,9 @@ export function initCanvas(
     sy: number,
     tx: number,
     ty: number,
-    highlighted: boolean
+    highlighted: boolean,
+    arrowColor: string,
+    arrowHighlight: string
   ) {
     const angle = Math.atan2(ty - sy, tx - sx);
     const tipX = tx - Math.cos(angle) * NODE_RADIUS;
@@ -231,30 +248,28 @@ export function initCanvas(
       tipY - size * Math.sin(angle + 0.4)
     );
     ctx.closePath();
-    ctx.fillStyle = highlighted
-      ? "rgba(212, 162, 127, 0.5)"
-      : "rgba(255, 255, 255, 0.12)";
+    ctx.fillStyle = highlighted ? arrowHighlight : arrowColor;
     ctx.fill();
   }
 
   function drawSelfLoop(
     node: LayoutNode,
     type: string,
-    highlighted: boolean
+    highlighted: boolean,
+    edgeColor: string,
+    edgeHighlight: string,
+    labelColor: string,
+    labelHighlight: string
   ) {
     const cx = node.x + NODE_RADIUS + 15;
     const cy = node.y - NODE_RADIUS - 15;
     ctx.beginPath();
     ctx.arc(cx, cy, 15, 0, Math.PI * 2);
-    ctx.strokeStyle = highlighted
-      ? "rgba(212, 162, 127, 0.5)"
-      : "rgba(255, 255, 255, 0.08)";
+    ctx.strokeStyle = highlighted ? edgeHighlight : edgeColor;
     ctx.lineWidth = highlighted ? 2.5 : 1.5;
     ctx.stroke();
 
-    ctx.fillStyle = highlighted
-      ? "rgba(212, 162, 127, 0.7)"
-      : "rgba(255, 255, 255, 0.2)";
+    ctx.fillStyle = highlighted ? labelHighlight : labelColor;
     ctx.font = "9px system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText(type, cx, cy - 18);
@@ -321,12 +336,29 @@ export function initCanvas(
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
     const hit = nodeAtScreen(mx, my);
+    const multiSelect = e.ctrlKey || e.metaKey;
 
     if (hit) {
-      selectedNodeId = hit.id;
-      onNodeClick?.(hit.id);
+      if (multiSelect) {
+        // Toggle node in/out of multi-selection
+        if (selectedNodeIds.has(hit.id)) {
+          selectedNodeIds.delete(hit.id);
+        } else {
+          selectedNodeIds.add(hit.id);
+        }
+      } else {
+        // Single click — toggle if already the only selection, otherwise replace
+        if (selectedNodeIds.size === 1 && selectedNodeIds.has(hit.id)) {
+          selectedNodeIds.clear();
+        } else {
+          selectedNodeIds.clear();
+          selectedNodeIds.add(hit.id);
+        }
+      }
+      const ids = [...selectedNodeIds];
+      onNodeClick?.(ids.length > 0 ? ids : null);
     } else {
-      selectedNodeId = null;
+      selectedNodeIds.clear();
       onNodeClick?.(null);
     }
     render();
@@ -418,7 +450,7 @@ export function initCanvas(
       cancelAnimationFrame(animFrame);
       state = createLayout(data);
       alpha = 1;
-      selectedNodeId = null;
+      selectedNodeIds = new Set();
       filteredNodeIds = null;
 
       // Center camera on the graph
@@ -452,8 +484,8 @@ export function initCanvas(
       const node = state.nodeMap.get(nodeId);
       if (!node) return;
 
-      selectedNodeId = nodeId;
-      onNodeClick?.(nodeId);
+      selectedNodeIds = new Set([nodeId]);
+      onNodeClick?.([nodeId]);
 
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;

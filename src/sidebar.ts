@@ -20,7 +20,7 @@ export function initSidebar(
   footer.className = "sidebar-footer";
   footer.innerHTML =
     '<a href="mailto:support@backpackontology.com">support@backpackontology.com</a>' +
-    "<span>Feedback, support & sponsorship</span>";
+    "<span>Feedback & support</span>";
 
   container.appendChild(heading);
   container.appendChild(input);

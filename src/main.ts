@@ -12,11 +12,30 @@ let currentData: OntologyData | null = null;
 async function main() {
   const canvasContainer = document.getElementById("canvas-container")!;
 
+  // --- Theme toggle (top-right of canvas) ---
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)");
+  const stored = localStorage.getItem("backpack-theme");
+  const initial = stored ?? (prefersDark.matches ? "dark" : "light");
+  document.documentElement.setAttribute("data-theme", initial);
+
+  const themeBtn = document.createElement("button");
+  themeBtn.className = "theme-toggle";
+  themeBtn.textContent = initial === "light" ? "\u263E" : "\u263C";
+  themeBtn.title = "Toggle light/dark mode";
+  themeBtn.addEventListener("click", () => {
+    const current = document.documentElement.getAttribute("data-theme");
+    const next = current === "light" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("backpack-theme", next);
+    themeBtn.textContent = next === "light" ? "\u263E" : "\u263C";
+  });
+  canvasContainer.appendChild(themeBtn);
+
   const infoPanel = initInfoPanel(canvasContainer);
 
-  const canvas = initCanvas(canvasContainer, (nodeId) => {
-    if (nodeId && currentData) {
-      infoPanel.show(nodeId, currentData);
+  const canvas = initCanvas(canvasContainer, (nodeIds) => {
+    if (nodeIds && nodeIds.length > 0 && currentData) {
+      infoPanel.show(nodeIds, currentData);
     } else {
       infoPanel.hide();
     }
@@ -31,7 +50,7 @@ async function main() {
   search.onNodeSelect((nodeId) => {
     canvas.panToNode(nodeId);
     if (currentData) {
-      infoPanel.show(nodeId, currentData);
+      infoPanel.show([nodeId], currentData);
     }
   });
 
