@@ -14,18 +14,19 @@ Or run it directly:
 npx backpack-viewer
 ```
 
-Opens http://localhost:5173 — click any ontology in the sidebar to visualize it.
+Opens http://localhost:5173. Click any ontology in the sidebar to visualize it.
 
 ## Features
 
-- **Live reload** — add knowledge via Claude and watch it appear in real time
-- **Pan and zoom** — click-drag to pan, scroll to zoom
-- **Inspect** — click any item to see its properties, connections, and metadata
-- **Search** — filter ontologies by name in the sidebar
+- **Live reload**: add knowledge via Claude and watch it appear in real time
+- **Pan and zoom**: click-drag to pan, scroll to zoom
+- **Inspect**: click any item to see its properties, connections, and metadata
+- **Edit**: rename ontologies, edit node types and properties, add or remove items inline
+- **Search**: filter ontologies by name in the sidebar
 
 ## How it works
 
-The viewer reads ontology data from the same local files that the MCP server writes to. Changes appear automatically — no refresh needed.
+The viewer reads ontology data from the same local files that the MCP server writes to. Changes appear automatically, no refresh needed.
 
 ```
 backpack-ontology (MCP) ──writes──> ~/.local/share/backpack/ontologies/
