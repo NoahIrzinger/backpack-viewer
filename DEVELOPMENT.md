@@ -38,7 +38,7 @@ Changes to the ontology source will be reflected after running `npm run build` i
 
 ```
 backpack-viewer/
-├── vite.config.ts          # Vite plugin: StorageBackend → HTTP API + file watcher
+├── vite.config.ts          # Vite plugin: JSON file backend → HTTP API + file watcher
 ├── index.html              # Single page shell
 ├── bin/
 │   └── serve.js            # CLI entry point (npx backpack-viewer)
@@ -59,7 +59,7 @@ backpack-viewer/
 
 The custom Vite plugin serves two purposes:
 
-1. **API middleware** — Exposes two HTTP endpoints backed by the `StorageBackend` interface:
+1. **API middleware** — Exposes two HTTP endpoints backed by `JsonFileBackend`:
    - `GET /api/ontologies` → `storage.listOntologies()`
    - `GET /api/ontologies/:name` → `storage.loadOntology(name)`
 
@@ -102,7 +102,7 @@ The `v*` tag triggers the GitHub Actions publish workflow, which validates the t
 
 ## Dependencies
 
-- **Runtime**: `backpack-ontology` (StorageBackend interface + types), `vite` (dev server + bundler)
+- **Runtime**: `backpack-ontology` (JsonFileBackend + types), `vite` (dev server + bundler)
 - **Dev**: `typescript`, `@types/node`
 
 No frameworks. No UI libraries. Pure TypeScript + Canvas 2D.

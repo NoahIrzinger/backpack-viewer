@@ -1,5 +1,5 @@
 import type { OntologyData } from "backpack-ontology";
-import { listOntologies, loadOntology } from "./api";
+import { listOntologies, loadOntology, saveOntology } from "./api";
 import { initSidebar } from "./sidebar";
 import { initCanvas } from "./canvas";
 import { initInfoPanel } from "./info-panel";
@@ -31,7 +31,60 @@ async function main() {
   });
   canvasContainer.appendChild(themeBtn);
 
-  const infoPanel = initInfoPanel(canvasContainer);
+  // --- Save and re-render helper ---
+  async function save() {
+    if (!activeOntology || !currentData) return;
+    currentData.metadata.updatedAt = new Date().toISOString();
+    await saveOntology(activeOntology, currentData);
+    canvas.loadGraph(currentData);
+    search.setOntologyData(currentData);
+    // Refresh sidebar counts
+    const updated = await listOntologies();
+    sidebar.setSummaries(updated);
+  }
+
+  // --- Info panel with edit callbacks ---
+  const infoPanel = initInfoPanel(canvasContainer, {
+    onUpdateNode(nodeId, properties) {
+      if (!currentData) return;
+      const node = currentData.nodes.find((n) => n.id === nodeId);
+      if (!node) return;
+      node.properties = { ...node.properties, ...properties };
+      node.updatedAt = new Date().toISOString();
+      save().then(() => infoPanel.show([nodeId], currentData!));
+    },
+
+    onDeleteNode(nodeId) {
+      if (!currentData) return;
+      currentData.nodes = currentData.nodes.filter((n) => n.id !== nodeId);
+      currentData.edges = currentData.edges.filter(
+        (e) => e.sourceId !== nodeId && e.targetId !== nodeId
+      );
+      save();
+    },
+
+    onDeleteEdge(edgeId) {
+      if (!currentData) return;
+      const selectedNodeId = currentData.edges.find(
+        (e) => e.id === edgeId
+      )?.sourceId;
+      currentData.edges = currentData.edges.filter((e) => e.id !== edgeId);
+      save().then(() => {
+        if (selectedNodeId && currentData) {
+          infoPanel.show([selectedNodeId], currentData);
+        }
+      });
+    },
+
+    onAddProperty(nodeId, key, value) {
+      if (!currentData) return;
+      const node = currentData.nodes.find((n) => n.id === nodeId);
+      if (!node) return;
+      node.properties[key] = value;
+      node.updatedAt = new Date().toISOString();
+      save().then(() => infoPanel.show([nodeId], currentData!));
+    },
+  });
 
   const canvas = initCanvas(canvasContainer, (nodeIds) => {
     if (nodeIds && nodeIds.length > 0 && currentData) {
@@ -82,7 +135,6 @@ async function main() {
 
   // Keyboard shortcut: / or Ctrl+K to focus search
   document.addEventListener("keydown", (e) => {
-    // Don't hijack if typing in an input
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
     if (e.key === "/" || (e.key === "k" && (e.metaKey || e.ctrlKey))) {

@@ -2,10 +2,9 @@ import { defineConfig, type Plugin } from "vite";
 import fs from "node:fs";
 import path from "node:path";
 import { JsonFileBackend, dataDir } from "backpack-ontology";
-import type { StorageBackend } from "backpack-ontology";
 
 function ontologyApiPlugin(): Plugin {
-  let storage: StorageBackend;
+  let storage: JsonFileBackend;
 
   return {
     name: "ontology-api",
@@ -34,7 +33,7 @@ function ontologyApiPlugin(): Plugin {
         const urlPath = req.url.replace(/\?.*$/, "");
 
         // GET /api/ontologies
-        if (urlPath === "/api/ontologies") {
+        if (urlPath === "/api/ontologies" && req.method === "GET") {
           storage
             .listOntologies()
             .then((summaries) => {
@@ -48,12 +47,36 @@ function ontologyApiPlugin(): Plugin {
           return;
         }
 
-        // GET /api/ontologies/:name
         const name = decodeURIComponent(
           urlPath.replace("/api/ontologies/", "")
         );
         if (!name) return next();
 
+        // PUT /api/ontologies/:name
+        if (req.method === "PUT") {
+          let body = "";
+          req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+          req.on("end", () => {
+            try {
+              const data = JSON.parse(body);
+              storage.saveOntology(name, data).then(() => {
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ ok: true }));
+              }).catch((err: Error) => {
+                res.statusCode = 500;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ error: err.message }));
+              });
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "Invalid JSON" }));
+            }
+          });
+          return;
+        }
+
+        // GET /api/ontologies/:name
         storage
           .loadOntology(name)
           .then((data) => {

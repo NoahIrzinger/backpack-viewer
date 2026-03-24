@@ -9,7 +9,17 @@ function nodeLabel(node: Node): string {
   return node.id;
 }
 
-export function initInfoPanel(container: HTMLElement) {
+export interface EditCallbacks {
+  onUpdateNode(nodeId: string, properties: Record<string, unknown>): void;
+  onDeleteNode(nodeId: string): void;
+  onDeleteEdge(edgeId: string): void;
+  onAddProperty(nodeId: string, key: string, value: string): void;
+}
+
+export function initInfoPanel(
+  container: HTMLElement,
+  callbacks?: EditCallbacks
+) {
   const panel = document.createElement("div");
   panel.id = "info-panel";
   panel.className = "info-panel hidden";
@@ -60,10 +70,11 @@ export function initInfoPanel(container: HTMLElement) {
     header.appendChild(nodeIdEl);
     panel.appendChild(header);
 
-    // Properties section
+    // Properties section (editable)
     const propKeys = Object.keys(node.properties);
+    const propSection = createSection("Properties");
+
     if (propKeys.length > 0) {
-      const section = createSection("Properties");
       const table = document.createElement("dl");
       table.className = "info-props";
 
@@ -72,15 +83,90 @@ export function initInfoPanel(container: HTMLElement) {
         dt.textContent = key;
 
         const dd = document.createElement("dd");
-        dd.appendChild(renderValue(node.properties[key]));
+
+        if (callbacks) {
+          const valueStr = formatValue(node.properties[key]);
+          const input = document.createElement("input");
+          input.type = "text";
+          input.className = "info-edit-input";
+          input.value = valueStr;
+          input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+              input.blur();
+            }
+          });
+          input.addEventListener("blur", () => {
+            const newVal = input.value;
+            if (newVal !== valueStr) {
+              callbacks.onUpdateNode(nodeId, { [key]: tryParseValue(newVal) });
+            }
+          });
+          dd.appendChild(input);
+
+          // Delete property button
+          const delProp = document.createElement("button");
+          delProp.className = "info-delete-prop";
+          delProp.textContent = "\u00d7";
+          delProp.title = `Remove ${key}`;
+          delProp.addEventListener("click", () => {
+            const updated = { ...node.properties };
+            delete updated[key];
+            callbacks.onUpdateNode(nodeId, updated);
+          });
+          dd.appendChild(delProp);
+        } else {
+          dd.appendChild(renderValue(node.properties[key]));
+        }
 
         table.appendChild(dt);
         table.appendChild(dd);
       }
 
-      section.appendChild(table);
-      panel.appendChild(section);
+      propSection.appendChild(table);
     }
+
+    // Add property button
+    if (callbacks) {
+      const addBtn = document.createElement("button");
+      addBtn.className = "info-add-btn";
+      addBtn.textContent = "+ Add property";
+      addBtn.addEventListener("click", () => {
+        const row = document.createElement("div");
+        row.className = "info-add-row";
+
+        const keyInput = document.createElement("input");
+        keyInput.type = "text";
+        keyInput.className = "info-edit-input";
+        keyInput.placeholder = "key";
+
+        const valInput = document.createElement("input");
+        valInput.type = "text";
+        valInput.className = "info-edit-input";
+        valInput.placeholder = "value";
+
+        const saveBtn = document.createElement("button");
+        saveBtn.className = "info-add-save";
+        saveBtn.textContent = "Add";
+        saveBtn.addEventListener("click", () => {
+          if (keyInput.value) {
+            callbacks.onAddProperty(
+              nodeId,
+              keyInput.value,
+              valInput.value
+            );
+          }
+        });
+
+        row.appendChild(keyInput);
+        row.appendChild(valInput);
+        row.appendChild(saveBtn);
+        propSection.appendChild(row);
+        keyInput.focus();
+      });
+      propSection.appendChild(addBtn);
+    }
+
+    panel.appendChild(propSection);
 
     // Connections section
     if (connectedEdges.length > 0) {
@@ -99,6 +185,13 @@ export function initInfoPanel(container: HTMLElement) {
         const li = document.createElement("li");
         li.className = "info-connection";
 
+        if (otherNode) {
+          const dot = document.createElement("span");
+          dot.className = "info-target-dot";
+          dot.style.backgroundColor = getColor(otherNode.type);
+          li.appendChild(dot);
+        }
+
         const arrow = document.createElement("span");
         arrow.className = "info-arrow";
         arrow.textContent = isOutgoing ? "\u2192" : "\u2190";
@@ -110,13 +203,6 @@ export function initInfoPanel(container: HTMLElement) {
         const target = document.createElement("span");
         target.className = "info-target";
         target.textContent = otherLabel;
-
-        if (otherNode) {
-          const dot = document.createElement("span");
-          dot.className = "info-target-dot";
-          dot.style.backgroundColor = getColor(otherNode.type);
-          li.appendChild(dot);
-        }
 
         li.appendChild(arrow);
         li.appendChild(edgeType);
@@ -134,6 +220,19 @@ export function initInfoPanel(container: HTMLElement) {
             edgeProps.appendChild(prop);
           }
           li.appendChild(edgeProps);
+        }
+
+        // Delete edge button
+        if (callbacks) {
+          const delEdge = document.createElement("button");
+          delEdge.className = "info-delete-edge";
+          delEdge.textContent = "\u00d7";
+          delEdge.title = "Remove connection";
+          delEdge.addEventListener("click", (e) => {
+            e.stopPropagation();
+            callbacks.onDeleteEdge(edge.id);
+          });
+          li.appendChild(delEdge);
         }
 
         list.appendChild(li);
@@ -164,6 +263,22 @@ export function initInfoPanel(container: HTMLElement) {
     timestamps.appendChild(updatedDd);
     tsSection.appendChild(timestamps);
     panel.appendChild(tsSection);
+
+    // Delete node button
+    if (callbacks) {
+      const deleteSection = document.createElement("div");
+      deleteSection.className = "info-section info-danger";
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "info-delete-node";
+      deleteBtn.textContent = "Delete node";
+      deleteBtn.addEventListener("click", () => {
+        callbacks.onDeleteNode(nodeId);
+        hide();
+      });
+      deleteSection.appendChild(deleteBtn);
+      panel.appendChild(deleteSection);
+    }
   }
 
   function showMulti(nodeIds: string[], data: OntologyData) {
@@ -171,7 +286,6 @@ export function initInfoPanel(container: HTMLElement) {
     const nodes = data.nodes.filter((n) => selectedSet.has(n.id));
     if (nodes.length === 0) return;
 
-    // Edges where BOTH endpoints are in the selection
     const sharedEdges = data.edges.filter(
       (e) => selectedSet.has(e.sourceId) && selectedSet.has(e.targetId)
     );
@@ -179,14 +293,12 @@ export function initInfoPanel(container: HTMLElement) {
     panel.innerHTML = "";
     panel.classList.remove("hidden");
 
-    // Close button
     const closeBtn = document.createElement("button");
     closeBtn.className = "info-close";
     closeBtn.textContent = "\u00d7";
     closeBtn.addEventListener("click", hide);
     panel.appendChild(closeBtn);
 
-    // Header
     const header = document.createElement("div");
     header.className = "info-header";
 
@@ -196,7 +308,6 @@ export function initInfoPanel(container: HTMLElement) {
 
     header.appendChild(label);
 
-    // Type badges
     const badgeRow = document.createElement("div");
     badgeRow.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;margin-top:6px";
     const typeCounts = new Map<string, number>();
@@ -213,7 +324,6 @@ export function initInfoPanel(container: HTMLElement) {
     header.appendChild(badgeRow);
     panel.appendChild(header);
 
-    // Selected nodes list
     const nodesSection = createSection("Selected Nodes");
     const nodesList = document.createElement("ul");
     nodesList.className = "info-connections";
@@ -243,7 +353,6 @@ export function initInfoPanel(container: HTMLElement) {
     nodesSection.appendChild(nodesList);
     panel.appendChild(nodesSection);
 
-    // Shared connections
     const connSection = createSection(
       sharedEdges.length > 0
         ? `Connections Between Selected (${sharedEdges.length})`
@@ -262,8 +371,12 @@ export function initInfoPanel(container: HTMLElement) {
       for (const edge of sharedEdges) {
         const sourceNode = data.nodes.find((n) => n.id === edge.sourceId);
         const targetNode = data.nodes.find((n) => n.id === edge.targetId);
-        const sourceLabel = sourceNode ? nodeLabel(sourceNode) : edge.sourceId;
-        const targetLabel = targetNode ? nodeLabel(targetNode) : edge.targetId;
+        const sourceLabel = sourceNode
+          ? nodeLabel(sourceNode)
+          : edge.sourceId;
+        const targetLabel = targetNode
+          ? nodeLabel(targetNode)
+          : edge.targetId;
 
         const li = document.createElement("li");
         li.className = "info-connection";
@@ -291,21 +404,16 @@ export function initInfoPanel(container: HTMLElement) {
         arrow2.className = "info-arrow";
         arrow2.textContent = "\u2192";
 
+        li.appendChild(source);
+        li.appendChild(arrow);
+        li.appendChild(edgeType);
+        li.appendChild(arrow2);
+
         if (targetNode) {
           const dot2 = document.createElement("span");
           dot2.className = "info-target-dot";
           dot2.style.backgroundColor = getColor(targetNode.type);
-
-          li.appendChild(source);
-          li.appendChild(arrow);
-          li.appendChild(edgeType);
-          li.appendChild(arrow2);
           li.appendChild(dot2);
-        } else {
-          li.appendChild(source);
-          li.appendChild(arrow);
-          li.appendChild(edgeType);
-          li.appendChild(arrow2);
         }
 
         const target = document.createElement("span");
@@ -313,7 +421,6 @@ export function initInfoPanel(container: HTMLElement) {
         target.textContent = targetLabel;
         li.appendChild(target);
 
-        // Edge properties
         const edgePropKeys = Object.keys(edge.properties);
         if (edgePropKeys.length > 0) {
           const edgeProps = document.createElement("div");
@@ -365,7 +472,6 @@ function createSection(title: string): HTMLElement {
   return section;
 }
 
-/** Render any property value into a DOM element. Handles strings, arrays, numbers, objects. */
 function renderValue(value: unknown): HTMLElement {
   if (Array.isArray(value)) {
     const container = document.createElement("div");
@@ -392,12 +498,30 @@ function renderValue(value: unknown): HTMLElement {
   return span;
 }
 
-/** Format a value for inline display. */
 function formatValue(value: unknown): string {
   if (Array.isArray(value)) return value.map(String).join(", ");
   if (value !== null && typeof value === "object")
     return JSON.stringify(value);
   return String(value ?? "");
+}
+
+/** Try to parse a string as JSON (number, boolean, array), fall back to string. */
+function tryParseValue(str: string): unknown {
+  const trimmed = str.trim();
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  if (trimmed !== "" && !isNaN(Number(trimmed))) return Number(trimmed);
+  if (
+    (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
+    (trimmed.startsWith("{") && trimmed.endsWith("}"))
+  ) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return str;
+    }
+  }
+  return str;
 }
 
 function formatTimestamp(iso: string): string {
