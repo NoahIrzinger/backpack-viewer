@@ -1,5 +1,5 @@
 import type { OntologyData } from "backpack-ontology";
-import { listOntologies, loadOntology, saveOntology } from "./api";
+import { listOntologies, loadOntology, saveOntology, renameOntology } from "./api";
 import { initSidebar } from "./sidebar";
 import { initCanvas } from "./canvas";
 import { initInfoPanel } from "./info-panel";
@@ -50,6 +50,15 @@ async function main() {
       const node = currentData.nodes.find((n) => n.id === nodeId);
       if (!node) return;
       node.properties = { ...node.properties, ...properties };
+      node.updatedAt = new Date().toISOString();
+      save().then(() => infoPanel.show([nodeId], currentData!));
+    },
+
+    onChangeNodeType(nodeId, newType) {
+      if (!currentData) return;
+      const node = currentData.nodes.find((n) => n.id === nodeId);
+      if (!node) return;
+      node.type = newType;
       node.updatedAt = new Date().toISOString();
       save().then(() => infoPanel.show([nodeId], currentData!));
     },
@@ -109,14 +118,30 @@ async function main() {
 
   const sidebar = initSidebar(
     document.getElementById("sidebar")!,
-    async (name) => {
-      activeOntology = name;
-      sidebar.setActive(name);
-      infoPanel.hide();
-      search.clear();
-      currentData = await loadOntology(name);
-      canvas.loadGraph(currentData);
-      search.setOntologyData(currentData);
+    {
+      onSelect: async (name) => {
+        activeOntology = name;
+        sidebar.setActive(name);
+        infoPanel.hide();
+        search.clear();
+        currentData = await loadOntology(name);
+        canvas.loadGraph(currentData);
+        search.setOntologyData(currentData);
+      },
+      onRename: async (oldName, newName) => {
+        await renameOntology(oldName, newName);
+        if (activeOntology === oldName) {
+          activeOntology = newName;
+        }
+        const updated = await listOntologies();
+        sidebar.setSummaries(updated);
+        sidebar.setActive(activeOntology);
+        if (activeOntology === newName) {
+          currentData = await loadOntology(newName);
+          canvas.loadGraph(currentData);
+          search.setOntologyData(currentData);
+        }
+      },
     }
   );
 

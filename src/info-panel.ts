@@ -11,10 +11,13 @@ function nodeLabel(node: Node): string {
 
 export interface EditCallbacks {
   onUpdateNode(nodeId: string, properties: Record<string, unknown>): void;
+  onChangeNodeType(nodeId: string, newType: string): void;
   onDeleteNode(nodeId: string): void;
   onDeleteEdge(edgeId: string): void;
   onAddProperty(nodeId: string, key: string, value: string): void;
 }
+
+const EDIT_ICON = '\u270E'; // pencil
 
 export function initInfoPanel(
   container: HTMLElement,
@@ -56,6 +59,39 @@ export function initInfoPanel(
     typeBadge.className = "info-type-badge";
     typeBadge.textContent = node.type;
     typeBadge.style.backgroundColor = getColor(node.type);
+
+    if (callbacks) {
+      typeBadge.classList.add("info-editable");
+      const typeEditBtn = document.createElement("button");
+      typeEditBtn.className = "info-inline-edit";
+      typeEditBtn.textContent = EDIT_ICON;
+      typeEditBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "info-edit-inline-input";
+        input.value = node.type;
+        typeBadge.textContent = "";
+        typeBadge.appendChild(input);
+        input.focus();
+        input.select();
+        const finish = () => {
+          const val = input.value.trim();
+          if (val && val !== node.type) {
+            callbacks.onChangeNodeType(nodeId, val);
+          } else {
+            typeBadge.textContent = node.type;
+            typeBadge.appendChild(typeEditBtn);
+          }
+        };
+        input.addEventListener("blur", finish);
+        input.addEventListener("keydown", (ke) => {
+          if (ke.key === "Enter") input.blur();
+          if (ke.key === "Escape") { input.value = node.type; input.blur(); }
+        });
+      });
+      typeBadge.appendChild(typeEditBtn);
+    }
 
     const label = document.createElement("h3");
     label.className = "info-label";

@@ -23,3 +23,18 @@ export async function saveOntology(
   });
   if (!res.ok) throw new Error(`Failed to save ontology: ${name}`);
 }
+
+export async function renameOntology(
+  oldName: string,
+  newName: string
+): Promise<void> {
+  const res = await fetch(
+    `/api/ontologies/${encodeURIComponent(oldName)}/rename`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newName }),
+    }
+  );
+  if (!res.ok) throw new Error(`Failed to rename ontology: ${oldName}`);
+}

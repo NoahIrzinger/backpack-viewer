@@ -47,6 +47,32 @@ function ontologyApiPlugin(): Plugin {
           return;
         }
 
+        // POST /api/ontologies/:name/rename
+        const renameMatch = urlPath.match(/^\/api\/ontologies\/(.+)\/rename$/);
+        if (renameMatch && req.method === "POST") {
+          const oldName = decodeURIComponent(renameMatch[1]);
+          let body = "";
+          req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+          req.on("end", () => {
+            try {
+              const { name: newName } = JSON.parse(body);
+              storage.renameOntology(oldName, newName).then(() => {
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ ok: true, name: newName }));
+              }).catch((err: Error) => {
+                res.statusCode = 500;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ error: err.message }));
+              });
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "Invalid JSON" }));
+            }
+          });
+          return;
+        }
+
         const name = decodeURIComponent(
           urlPath.replace("/api/ontologies/", "")
         );
