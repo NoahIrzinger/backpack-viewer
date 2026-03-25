@@ -7,7 +7,7 @@ import http from "node:http";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
-const distDir = path.resolve(root, "dist");
+const distDir = path.resolve(root, "dist/app");
 const port = parseInt(process.env.PORT || "5173", 10);
 
 const hasDistBuild = fs.existsSync(path.join(distDir, "index.html"));

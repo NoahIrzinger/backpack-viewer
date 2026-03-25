@@ -121,4 +121,7 @@ function ontologyApiPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [ontologyApiPlugin()],
+  build: {
+    outDir: "dist/app",
+  },
 });

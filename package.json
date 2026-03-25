@@ -14,10 +14,10 @@
   ],
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "rm -rf dist && tsc && cp src/style.css dist/ && vite build",
     "preview": "vite preview",
     "serve": "node bin/serve.js",
-    "prepublishOnly": "npm run build",
+    "prepare": "npm run build",
     "release:patch": "npm version patch && git push && git push --tags",
     "release:minor": "npm version minor && git push && git push --tags",
     "release:major": "npm version major && git push && git push --tags"
