@@ -44,6 +44,10 @@ async function main() {
   }
 
   // --- Info panel with edit callbacks ---
+  // canvas is used inside the navigate callback but declared below —
+  // that's fine because the callback is only invoked after setup completes.
+  let canvas: ReturnType<typeof initCanvas>;
+
   const infoPanel = initInfoPanel(canvasContainer, {
     onUpdateNode(nodeId, properties) {
       if (!currentData) return;
@@ -93,9 +97,11 @@ async function main() {
       node.updatedAt = new Date().toISOString();
       save().then(() => infoPanel.show([nodeId], currentData!));
     },
+  }, (nodeId) => {
+    canvas.panToNode(nodeId);
   });
 
-  const canvas = initCanvas(canvasContainer, (nodeIds) => {
+  canvas = initCanvas(canvasContainer, (nodeIds) => {
     if (nodeIds && nodeIds.length > 0 && currentData) {
       infoPanel.show(nodeIds, currentData);
     } else {

@@ -21,16 +21,104 @@ const EDIT_ICON = '\u270E'; // pencil
 
 export function initInfoPanel(
   container: HTMLElement,
-  callbacks?: EditCallbacks
+  callbacks?: EditCallbacks,
+  onNavigateToNode?: (nodeId: string) => void
 ) {
   const panel = document.createElement("div");
   panel.id = "info-panel";
   panel.className = "info-panel hidden";
   container.appendChild(panel);
 
+  // --- State ---
+  let maximized = false;
+  let history: string[] = [];
+  let historyIndex = -1;
+  let navigatingHistory = false;
+  let lastData: OntologyData | null = null;
+
   function hide() {
     panel.classList.add("hidden");
+    panel.classList.remove("info-panel-maximized");
     panel.innerHTML = "";
+    maximized = false;
+    history = [];
+    historyIndex = -1;
+  }
+
+  function navigateTo(nodeId: string) {
+    if (!lastData || !onNavigateToNode) return;
+    // Push to history before navigating
+    if (historyIndex < history.length - 1) {
+      history = history.slice(0, historyIndex + 1);
+    }
+    history.push(nodeId);
+    historyIndex = history.length - 1;
+    // Set flag so the show() call from canvas doesn't double-push
+    navigatingHistory = true;
+    onNavigateToNode(nodeId);
+    navigatingHistory = false;
+  }
+
+  function goBack() {
+    if (historyIndex <= 0 || !lastData || !onNavigateToNode) return;
+    historyIndex--;
+    navigatingHistory = true;
+    onNavigateToNode(history[historyIndex]);
+    navigatingHistory = false;
+  }
+
+  function goForward() {
+    if (historyIndex >= history.length - 1 || !lastData || !onNavigateToNode) return;
+    historyIndex++;
+    navigatingHistory = true;
+    onNavigateToNode(history[historyIndex]);
+    navigatingHistory = false;
+  }
+
+  function createToolbar(): HTMLElement {
+    const toolbar = document.createElement("div");
+    toolbar.className = "info-panel-toolbar";
+
+    // Back
+    const backBtn = document.createElement("button");
+    backBtn.className = "info-toolbar-btn";
+    backBtn.textContent = "\u2190";
+    backBtn.title = "Back";
+    backBtn.disabled = historyIndex <= 0;
+    backBtn.addEventListener("click", goBack);
+    toolbar.appendChild(backBtn);
+
+    // Forward
+    const fwdBtn = document.createElement("button");
+    fwdBtn.className = "info-toolbar-btn";
+    fwdBtn.textContent = "\u2192";
+    fwdBtn.title = "Forward";
+    fwdBtn.disabled = historyIndex >= history.length - 1;
+    fwdBtn.addEventListener("click", goForward);
+    toolbar.appendChild(fwdBtn);
+
+    // Maximize/restore
+    const maxBtn = document.createElement("button");
+    maxBtn.className = "info-toolbar-btn";
+    maxBtn.textContent = maximized ? "\u2398" : "\u26F6";
+    maxBtn.title = maximized ? "Restore" : "Maximize";
+    maxBtn.addEventListener("click", () => {
+      maximized = !maximized;
+      panel.classList.toggle("info-panel-maximized", maximized);
+      maxBtn.textContent = maximized ? "\u2398" : "\u26F6";
+      maxBtn.title = maximized ? "Restore" : "Maximize";
+    });
+    toolbar.appendChild(maxBtn);
+
+    // Close
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "info-toolbar-btn info-close-btn";
+    closeBtn.textContent = "\u00d7";
+    closeBtn.title = "Close";
+    closeBtn.addEventListener("click", hide);
+    toolbar.appendChild(closeBtn);
+
+    return toolbar;
   }
 
   function showSingle(nodeId: string, data: OntologyData) {
@@ -43,13 +131,10 @@ export function initInfoPanel(
 
     panel.innerHTML = "";
     panel.classList.remove("hidden");
+    if (maximized) panel.classList.add("info-panel-maximized");
 
-    // Close button
-    const closeBtn = document.createElement("button");
-    closeBtn.className = "info-close";
-    closeBtn.textContent = "\u00d7";
-    closeBtn.addEventListener("click", hide);
-    panel.appendChild(closeBtn);
+    // Toolbar (back, forward, maximize, close)
+    panel.appendChild(createToolbar());
 
     // Header: type badge + label
     const header = document.createElement("div");
@@ -221,6 +306,16 @@ export function initInfoPanel(
         const li = document.createElement("li");
         li.className = "info-connection";
 
+        // Make clickable if we can navigate
+        if (onNavigateToNode && otherNode) {
+          li.classList.add("info-connection-link");
+          li.addEventListener("click", (e) => {
+            // Don't navigate if clicking the delete edge button
+            if ((e.target as HTMLElement).closest(".info-delete-edge")) return;
+            navigateTo(otherId);
+          });
+        }
+
         if (otherNode) {
           const dot = document.createElement("span");
           dot.className = "info-target-dot";
@@ -328,12 +423,10 @@ export function initInfoPanel(
 
     panel.innerHTML = "";
     panel.classList.remove("hidden");
+    if (maximized) panel.classList.add("info-panel-maximized");
 
-    const closeBtn = document.createElement("button");
-    closeBtn.className = "info-close";
-    closeBtn.textContent = "\u00d7";
-    closeBtn.addEventListener("click", hide);
-    panel.appendChild(closeBtn);
+    // Toolbar
+    panel.appendChild(createToolbar());
 
     const header = document.createElement("div");
     header.className = "info-header";
@@ -367,6 +460,14 @@ export function initInfoPanel(
     for (const node of nodes) {
       const li = document.createElement("li");
       li.className = "info-connection";
+
+      // Make clickable to navigate to single node
+      if (onNavigateToNode) {
+        li.classList.add("info-connection-link");
+        li.addEventListener("click", () => {
+          navigateTo(node.id);
+        });
+      }
 
       const dot = document.createElement("span");
       dot.className = "info-target-dot";
@@ -481,6 +582,21 @@ export function initInfoPanel(
 
   return {
     show(nodeIds: string[], data: OntologyData) {
+      lastData = data;
+
+      // Track history for single-node views
+      if (nodeIds.length === 1 && !navigatingHistory) {
+        const nodeId = nodeIds[0];
+        // Don't push duplicate consecutive entries
+        if (history[historyIndex] !== nodeId) {
+          if (historyIndex < history.length - 1) {
+            history = history.slice(0, historyIndex + 1);
+          }
+          history.push(nodeId);
+          historyIndex = history.length - 1;
+        }
+      }
+
       if (nodeIds.length === 1) {
         showSingle(nodeIds[0], data);
       } else if (nodeIds.length > 1) {
