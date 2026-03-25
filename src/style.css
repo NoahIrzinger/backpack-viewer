@@ -964,6 +964,7 @@ body {
     width: auto;
     max-height: none;
     overflow-y: auto;
+    z-index: 30;
   }
 
   .info-panel.info-panel-maximized {
