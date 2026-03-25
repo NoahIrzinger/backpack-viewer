@@ -4,6 +4,7 @@ import { initSidebar } from "./sidebar";
 import { initCanvas } from "./canvas";
 import { initInfoPanel } from "./info-panel";
 import { initSearch } from "./search";
+import { initToolsPane } from "./tools-pane";
 import "./style.css";
 
 let activeOntology = "";
@@ -38,6 +39,7 @@ async function main() {
     await saveOntology(activeOntology, currentData);
     canvas.loadGraph(currentData);
     search.setLearningGraphData(currentData);
+    toolsPane.setData(currentData);
     // Refresh sidebar counts
     const updated = await listOntologies();
     sidebar.setSummaries(updated);
@@ -101,15 +103,90 @@ async function main() {
     canvas.panToNode(nodeId);
   });
 
+  const mobileQuery = window.matchMedia("(max-width: 768px)");
+
   canvas = initCanvas(canvasContainer, (nodeIds) => {
     if (nodeIds && nodeIds.length > 0 && currentData) {
       infoPanel.show(nodeIds, currentData);
+      if (mobileQuery.matches) toolsPane.collapse();
     } else {
       infoPanel.hide();
     }
   });
 
   const search = initSearch(canvasContainer);
+  const toolsPane = initToolsPane(canvasContainer, {
+    onFilterByType(type) {
+      if (!currentData) return;
+      if (type === null) {
+        canvas.setFilteredNodeIds(null);
+      } else {
+        const ids = new Set(
+          (currentData?.nodes ?? [])
+            .filter((n) => n.type === type)
+            .map((n) => n.id)
+        );
+        canvas.setFilteredNodeIds(ids);
+      }
+    },
+    onNavigateToNode(nodeId) {
+      canvas.panToNode(nodeId);
+      if (currentData) infoPanel.show([nodeId], currentData);
+    },
+    onRenameNodeType(oldType, newType) {
+      if (!currentData) return;
+      for (const node of currentData.nodes) {
+        if (node.type === oldType) {
+          node.type = newType;
+          node.updatedAt = new Date().toISOString();
+        }
+      }
+      save();
+    },
+    onRenameEdgeType(oldType, newType) {
+      if (!currentData) return;
+      for (const edge of currentData.edges) {
+        if (edge.type === oldType) {
+          edge.type = newType;
+        }
+      }
+      save();
+    },
+    onOpen() {
+      if (mobileQuery.matches) infoPanel.hide();
+    },
+  });
+
+  // --- Top bar: flex container for all top controls ---
+  const topBar = document.createElement("div");
+  topBar.className = "canvas-top-bar";
+
+  const topLeft = document.createElement("div");
+  topLeft.className = "canvas-top-left";
+
+  const topCenter = document.createElement("div");
+  topCenter.className = "canvas-top-center";
+
+  const topRight = document.createElement("div");
+  topRight.className = "canvas-top-right";
+
+  // Move tools toggle into left slot
+  const toolsToggle = canvasContainer.querySelector(".tools-pane-toggle");
+  if (toolsToggle) topLeft.appendChild(toolsToggle);
+
+  // Move search overlay into center slot
+  const searchOverlay = canvasContainer.querySelector(".search-overlay");
+  if (searchOverlay) topCenter.appendChild(searchOverlay);
+
+  // Move zoom controls and theme toggle into right slot
+  const zoomControls = canvasContainer.querySelector(".zoom-controls");
+  if (zoomControls) topRight.appendChild(zoomControls);
+  topRight.appendChild(themeBtn);
+
+  topBar.appendChild(topLeft);
+  topBar.appendChild(topCenter);
+  topBar.appendChild(topRight);
+  canvasContainer.appendChild(topBar);
 
   search.onFilterChange((ids) => {
     canvas.setFilteredNodeIds(ids);
@@ -133,6 +210,7 @@ async function main() {
         currentData = await loadOntology(name);
         canvas.loadGraph(currentData);
         search.setLearningGraphData(currentData);
+    toolsPane.setData(currentData);
       },
       onRename: async (oldName, newName) => {
         await renameOntology(oldName, newName);
@@ -146,6 +224,7 @@ async function main() {
           currentData = await loadOntology(newName);
           canvas.loadGraph(currentData);
           search.setLearningGraphData(currentData);
+    toolsPane.setData(currentData);
         }
       },
     }
@@ -162,6 +241,7 @@ async function main() {
     currentData = await loadOntology(activeOntology);
     canvas.loadGraph(currentData);
     search.setLearningGraphData(currentData);
+    toolsPane.setData(currentData);
   }
 
   // Keyboard shortcut: / or Ctrl+K to focus search
@@ -185,6 +265,7 @@ async function main() {
           currentData = await loadOntology(activeOntology);
           canvas.loadGraph(currentData);
           search.setLearningGraphData(currentData);
+    toolsPane.setData(currentData);
         } catch {
           // Ontology may have been deleted
         }
