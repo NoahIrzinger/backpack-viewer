@@ -437,6 +437,10 @@ export function initCanvas(
     touches = current;
   }, { passive: false });
 
+  // Prevent Safari page-level pinch zoom on the canvas
+  canvas.addEventListener("gesturestart", (e) => e.preventDefault());
+  canvas.addEventListener("gesturechange", (e) => e.preventDefault());
+
   function touchDistance(a: Touch, b: Touch): number {
     const dx = a.clientX - b.clientX;
     const dy = a.clientY - b.clientY;
