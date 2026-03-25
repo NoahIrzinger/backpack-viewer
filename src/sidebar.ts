@@ -15,7 +15,7 @@ export function initSidebar(
       : onSelectOrCallbacks;
   // Build DOM
   const heading = document.createElement("h2");
-  heading.textContent = "Backpack Ontology Viewer";
+  heading.textContent = "Backpack Viewer";
 
   const input = document.createElement("input");
   input.type = "text";
