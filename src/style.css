@@ -354,12 +354,16 @@ body {
 
 .search-input-wrap {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 380px;
   max-width: calc(100vw - 340px);
 }
 
 .search-input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 10px 16px;
   padding-right: 36px;
   border: 1px solid var(--glass-border);
@@ -455,6 +459,36 @@ body {
   flex-shrink: 0;
 }
 
+/* Chip toggle button */
+
+.chip-toggle {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+  pointer-events: auto;
+}
+
+.chip-toggle:hover {
+  border-color: rgba(212, 162, 127, 0.3);
+  color: var(--text);
+}
+
+.chip-toggle.active {
+  border-color: rgba(212, 162, 127, 0.4);
+  color: var(--accent);
+}
+
 /* Type filter chips */
 
 .type-chips {
@@ -467,6 +501,10 @@ body {
   overflow-y: auto;
   padding: 4px;
   border-radius: 10px;
+}
+
+.type-chips.hidden {
+  display: none;
 }
 
 .type-chip {

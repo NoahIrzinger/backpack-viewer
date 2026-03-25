@@ -49,14 +49,27 @@ export function initSearch(container: HTMLElement) {
   kbd.className = "search-kbd";
   kbd.textContent = "/";
 
+  const chipToggle = document.createElement("button");
+  chipToggle.className = "chip-toggle";
+  chipToggle.setAttribute("aria-label", "Toggle filter chips");
+  chipToggle.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>';
+  let chipsVisible = false;
+
+  chipToggle.addEventListener("click", () => {
+    chipsVisible = !chipsVisible;
+    chips.classList.toggle("hidden", !chipsVisible);
+    chipToggle.classList.toggle("active", chipsVisible);
+  });
+
   inputWrap.appendChild(input);
   inputWrap.appendChild(kbd);
+  inputWrap.appendChild(chipToggle);
 
   const results = document.createElement("ul");
   results.className = "search-results hidden";
 
   const chips = document.createElement("div");
-  chips.className = "type-chips";
+  chips.className = "type-chips hidden";
 
   overlay.appendChild(inputWrap);
   overlay.appendChild(results);
@@ -256,6 +269,9 @@ export function initSearch(container: HTMLElement) {
       input.value = "";
       results.classList.add("hidden");
       activeTypes.clear();
+      chipsVisible = false;
+      chips.classList.add("hidden");
+      chipToggle.classList.remove("active");
       filterCallback?.(null);
     },
 
