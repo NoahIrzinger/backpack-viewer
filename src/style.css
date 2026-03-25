@@ -957,12 +957,13 @@ body {
 
 @media (max-width: 768px) {
   .info-panel {
-    top: auto;
+    top: 8px;
     bottom: 72px;
     right: 8px;
     left: 8px;
     width: auto;
-    max-height: calc(100vh - 160px);
+    max-height: none;
+    overflow-y: auto;
   }
 
   .info-panel.info-panel-maximized {
