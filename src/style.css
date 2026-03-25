@@ -952,3 +952,22 @@ body {
 .info-delete-node:hover {
   background: rgba(239, 68, 68, 0.1);
 }
+
+/* --- Mobile --- */
+
+@media (max-width: 768px) {
+  .info-panel {
+    top: auto;
+    bottom: 72px;
+    right: 8px;
+    left: 8px;
+    width: auto;
+    max-height: calc(100vh - 160px);
+  }
+
+  .info-panel.info-panel-maximized {
+    bottom: 0;
+    left: 0;
+    right: 0;
+  }
+}
