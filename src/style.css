@@ -852,9 +852,14 @@ body {
   border-radius: 4px;
   padding: 3px 6px;
   font-size: 12px;
+  font-family: inherit;
   color: var(--text);
   flex: 1;
   min-width: 0;
+  resize: vertical;
+  overflow: hidden;
+  line-height: 1.4;
+  max-height: 300px;
 }
 
 .info-edit-input:focus {
@@ -997,9 +1002,9 @@ body {
   position: absolute;
   top: 56px;
   left: 16px;
+  bottom: 16px;
   z-index: 20;
   width: 200px;
-  max-height: calc(100vh - 72px);
   overflow-y: auto;
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -1417,8 +1422,8 @@ body {
   .tools-pane-content {
     top: 48px;
     left: 8px;
+    bottom: 80px;
     width: 160px;
-    max-height: calc(100% - 200px);
     max-width: calc(100vw - 24px);
   }
 

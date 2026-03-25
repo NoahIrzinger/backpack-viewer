@@ -207,22 +207,26 @@ export function initInfoPanel(
 
         if (callbacks) {
           const valueStr = formatValue(node.properties[key]);
-          const input = document.createElement("input");
-          input.type = "text";
-          input.className = "info-edit-input";
-          input.value = valueStr;
-          input.addEventListener("keydown", (e) => {
-            if (e.key === "Enter") {
-              input.blur();
+          const textarea = document.createElement("textarea");
+          textarea.className = "info-edit-input";
+          textarea.value = valueStr;
+          textarea.rows = 1;
+          textarea.addEventListener("input", () => autoResize(textarea));
+          textarea.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              textarea.blur();
             }
           });
-          input.addEventListener("blur", () => {
-            const newVal = input.value;
+          textarea.addEventListener("blur", () => {
+            const newVal = textarea.value;
             if (newVal !== valueStr) {
               callbacks.onUpdateNode(nodeId, { [key]: tryParseValue(newVal) });
             }
           });
-          dd.appendChild(input);
+          dd.appendChild(textarea);
+          // Auto-size after append
+          requestAnimationFrame(() => autoResize(textarea));
 
           // Delete property button
           const delProp = document.createElement("button");
@@ -674,6 +678,11 @@ function tryParseValue(str: string): unknown {
     }
   }
   return str;
+}
+
+function autoResize(textarea: HTMLTextAreaElement) {
+  textarea.style.height = "auto";
+  textarea.style.height = textarea.scrollHeight + "px";
 }
 
 function formatTimestamp(iso: string): string {
