@@ -476,7 +476,31 @@ export function initCanvas(
     render();
   });
 
+  const zoomResetBtn = document.createElement("button");
+  zoomResetBtn.className = "zoom-btn";
+  zoomResetBtn.textContent = "\u25CB";
+  zoomResetBtn.title = "Reset zoom";
+  zoomResetBtn.addEventListener("click", () => {
+    if (!state) return;
+    camera = { x: 0, y: 0, scale: 1 };
+    if (state.nodes.length > 0) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const n of state.nodes) {
+        if (n.x < minX) minX = n.x;
+        if (n.y < minY) minY = n.y;
+        if (n.x > maxX) maxX = n.x;
+        if (n.y > maxY) maxY = n.y;
+      }
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      camera.x = cx - canvas.clientWidth / 2;
+      camera.y = cy - canvas.clientHeight / 2;
+    }
+    render();
+  });
+
   zoomControls.appendChild(zoomInBtn);
+  zoomControls.appendChild(zoomResetBtn);
   zoomControls.appendChild(zoomOutBtn);
   container.appendChild(zoomControls);
 
