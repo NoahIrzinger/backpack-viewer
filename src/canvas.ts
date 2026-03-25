@@ -443,6 +443,43 @@ export function initCanvas(
     return Math.sqrt(dx * dx + dy * dy);
   }
 
+  // --- Zoom controls ---
+
+  const zoomControls = document.createElement("div");
+  zoomControls.className = "zoom-controls";
+
+  const zoomInBtn = document.createElement("button");
+  zoomInBtn.className = "zoom-btn";
+  zoomInBtn.textContent = "+";
+  zoomInBtn.title = "Zoom in";
+  zoomInBtn.addEventListener("click", () => {
+    const cx = canvas.clientWidth / 2;
+    const cy = canvas.clientHeight / 2;
+    const [wx, wy] = screenToWorld(cx, cy);
+    camera.scale = Math.min(10, camera.scale * 1.3);
+    camera.x = wx - cx / camera.scale;
+    camera.y = wy - cy / camera.scale;
+    render();
+  });
+
+  const zoomOutBtn = document.createElement("button");
+  zoomOutBtn.className = "zoom-btn";
+  zoomOutBtn.textContent = "\u2212";
+  zoomOutBtn.title = "Zoom out";
+  zoomOutBtn.addEventListener("click", () => {
+    const cx = canvas.clientWidth / 2;
+    const cy = canvas.clientHeight / 2;
+    const [wx, wy] = screenToWorld(cx, cy);
+    camera.scale = Math.max(0.05, camera.scale / 1.3);
+    camera.x = wx - cx / camera.scale;
+    camera.y = wy - cy / camera.scale;
+    render();
+  });
+
+  zoomControls.appendChild(zoomInBtn);
+  zoomControls.appendChild(zoomOutBtn);
+  container.appendChild(zoomControls);
+
   // --- Public API ---
 
   return {
