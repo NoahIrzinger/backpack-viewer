@@ -22,13 +22,37 @@ export interface LayoutState {
   nodeMap: Map<string, LayoutNode>;
 }
 
+export interface LayoutParams {
+  clusterStrength: number; // 0–0.15, how tightly same-type nodes group
+  spacing: number;         // 0.5–3, multiplier on edge rest lengths
+}
+
+export const DEFAULT_LAYOUT_PARAMS: LayoutParams = {
+  clusterStrength: 0.05,
+  spacing: 1,
+};
+
 const REPULSION = 5000;
+const CROSS_TYPE_REPULSION_BASE = 8000;
 const ATTRACTION = 0.005;
-const REST_LENGTH = 150;
+const REST_LENGTH_SAME_BASE = 100;
+const REST_LENGTH_CROSS_BASE = 250;
 const DAMPING = 0.9;
 const CENTER_GRAVITY = 0.01;
 const MIN_DISTANCE = 30;
 const MAX_VELOCITY = 50;
+
+// Active params — mutated by setLayoutParams()
+let params: LayoutParams = { ...DEFAULT_LAYOUT_PARAMS };
+
+export function setLayoutParams(p: Partial<LayoutParams>) {
+  if (p.clusterStrength !== undefined) params.clusterStrength = p.clusterStrength;
+  if (p.spacing !== undefined) params.spacing = p.spacing;
+}
+
+export function getLayoutParams(): LayoutParams {
+  return { ...params };
+}
 
 /** Extract a display label from a node — first string property value, fallback to id. */
 function nodeLabel(properties: Record<string, unknown>, id: string): string {
@@ -38,17 +62,35 @@ function nodeLabel(properties: Record<string, unknown>, id: string): string {
   return id;
 }
 
-/** Create a layout state from ontology data. Nodes start in a circle. */
+/** Create a layout state from ontology data. Nodes start grouped by type. */
 export function createLayout(data: LearningGraphData): LayoutState {
-  const radius = Math.sqrt(data.nodes.length) * REST_LENGTH * 0.5;
   const nodeMap = new Map<string, LayoutNode>();
 
-  const nodes: LayoutNode[] = data.nodes.map((n, i) => {
-    const angle = (2 * Math.PI * i) / data.nodes.length;
+  // Group nodes by type for initial placement
+  const types = [...new Set(data.nodes.map((n) => n.type))];
+  const typeRadius = Math.sqrt(types.length) * REST_LENGTH_CROSS_BASE * 0.6;
+  const typeCounters = new Map<string, number>();
+  const typeSizes = new Map<string, number>();
+  for (const n of data.nodes) {
+    typeSizes.set(n.type, (typeSizes.get(n.type) ?? 0) + 1);
+  }
+
+  const nodes: LayoutNode[] = data.nodes.map((n) => {
+    const ti = types.indexOf(n.type);
+    const typeAngle = (2 * Math.PI * ti) / Math.max(types.length, 1);
+    const cx = Math.cos(typeAngle) * typeRadius;
+    const cy = Math.sin(typeAngle) * typeRadius;
+
+    const ni = typeCounters.get(n.type) ?? 0;
+    typeCounters.set(n.type, ni + 1);
+    const groupSize = typeSizes.get(n.type) ?? 1;
+    const nodeAngle = (2 * Math.PI * ni) / groupSize;
+    const nodeRadius = REST_LENGTH_SAME_BASE * 0.6;
+
     const node: LayoutNode = {
       id: n.id,
-      x: Math.cos(angle) * radius,
-      y: Math.sin(angle) * radius,
+      x: cx + Math.cos(nodeAngle) * nodeRadius,
+      y: cy + Math.sin(nodeAngle) * nodeRadius,
       vx: 0,
       vy: 0,
       label: nodeLabel(n.properties, n.id),
@@ -71,7 +113,7 @@ export function createLayout(data: LearningGraphData): LayoutState {
 export function tick(state: LayoutState, alpha: number): number {
   const { nodes, edges, nodeMap } = state;
 
-  // Repulsion — all pairs
+  // Repulsion — all pairs (stronger between different types)
   for (let i = 0; i < nodes.length; i++) {
     for (let j = i + 1; j < nodes.length; j++) {
       const a = nodes[i];
@@ -81,7 +123,8 @@ export function tick(state: LayoutState, alpha: number): number {
       let dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < MIN_DISTANCE) dist = MIN_DISTANCE;
 
-      const force = (REPULSION * alpha) / (dist * dist);
+      const rep = a.type === b.type ? REPULSION : CROSS_TYPE_REPULSION_BASE * params.spacing;
+      const force = (rep * alpha) / (dist * dist);
       const fx = (dx / dist) * force;
       const fy = (dy / dist) * force;
 
@@ -92,7 +135,7 @@ export function tick(state: LayoutState, alpha: number): number {
     }
   }
 
-  // Attraction — along edges
+  // Attraction — along edges (shorter rest length within same type)
   for (const edge of edges) {
     const source = nodeMap.get(edge.sourceId);
     const target = nodeMap.get(edge.targetId);
@@ -103,7 +146,10 @@ export function tick(state: LayoutState, alpha: number): number {
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist === 0) continue;
 
-    const force = ATTRACTION * (dist - REST_LENGTH) * alpha;
+    const restLen = source.type === target.type
+      ? REST_LENGTH_SAME_BASE * params.spacing
+      : REST_LENGTH_CROSS_BASE * params.spacing;
+    const force = ATTRACTION * (dist - restLen) * alpha;
     const fx = (dx / dist) * force;
     const fy = (dy / dist) * force;
 
@@ -117,6 +163,25 @@ export function tick(state: LayoutState, alpha: number): number {
   for (const node of nodes) {
     node.vx -= node.x * CENTER_GRAVITY * alpha;
     node.vy -= node.y * CENTER_GRAVITY * alpha;
+  }
+
+  // Cluster force — pull nodes toward their type centroid
+  const centroids = new Map<string, { x: number; y: number; count: number }>();
+  for (const node of nodes) {
+    const c = centroids.get(node.type) ?? { x: 0, y: 0, count: 0 };
+    c.x += node.x;
+    c.y += node.y;
+    c.count++;
+    centroids.set(node.type, c);
+  }
+  for (const c of centroids.values()) {
+    c.x /= c.count;
+    c.y /= c.count;
+  }
+  for (const node of nodes) {
+    const c = centroids.get(node.type)!;
+    node.vx += (c.x - node.x) * params.clusterStrength * alpha;
+    node.vy += (c.y - node.y) * params.clusterStrength * alpha;
   }
 
   // Integrate — update positions, apply damping, clamp velocity

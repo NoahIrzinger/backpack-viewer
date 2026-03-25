@@ -5,6 +5,10 @@ import { initCanvas } from "./canvas";
 import { initInfoPanel } from "./info-panel";
 import { initSearch } from "./search";
 import { initToolsPane } from "./tools-pane";
+import { setLayoutParams } from "./layout";
+import { initShortcuts } from "./shortcuts";
+import { initEmptyState } from "./empty-state";
+import { createHistory } from "./history";
 import "./style.css";
 
 let activeOntology = "";
@@ -32,6 +36,9 @@ async function main() {
   });
   canvasContainer.appendChild(themeBtn);
 
+  // --- Undo/redo ---
+  const undoHistory = createHistory();
+
   // --- Save and re-render helper ---
   async function save() {
     if (!activeOntology || !currentData) return;
@@ -45,6 +52,22 @@ async function main() {
     sidebar.setSummaries(updated);
   }
 
+  /** Snapshot current state, then save. Call this instead of save() for undoable actions. */
+  async function undoableSave() {
+    if (currentData) undoHistory.push(currentData);
+    await save();
+  }
+
+  async function applyState(data: LearningGraphData) {
+    currentData = data;
+    await saveOntology(activeOntology, currentData);
+    canvas.loadGraph(currentData);
+    search.setLearningGraphData(currentData);
+    toolsPane.setData(currentData);
+    const updated = await listOntologies();
+    sidebar.setSummaries(updated);
+  }
+
   // --- Info panel with edit callbacks ---
   // canvas is used inside the navigate callback but declared below —
   // that's fine because the callback is only invoked after setup completes.
@@ -53,6 +76,7 @@ async function main() {
   const infoPanel = initInfoPanel(canvasContainer, {
     onUpdateNode(nodeId, properties) {
       if (!currentData) return;
+      undoHistory.push(currentData);
       const node = currentData.nodes.find((n) => n.id === nodeId);
       if (!node) return;
       node.properties = { ...node.properties, ...properties };
@@ -62,6 +86,7 @@ async function main() {
 
     onChangeNodeType(nodeId, newType) {
       if (!currentData) return;
+      undoHistory.push(currentData);
       const node = currentData.nodes.find((n) => n.id === nodeId);
       if (!node) return;
       node.type = newType;
@@ -71,6 +96,7 @@ async function main() {
 
     onDeleteNode(nodeId) {
       if (!currentData) return;
+      undoHistory.push(currentData);
       currentData.nodes = currentData.nodes.filter((n) => n.id !== nodeId);
       currentData.edges = currentData.edges.filter(
         (e) => e.sourceId !== nodeId && e.targetId !== nodeId
@@ -80,6 +106,7 @@ async function main() {
 
     onDeleteEdge(edgeId) {
       if (!currentData) return;
+      undoHistory.push(currentData);
       const selectedNodeId = currentData.edges.find(
         (e) => e.id === edgeId
       )?.sourceId;
@@ -93,6 +120,7 @@ async function main() {
 
     onAddProperty(nodeId, key, value) {
       if (!currentData) return;
+      undoHistory.push(currentData);
       const node = currentData.nodes.find((n) => n.id === nodeId);
       if (!node) return;
       node.properties[key] = value;
@@ -109,8 +137,10 @@ async function main() {
     if (nodeIds && nodeIds.length > 0 && currentData) {
       infoPanel.show(nodeIds, currentData);
       if (mobileQuery.matches) toolsPane.collapse();
+      updateUrl(activeOntology, nodeIds);
     } else {
       infoPanel.hide();
+      if (activeOntology) updateUrl(activeOntology);
     }
   });
 
@@ -135,6 +165,7 @@ async function main() {
     },
     onRenameNodeType(oldType, newType) {
       if (!currentData) return;
+      undoHistory.push(currentData);
       for (const node of currentData.nodes) {
         if (node.type === oldType) {
           node.type = newType;
@@ -145,12 +176,34 @@ async function main() {
     },
     onRenameEdgeType(oldType, newType) {
       if (!currentData) return;
+      undoHistory.push(currentData);
       for (const edge of currentData.edges) {
         if (edge.type === oldType) {
           edge.type = newType;
         }
       }
       save();
+    },
+    onToggleEdgeLabels(visible) {
+      canvas.setEdgeLabels(visible);
+    },
+    onToggleTypeHulls(visible) {
+      canvas.setTypeHulls(visible);
+    },
+    onToggleMinimap(visible) {
+      canvas.setMinimap(visible);
+    },
+    onLayoutChange(param, value) {
+      setLayoutParams({ [param]: value });
+      canvas.reheat();
+    },
+    onExport(format) {
+      const dataUrl = canvas.exportImage(format);
+      if (!dataUrl) return;
+      const link = document.createElement("a");
+      link.download = `${activeOntology || "graph"}.${format}`;
+      link.href = dataUrl;
+      link.click();
     },
     onOpen() {
       if (mobileQuery.matches) infoPanel.hide();
@@ -202,16 +255,7 @@ async function main() {
   const sidebar = initSidebar(
     document.getElementById("sidebar")!,
     {
-      onSelect: async (name) => {
-        activeOntology = name;
-        sidebar.setActive(name);
-        infoPanel.hide();
-        search.clear();
-        currentData = await loadOntology(name);
-        canvas.loadGraph(currentData);
-        search.setLearningGraphData(currentData);
-    toolsPane.setData(currentData);
-      },
+      onSelect: (name) => selectGraph(name),
       onRename: async (oldName, newName) => {
         await renameOntology(oldName, newName);
         if (activeOntology === oldName) {
@@ -230,27 +274,115 @@ async function main() {
     }
   );
 
+  const shortcuts = initShortcuts(canvasContainer);
+  const emptyState = initEmptyState(canvasContainer);
+
+  // --- URL deep linking ---
+  function updateUrl(name: string, nodeIds?: string[] | null) {
+    const hash = "#" + encodeURIComponent(name) +
+      (nodeIds?.length ? "?node=" + nodeIds.map(encodeURIComponent).join(",") : "");
+    history.replaceState(null, "", hash);
+  }
+
+  function parseUrl(): { graph: string | null; nodes: string[] } {
+    const hash = window.location.hash.slice(1);
+    if (!hash) return { graph: null, nodes: [] };
+    const [graphPart, queryPart] = hash.split("?");
+    const graph = graphPart ? decodeURIComponent(graphPart) : null;
+    let nodes: string[] = [];
+    if (queryPart) {
+      const params = new URLSearchParams(queryPart);
+      const nodeParam = params.get("node");
+      if (nodeParam) nodes = nodeParam.split(",").map(decodeURIComponent);
+    }
+    return { graph, nodes };
+  }
+
+  async function selectGraph(name: string, focusNodeIds?: string[]) {
+    activeOntology = name;
+    sidebar.setActive(name);
+    infoPanel.hide();
+    search.clear();
+    undoHistory.clear();
+    currentData = await loadOntology(name);
+    canvas.loadGraph(currentData);
+    search.setLearningGraphData(currentData);
+    toolsPane.setData(currentData);
+    emptyState.hide();
+    updateUrl(name);
+
+    // Focus on specific nodes if requested
+    if (focusNodeIds?.length && currentData) {
+      const validIds = focusNodeIds.filter((id) =>
+        currentData!.nodes.some((n) => n.id === id)
+      );
+      if (validIds.length) {
+        setTimeout(() => {
+          canvas.panToNodes(validIds);
+          if (currentData) infoPanel.show(validIds, currentData);
+          updateUrl(name, validIds);
+        }, 500);
+      }
+    }
+  }
+
   // Load ontology list
   const summaries = await listOntologies();
   sidebar.setSummaries(summaries);
 
-  // Auto-load first ontology
-  if (summaries.length > 0) {
-    activeOntology = summaries[0].name;
-    sidebar.setActive(activeOntology);
-    currentData = await loadOntology(activeOntology);
-    canvas.loadGraph(currentData);
-    search.setLearningGraphData(currentData);
-    toolsPane.setData(currentData);
+  // Auto-load from URL hash, or first graph
+  const initialUrl = parseUrl();
+  const initialName = initialUrl.graph && summaries.some((s) => s.name === initialUrl.graph)
+    ? initialUrl.graph
+    : summaries.length > 0
+      ? summaries[0].name
+      : null;
+
+  if (initialName) {
+    await selectGraph(initialName, initialUrl.nodes.length ? initialUrl.nodes : undefined);
+  } else {
+    emptyState.show();
   }
 
-  // Keyboard shortcut: / or Ctrl+K to focus search
+  // Keyboard shortcuts
   document.addEventListener("keydown", (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
     if (e.key === "/" || (e.key === "k" && (e.metaKey || e.ctrlKey))) {
       e.preventDefault();
       search.focus();
+    } else if (e.key === "z" && (e.metaKey || e.ctrlKey) && e.shiftKey) {
+      e.preventDefault();
+      if (currentData) {
+        const restored = undoHistory.redo(currentData);
+        if (restored) applyState(restored);
+      }
+    } else if (e.key === "z" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      if (currentData) {
+        const restored = undoHistory.undo(currentData);
+        if (restored) applyState(restored);
+      }
+    } else if (e.key === "?") {
+      shortcuts.show();
+    } else if (e.key === "Escape") {
+      shortcuts.hide();
+    }
+  });
+
+  // Handle browser back/forward
+  window.addEventListener("hashchange", () => {
+    const url = parseUrl();
+    if (url.graph && url.graph !== activeOntology) {
+      selectGraph(url.graph, url.nodes.length ? url.nodes : undefined);
+    } else if (url.graph && url.nodes.length && currentData) {
+      const validIds = url.nodes.filter((id) =>
+        currentData!.nodes.some((n) => n.id === id)
+      );
+      if (validIds.length) {
+        canvas.panToNodes(validIds);
+        infoPanel.show(validIds, currentData);
+      }
     }
   });
 
@@ -259,6 +391,8 @@ async function main() {
     import.meta.hot.on("ontology-change", async () => {
       const updated = await listOntologies();
       sidebar.setSummaries(updated);
+
+      if (updated.length > 0) emptyState.hide();
 
       if (activeOntology) {
         try {
@@ -269,6 +403,13 @@ async function main() {
         } catch {
           // Ontology may have been deleted
         }
+      } else if (updated.length > 0) {
+        activeOntology = updated[0].name;
+        sidebar.setActive(activeOntology);
+        currentData = await loadOntology(activeOntology);
+        canvas.loadGraph(currentData);
+        search.setLearningGraphData(currentData);
+    toolsPane.setData(currentData);
       }
     });
   }

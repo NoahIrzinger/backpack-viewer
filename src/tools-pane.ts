@@ -6,6 +6,11 @@ interface ToolsPaneCallbacks {
   onNavigateToNode: (nodeId: string) => void;
   onRenameNodeType: (oldType: string, newType: string) => void;
   onRenameEdgeType: (oldType: string, newType: string) => void;
+  onToggleEdgeLabels: (visible: boolean) => void;
+  onToggleTypeHulls: (visible: boolean) => void;
+  onToggleMinimap: (visible: boolean) => void;
+  onLayoutChange: (param: string, value: number) => void;
+  onExport: (format: "png" | "svg") => void;
   onOpen?: () => void;
 }
 
@@ -28,6 +33,9 @@ export function initToolsPane(
   let stats: DerivedStats | null = null;
   let collapsed = true;
   let activeTypeFilter: string | null = null;
+  let edgeLabelsVisible = true;
+  let typeHullsVisible = true;
+  let minimapVisible = true;
 
   // --- DOM ---
 
@@ -258,6 +266,142 @@ export function initToolsPane(
         }
       }));
     }
+
+    // Controls section
+    content.appendChild(makeSection("Controls", (section) => {
+      // Edge labels toggle
+      const labelRow = document.createElement("div");
+      labelRow.className = "tools-pane-row tools-pane-clickable";
+
+      const labelCheck = document.createElement("input");
+      labelCheck.type = "checkbox";
+      labelCheck.checked = edgeLabelsVisible;
+      labelCheck.className = "tools-pane-checkbox";
+
+      const labelText = document.createElement("span");
+      labelText.className = "tools-pane-name";
+      labelText.textContent = "Edge labels";
+
+      labelRow.appendChild(labelCheck);
+      labelRow.appendChild(labelText);
+
+      labelRow.addEventListener("click", (e) => {
+        if (e.target !== labelCheck) labelCheck.checked = !labelCheck.checked;
+        edgeLabelsVisible = labelCheck.checked;
+        callbacks.onToggleEdgeLabels(edgeLabelsVisible);
+      });
+
+      section.appendChild(labelRow);
+
+      // Type hulls toggle
+      const hullRow = document.createElement("div");
+      hullRow.className = "tools-pane-row tools-pane-clickable";
+
+      const hullCheck = document.createElement("input");
+      hullCheck.type = "checkbox";
+      hullCheck.checked = typeHullsVisible;
+      hullCheck.className = "tools-pane-checkbox";
+
+      const hullText = document.createElement("span");
+      hullText.className = "tools-pane-name";
+      hullText.textContent = "Type regions";
+
+      hullRow.appendChild(hullCheck);
+      hullRow.appendChild(hullText);
+
+      hullRow.addEventListener("click", (e) => {
+        if (e.target !== hullCheck) hullCheck.checked = !hullCheck.checked;
+        typeHullsVisible = hullCheck.checked;
+        callbacks.onToggleTypeHulls(typeHullsVisible);
+      });
+
+      section.appendChild(hullRow);
+
+      // Minimap toggle
+      const mapRow = document.createElement("div");
+      mapRow.className = "tools-pane-row tools-pane-clickable";
+
+      const mapCheck = document.createElement("input");
+      mapCheck.type = "checkbox";
+      mapCheck.checked = minimapVisible;
+      mapCheck.className = "tools-pane-checkbox";
+
+      const mapText = document.createElement("span");
+      mapText.className = "tools-pane-name";
+      mapText.textContent = "Minimap";
+
+      mapRow.appendChild(mapCheck);
+      mapRow.appendChild(mapText);
+
+      mapRow.addEventListener("click", (e) => {
+        if (e.target !== mapCheck) mapCheck.checked = !mapCheck.checked;
+        minimapVisible = mapCheck.checked;
+        callbacks.onToggleMinimap(minimapVisible);
+      });
+
+      section.appendChild(mapRow);
+
+      // Layout sliders
+      section.appendChild(makeSlider("Clustering", 0, 0.15, 0.01, 0.05, (v) => {
+        callbacks.onLayoutChange("clusterStrength", v);
+      }));
+      section.appendChild(makeSlider("Spacing", 0.5, 3, 0.1, 1, (v) => {
+        callbacks.onLayoutChange("spacing", v);
+      }));
+
+      // Export buttons
+      const exportRow = document.createElement("div");
+      exportRow.className = "tools-pane-export-row";
+
+      const pngBtn = document.createElement("button");
+      pngBtn.className = "tools-pane-export-btn";
+      pngBtn.textContent = "Export PNG";
+      pngBtn.addEventListener("click", () => callbacks.onExport("png"));
+
+      const svgBtn = document.createElement("button");
+      svgBtn.className = "tools-pane-export-btn";
+      svgBtn.textContent = "Export SVG";
+      svgBtn.addEventListener("click", () => callbacks.onExport("svg"));
+
+      exportRow.appendChild(pngBtn);
+      exportRow.appendChild(svgBtn);
+      section.appendChild(exportRow);
+    }));
+  }
+
+  function makeSlider(
+    label: string, min: number, max: number, step: number, initial: number,
+    onChange: (value: number) => void
+  ): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "tools-pane-slider-row";
+
+    const lbl = document.createElement("span");
+    lbl.className = "tools-pane-slider-label";
+    lbl.textContent = label;
+
+    const input = document.createElement("input");
+    input.type = "range";
+    input.className = "tools-pane-slider";
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.value = String(initial);
+
+    const val = document.createElement("span");
+    val.className = "tools-pane-slider-value";
+    val.textContent = String(initial);
+
+    input.addEventListener("input", () => {
+      const v = parseFloat(input.value);
+      val.textContent = v % 1 === 0 ? String(v) : v.toFixed(2);
+      onChange(v);
+    });
+
+    row.appendChild(lbl);
+    row.appendChild(input);
+    row.appendChild(val);
+    return row;
   }
 
   function makeSection(title: string, build: (el: HTMLElement) => void): HTMLElement {

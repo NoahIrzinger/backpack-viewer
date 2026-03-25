@@ -30,6 +30,9 @@ export function initCanvas(
   let animFrame = 0;
   let selectedNodeIds: Set<string> = new Set();
   let filteredNodeIds: Set<string> | null = null; // null = no filter (show all)
+  let showEdgeLabels = true;
+  let showTypeHulls = true;
+  let showMinimap = true;
 
   // Pan animation state
   let panTarget: { x: number; y: number } | null = null;
@@ -106,6 +109,49 @@ export function initCanvas(
     ctx.translate(-camera.x * camera.scale, -camera.y * camera.scale);
     ctx.scale(camera.scale, camera.scale);
 
+    // Draw type hulls (shaded regions behind same-type nodes)
+    if (showTypeHulls) {
+      const typeGroups = new Map<string, LayoutNode[]>();
+      for (const node of state.nodes) {
+        if (filteredNodeIds !== null && !filteredNodeIds.has(node.id)) continue;
+        const group = typeGroups.get(node.type) ?? [];
+        group.push(node);
+        typeGroups.set(node.type, group);
+      }
+
+      for (const [type, nodes] of typeGroups) {
+        if (nodes.length < 2) continue;
+        const color = getColor(type);
+        const padding = NODE_RADIUS * 2.5;
+
+        // Compute bounding box
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const n of nodes) {
+          if (n.x < minX) minX = n.x;
+          if (n.y < minY) minY = n.y;
+          if (n.x > maxX) maxX = n.x;
+          if (n.y > maxY) maxY = n.y;
+        }
+
+        ctx.beginPath();
+        const rx = (maxX - minX) / 2 + padding;
+        const ry = (maxY - minY) / 2 + padding;
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.05;
+        ctx.fill();
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.12;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+      }
+    }
+
     // Draw edges
     for (const edge of state.edges) {
       const source = state.nodeMap.get(edge.sourceId);
@@ -148,17 +194,19 @@ export function initCanvas(
       drawArrowhead(source.x, source.y, target.x, target.y, highlighted, arrowColor, arrowHighlight);
 
       // Edge label at midpoint
-      const mx = (source.x + target.x) / 2;
-      const my = (source.y + target.y) / 2;
-      ctx.fillStyle = highlighted
-        ? edgeLabelHighlight
-        : edgeDimmed
-          ? edgeLabelDim
-          : edgeLabel;
-      ctx.font = "9px system-ui, sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "bottom";
-      ctx.fillText(edge.type, mx, my - 4);
+      if (showEdgeLabels) {
+        const mx = (source.x + target.x) / 2;
+        const my = (source.y + target.y) / 2;
+        ctx.fillStyle = highlighted
+          ? edgeLabelHighlight
+          : edgeDimmed
+            ? edgeLabelDim
+            : edgeLabel;
+        ctx.font = "9px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(edge.type, mx, my - 4);
+      }
     }
 
     // Draw nodes
@@ -221,6 +269,100 @@ export function initCanvas(
 
     ctx.restore();
     ctx.restore();
+
+    // Minimap
+    if (showMinimap && state.nodes.length > 1) {
+      drawMinimap();
+    }
+  }
+
+  function drawMinimap() {
+    if (!state) return;
+
+    const mapW = 140;
+    const mapH = 100;
+    const mapPad = 8;
+    const mapX = canvas.clientWidth - mapW - 16;
+    const mapY = canvas.clientHeight - mapH - 16;
+
+    // Compute graph bounds
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of state.nodes) {
+      if (n.x < minX) minX = n.x;
+      if (n.y < minY) minY = n.y;
+      if (n.x > maxX) maxX = n.x;
+      if (n.y > maxY) maxY = n.y;
+    }
+
+    const gw = maxX - minX || 1;
+    const gh = maxY - minY || 1;
+    const scale = Math.min((mapW - mapPad * 2) / gw, (mapH - mapPad * 2) / gh);
+
+    const offsetX = mapX + mapPad + ((mapW - mapPad * 2) - gw * scale) / 2;
+    const offsetY = mapY + mapPad + ((mapH - mapPad * 2) - gh * scale) / 2;
+
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Background
+    ctx.fillStyle = cssVar("--bg-surface") || "#1a1a1a";
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.roundRect(mapX, mapY, mapW, mapH, 8);
+    ctx.fill();
+    ctx.strokeStyle = cssVar("--border") || "#2a2a2a";
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Edges
+    ctx.globalAlpha = 0.15;
+    ctx.strokeStyle = cssVar("--canvas-edge") || "#555";
+    ctx.lineWidth = 0.5;
+    for (const edge of state.edges) {
+      const src = state.nodeMap.get(edge.sourceId);
+      const tgt = state.nodeMap.get(edge.targetId);
+      if (!src || !tgt || edge.sourceId === edge.targetId) continue;
+      ctx.beginPath();
+      ctx.moveTo(offsetX + (src.x - minX) * scale, offsetY + (src.y - minY) * scale);
+      ctx.lineTo(offsetX + (tgt.x - minX) * scale, offsetY + (tgt.y - minY) * scale);
+      ctx.stroke();
+    }
+
+    // Nodes
+    ctx.globalAlpha = 0.8;
+    for (const node of state.nodes) {
+      const nx = offsetX + (node.x - minX) * scale;
+      const ny = offsetY + (node.y - minY) * scale;
+      ctx.beginPath();
+      ctx.arc(nx, ny, 2, 0, Math.PI * 2);
+      ctx.fillStyle = getColor(node.type);
+      ctx.fill();
+    }
+
+    // Viewport rectangle
+    const vx1 = camera.x;
+    const vy1 = camera.y;
+    const vx2 = camera.x + canvas.clientWidth / camera.scale;
+    const vy2 = camera.y + canvas.clientHeight / camera.scale;
+
+    const rx = offsetX + (vx1 - minX) * scale;
+    const ry = offsetY + (vy1 - minY) * scale;
+    const rw = (vx2 - vx1) * scale;
+    const rh = (vy2 - vy1) * scale;
+
+    ctx.globalAlpha = 0.3;
+    ctx.strokeStyle = cssVar("--accent") || "#d4a27f";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(
+      Math.max(mapX, Math.min(rx, mapX + mapW)),
+      Math.max(mapY, Math.min(ry, mapY + mapH)),
+      Math.min(rw, mapW),
+      Math.min(rh, mapH)
+    );
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
   function drawArrowhead(
@@ -269,10 +411,12 @@ export function initCanvas(
     ctx.lineWidth = highlighted ? 2.5 : 1.5;
     ctx.stroke();
 
-    ctx.fillStyle = highlighted ? labelHighlight : labelColor;
-    ctx.font = "9px system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(type, cx, cy - 18);
+    if (showEdgeLabels) {
+      ctx.fillStyle = highlighted ? labelHighlight : labelColor;
+      ctx.font = "9px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(type, cx, cy - 18);
+    }
   }
 
   // --- Simulation loop ---
@@ -581,21 +725,107 @@ export function initCanvas(
     },
 
     panToNode(nodeId: string) {
-      if (!state) return;
-      const node = state.nodeMap.get(nodeId);
-      if (!node) return;
+      this.panToNodes([nodeId]);
+    },
 
-      selectedNodeIds = new Set([nodeId]);
-      onNodeClick?.([nodeId]);
+    panToNodes(nodeIds: string[]) {
+      if (!state || nodeIds.length === 0) return;
+      const nodes = nodeIds.map((id) => state!.nodeMap.get(id)).filter(Boolean) as LayoutNode[];
+      if (nodes.length === 0) return;
+
+      selectedNodeIds = new Set(nodeIds);
+      onNodeClick?.(nodeIds);
 
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
-      panStart = { x: camera.x, y: camera.y, time: performance.now() };
-      panTarget = {
-        x: node.x - w / (2 * camera.scale),
-        y: node.y - h / (2 * camera.scale),
-      };
+
+      if (nodes.length === 1) {
+        panStart = { x: camera.x, y: camera.y, time: performance.now() };
+        panTarget = {
+          x: nodes[0].x - w / (2 * camera.scale),
+          y: nodes[0].y - h / (2 * camera.scale),
+        };
+      } else {
+        // Fit all nodes in view with padding
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const n of nodes) {
+          if (n.x < minX) minX = n.x;
+          if (n.y < minY) minY = n.y;
+          if (n.x > maxX) maxX = n.x;
+          if (n.y > maxY) maxY = n.y;
+        }
+        const pad = NODE_RADIUS * 4;
+        const bw = maxX - minX + pad * 2;
+        const bh = maxY - minY + pad * 2;
+        const fitScale = Math.min(w / bw, h / bh, camera.scale);
+        camera.scale = fitScale;
+
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+        panStart = { x: camera.x, y: camera.y, time: performance.now() };
+        panTarget = {
+          x: cx - w / (2 * camera.scale),
+          y: cy - h / (2 * camera.scale),
+        };
+      }
       animatePan();
+    },
+
+    setEdgeLabels(visible: boolean) {
+      showEdgeLabels = visible;
+      render();
+    },
+
+    setTypeHulls(visible: boolean) {
+      showTypeHulls = visible;
+      render();
+    },
+
+    setMinimap(visible: boolean) {
+      showMinimap = visible;
+      render();
+    },
+
+    reheat() {
+      alpha = 0.5;
+      cancelAnimationFrame(animFrame);
+      simulate();
+    },
+
+    exportImage(format: "png" | "svg"): string {
+      if (!state) return "";
+
+      // Use the actual canvas pixel dimensions (already scaled by dpr)
+      const pw = canvas.width;
+      const ph = canvas.height;
+
+      if (format === "png") {
+        const exportCanvas = document.createElement("canvas");
+        exportCanvas.width = pw;
+        exportCanvas.height = ph;
+        const ectx = exportCanvas.getContext("2d")!;
+
+        // Draw background
+        ectx.fillStyle = cssVar("--bg") || "#141414";
+        ectx.fillRect(0, 0, pw, ph);
+
+        // Copy current canvas pixels 1:1
+        ectx.drawImage(canvas, 0, 0);
+
+        // Watermark (scale font to match pixel density)
+        drawWatermark(ectx, pw, ph);
+
+        return exportCanvas.toDataURL("image/png");
+      }
+
+      // SVG: embed the canvas as a PNG image with text overlay
+      const dataUrl = canvas.toDataURL("image/png");
+      const fontSize = Math.max(16, Math.round(pw / 80));
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${pw}" height="${ph}">
+  <image href="${dataUrl}" width="${pw}" height="${ph}"/>
+  <text x="${pw - 20}" y="${ph - 16}" text-anchor="end" font-family="system-ui, sans-serif" font-size="${fontSize}" fill="#ffffff" opacity="0.4">backpackontology.com</text>
+</svg>`;
+      return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
     },
 
     destroy() {
@@ -603,4 +833,15 @@ export function initCanvas(
       observer.disconnect();
     },
   };
+
+  function drawWatermark(ectx: CanvasRenderingContext2D, w: number, h: number) {
+    const fontSize = Math.max(16, Math.round(w / 80));
+    ectx.save();
+    ectx.font = `${fontSize}px system-ui, sans-serif`;
+    ectx.fillStyle = "rgba(255, 255, 255, 0.4)";
+    ectx.textAlign = "right";
+    ectx.textBaseline = "bottom";
+    ectx.fillText("backpackontology.com", w - 20, h - 16);
+    ectx.restore();
+  }
 }
