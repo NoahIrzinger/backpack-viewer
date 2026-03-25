@@ -1,12 +1,12 @@
-import type { OntologyData, OntologySummary } from "backpack-ontology";
+import type { LearningGraphData, LearningGraphSummary } from "backpack-ontology";
 
-export async function listOntologies(): Promise<OntologySummary[]> {
+export async function listOntologies(): Promise<LearningGraphSummary[]> {
   const res = await fetch("/api/ontologies");
   if (!res.ok) return [];
   return res.json();
 }
 
-export async function loadOntology(name: string): Promise<OntologyData> {
+export async function loadOntology(name: string): Promise<LearningGraphData> {
   const res = await fetch(`/api/ontologies/${encodeURIComponent(name)}`);
   if (!res.ok) throw new Error(`Failed to load ontology: ${name}`);
   return res.json();
@@ -14,7 +14,7 @@ export async function loadOntology(name: string): Promise<OntologyData> {
 
 export async function saveOntology(
   name: string,
-  data: OntologyData
+  data: LearningGraphData
 ): Promise<void> {
   const res = await fetch(`/api/ontologies/${encodeURIComponent(name)}`, {
     method: "PUT",

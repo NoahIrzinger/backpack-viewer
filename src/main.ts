@@ -1,4 +1,4 @@
-import type { OntologyData } from "backpack-ontology";
+import type { LearningGraphData } from "backpack-ontology";
 import { listOntologies, loadOntology, saveOntology, renameOntology } from "./api";
 import { initSidebar } from "./sidebar";
 import { initCanvas } from "./canvas";
@@ -7,7 +7,7 @@ import { initSearch } from "./search";
 import "./style.css";
 
 let activeOntology = "";
-let currentData: OntologyData | null = null;
+let currentData: LearningGraphData | null = null;
 
 async function main() {
   const canvasContainer = document.getElementById("canvas-container")!;
@@ -37,7 +37,7 @@ async function main() {
     currentData.metadata.updatedAt = new Date().toISOString();
     await saveOntology(activeOntology, currentData);
     canvas.loadGraph(currentData);
-    search.setOntologyData(currentData);
+    search.setLearningGraphData(currentData);
     // Refresh sidebar counts
     const updated = await listOntologies();
     sidebar.setSummaries(updated);
@@ -132,7 +132,7 @@ async function main() {
         search.clear();
         currentData = await loadOntology(name);
         canvas.loadGraph(currentData);
-        search.setOntologyData(currentData);
+        search.setLearningGraphData(currentData);
       },
       onRename: async (oldName, newName) => {
         await renameOntology(oldName, newName);
@@ -145,7 +145,7 @@ async function main() {
         if (activeOntology === newName) {
           currentData = await loadOntology(newName);
           canvas.loadGraph(currentData);
-          search.setOntologyData(currentData);
+          search.setLearningGraphData(currentData);
         }
       },
     }
@@ -161,7 +161,7 @@ async function main() {
     sidebar.setActive(activeOntology);
     currentData = await loadOntology(activeOntology);
     canvas.loadGraph(currentData);
-    search.setOntologyData(currentData);
+    search.setLearningGraphData(currentData);
   }
 
   // Keyboard shortcut: / or Ctrl+K to focus search
@@ -184,7 +184,7 @@ async function main() {
         try {
           currentData = await loadOntology(activeOntology);
           canvas.loadGraph(currentData);
-          search.setOntologyData(currentData);
+          search.setLearningGraphData(currentData);
         } catch {
           // Ontology may have been deleted
         }

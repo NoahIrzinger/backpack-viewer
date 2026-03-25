@@ -1,4 +1,4 @@
-import type { OntologyData, Node } from "backpack-ontology";
+import type { LearningGraphData, Node } from "backpack-ontology";
 import { getColor } from "./colors";
 
 /** Extract a display label from a node — first string property value, fallback to id. */
@@ -24,7 +24,7 @@ function matchesQuery(node: Node, query: string): boolean {
 }
 
 export function initSearch(container: HTMLElement) {
-  let data: OntologyData | null = null;
+  let data: LearningGraphData | null = null;
   let filterCallback: ((ids: Set<string> | null) => void) | null = null;
   let selectCallback: ((nodeId: string) => void) | null = null;
   let activeTypes: Set<string> = new Set();
@@ -245,7 +245,7 @@ export function initSearch(container: HTMLElement) {
   // --- Public API ---
 
   return {
-    setOntologyData(newData: OntologyData | null) {
+    setLearningGraphData(newData: LearningGraphData | null) {
       data = newData;
       input.value = "";
       results.classList.add("hidden");

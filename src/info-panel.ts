@@ -1,4 +1,4 @@
-import type { Node, Edge, OntologyData } from "backpack-ontology";
+import type { Node, Edge, LearningGraphData } from "backpack-ontology";
 import { getColor } from "./colors";
 
 /** Extract a display label from a node — first string property, fallback to id. */
@@ -34,7 +34,7 @@ export function initInfoPanel(
   let history: string[] = [];
   let historyIndex = -1;
   let navigatingHistory = false;
-  let lastData: OntologyData | null = null;
+  let lastData: LearningGraphData | null = null;
 
   function hide() {
     panel.classList.add("hidden");
@@ -121,7 +121,7 @@ export function initInfoPanel(
     return toolbar;
   }
 
-  function showSingle(nodeId: string, data: OntologyData) {
+  function showSingle(nodeId: string, data: LearningGraphData) {
     const node = data.nodes.find((n) => n.id === nodeId);
     if (!node) return;
 
@@ -412,7 +412,7 @@ export function initInfoPanel(
     }
   }
 
-  function showMulti(nodeIds: string[], data: OntologyData) {
+  function showMulti(nodeIds: string[], data: LearningGraphData) {
     const selectedSet = new Set(nodeIds);
     const nodes = data.nodes.filter((n) => selectedSet.has(n.id));
     if (nodes.length === 0) return;
@@ -581,7 +581,7 @@ export function initInfoPanel(
   }
 
   return {
-    show(nodeIds: string[], data: OntologyData) {
+    show(nodeIds: string[], data: LearningGraphData) {
       lastData = data;
 
       // Track history for single-node views

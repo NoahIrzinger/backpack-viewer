@@ -1,4 +1,4 @@
-import type { OntologySummary } from "backpack-ontology";
+import type { LearningGraphSummary } from "backpack-ontology";
 
 export interface SidebarCallbacks {
   onSelect: (name: string) => void;
@@ -49,7 +49,7 @@ export function initSidebar(
   });
 
   return {
-    setSummaries(summaries: OntologySummary[]) {
+    setSummaries(summaries: LearningGraphSummary[]) {
       list.innerHTML = "";
       items = summaries.map((s) => {
         const li = document.createElement("li");

@@ -1,4 +1,4 @@
-import type { OntologyData } from "backpack-ontology";
+import type { LearningGraphData } from "backpack-ontology";
 
 export interface LayoutNode {
   id: string;
@@ -39,7 +39,7 @@ function nodeLabel(properties: Record<string, unknown>, id: string): string {
 }
 
 /** Create a layout state from ontology data. Nodes start in a circle. */
-export function createLayout(data: OntologyData): LayoutState {
+export function createLayout(data: LearningGraphData): LayoutState {
   const radius = Math.sqrt(data.nodes.length) * REST_LENGTH * 0.5;
   const nodeMap = new Map<string, LayoutNode>();
 

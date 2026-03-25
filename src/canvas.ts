@@ -1,4 +1,4 @@
-import type { OntologyData } from "backpack-ontology";
+import type { LearningGraphData } from "backpack-ontology";
 import { createLayout, tick, type LayoutState, type LayoutNode } from "./layout";
 import { getColor } from "./colors";
 
@@ -547,7 +547,7 @@ export function initCanvas(
   // --- Public API ---
 
   return {
-    loadGraph(data: OntologyData) {
+    loadGraph(data: LearningGraphData) {
       cancelAnimationFrame(animFrame);
       state = createLayout(data);
       alpha = 1;
