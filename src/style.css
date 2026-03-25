@@ -962,7 +962,7 @@ body {
     right: 8px;
     left: 8px;
     width: auto;
-    max-height: 50vh;
+    max-height: calc(100% - 200px);
     overflow-y: auto;
   }
 
