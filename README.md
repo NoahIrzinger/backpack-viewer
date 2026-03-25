@@ -1,12 +1,12 @@
 # Backpack Viewer
 
-**See your knowledge graph.** A web-based visualizer for [Backpack](https://www.npmjs.com/package/backpack-ontology) ontologies with force-directed layout, interactive navigation, and live reload.
+**See your learning graph.** A web-based visualizer for [Backpack](https://www.npmjs.com/package/backpack-ontology) learning graphs with force-directed layout, interactive navigation, and live reload.
 
 ## Quick start
 
 Tell Claude:
 
-> "Show me my knowledge graph"
+> "Show me my learning graph"
 
 Or run it directly:
 
@@ -14,19 +14,19 @@ Or run it directly:
 npx backpack-viewer
 ```
 
-Opens http://localhost:5173. Click any ontology in the sidebar to visualize it.
+Opens http://localhost:5173. Click any learning graph in the sidebar to visualize it.
 
 ## Features
 
 - **Live reload**: add knowledge via Claude and watch it appear in real time
 - **Pan and zoom**: click-drag to pan, scroll to zoom
 - **Inspect**: click any item to see its properties, connections, and metadata
-- **Edit**: rename ontologies, edit node types and properties, add or remove items inline
-- **Search**: filter ontologies by name in the sidebar
+- **Edit**: rename graphs, edit node types and properties, add or remove items inline
+- **Search**: filter by name in the sidebar, filter by type with chips
 
 ## How it works
 
-The viewer reads ontology data from the same local files that the MCP server writes to. Changes appear automatically, no refresh needed.
+The viewer reads learning graph data from the same local files that the MCP server writes to. Changes appear automatically, no refresh needed.
 
 ```
 backpack-ontology (MCP) ──writes──> ~/.local/share/backpack/ontologies/
