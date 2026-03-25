@@ -402,6 +402,9 @@ export function initCanvas(
   let touches: Touch[] = [];
   let initialPinchDist = 0;
   let initialPinchScale = 1;
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let touchDidMove = false;
 
   canvas.addEventListener("touchstart", (e) => {
     e.preventDefault();
@@ -412,6 +415,9 @@ export function initCanvas(
     } else if (touches.length === 1) {
       lastX = touches[0].clientX;
       lastY = touches[0].clientY;
+      touchStartX = touches[0].clientX;
+      touchStartY = touches[0].clientY;
+      touchDidMove = false;
     }
   }, { passive: false });
 
@@ -427,6 +433,10 @@ export function initCanvas(
     } else if (current.length === 1) {
       const dx = current[0].clientX - lastX;
       const dy = current[0].clientY - lastY;
+      if (Math.abs(current[0].clientX - touchStartX) > 10 ||
+          Math.abs(current[0].clientY - touchStartY) > 10) {
+        touchDidMove = true;
+      }
       camera.x -= dx / camera.scale;
       camera.y -= dy / camera.scale;
       lastX = current[0].clientX;
@@ -435,6 +445,32 @@ export function initCanvas(
     }
 
     touches = current;
+  }, { passive: false });
+
+  canvas.addEventListener("touchend", (e) => {
+    e.preventDefault();
+    if (touchDidMove || e.changedTouches.length !== 1) return;
+
+    const t = e.changedTouches[0];
+    const rect = canvas.getBoundingClientRect();
+    const mx = t.clientX - rect.left;
+    const my = t.clientY - rect.top;
+    const hit = nodeAtScreen(mx, my);
+
+    if (hit) {
+      if (selectedNodeIds.size === 1 && selectedNodeIds.has(hit.id)) {
+        selectedNodeIds.clear();
+      } else {
+        selectedNodeIds.clear();
+        selectedNodeIds.add(hit.id);
+      }
+      const ids = [...selectedNodeIds];
+      onNodeClick?.(ids.length > 0 ? ids : null);
+    } else {
+      selectedNodeIds.clear();
+      onNodeClick?.(null);
+    }
+    render();
   }, { passive: false });
 
   // Prevent Safari page-level pinch zoom on the canvas
