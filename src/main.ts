@@ -1,7 +1,7 @@
 import type { LearningGraphData } from "backpack-ontology";
 import { listOntologies, loadOntology, saveOntology, renameOntology } from "./api";
 import { initSidebar } from "./sidebar";
-import { initCanvas } from "./canvas";
+import { initCanvas, type FocusInfo } from "./canvas";
 import { initInfoPanel } from "./info-panel";
 import { initSearch } from "./search";
 import { initToolsPane } from "./tools-pane";
@@ -129,17 +129,89 @@ async function main() {
     },
   }, (nodeId) => {
     canvas.panToNode(nodeId);
+  }, (nodeIds) => {
+    toolsPane.addToFocusSet(nodeIds);
   });
 
   const mobileQuery = window.matchMedia("(max-width: 768px)");
 
+  // Track current selection for keyboard shortcuts
+  let currentSelection: string[] = [];
+
+  // --- Focus indicator (top bar pill) ---
+  let focusIndicator: HTMLElement | null = null;
+
+  function buildFocusIndicator(info: FocusInfo) {
+    if (focusIndicator) focusIndicator.remove();
+
+    focusIndicator = document.createElement("div");
+    focusIndicator.className = "focus-indicator";
+
+    const label = document.createElement("span");
+    label.className = "focus-indicator-label";
+    label.textContent = `Focused: ${info.totalNodes} nodes`;
+
+    const hopsLabel = document.createElement("span");
+    hopsLabel.className = "focus-indicator-hops";
+    hopsLabel.textContent = `${info.hops}`;
+
+    const minus = document.createElement("button");
+    minus.className = "focus-indicator-btn";
+    minus.textContent = "\u2212";
+    minus.title = "Fewer hops";
+    minus.disabled = info.hops === 0;
+    minus.addEventListener("click", () => {
+      canvas.enterFocus(info.seedNodeIds, Math.max(0, info.hops - 1));
+    });
+
+    const plus = document.createElement("button");
+    plus.className = "focus-indicator-btn";
+    plus.textContent = "+";
+    plus.title = "More hops";
+    plus.disabled = false;
+    plus.addEventListener("click", () => {
+      canvas.enterFocus(info.seedNodeIds, info.hops + 1);
+    });
+
+    const exit = document.createElement("button");
+    exit.className = "focus-indicator-btn focus-indicator-exit";
+    exit.textContent = "\u00d7";
+    exit.title = "Exit focus (Esc)";
+    exit.addEventListener("click", () => toolsPane.clearFocusSet());
+
+    focusIndicator.appendChild(label);
+    focusIndicator.appendChild(minus);
+    focusIndicator.appendChild(hopsLabel);
+    focusIndicator.appendChild(plus);
+    focusIndicator.appendChild(exit);
+  }
+
+  function removeFocusIndicator() {
+    if (focusIndicator) {
+      focusIndicator.remove();
+      focusIndicator = null;
+    }
+  }
+
   canvas = initCanvas(canvasContainer, (nodeIds) => {
+    currentSelection = nodeIds ?? [];
     if (nodeIds && nodeIds.length > 0 && currentData) {
       infoPanel.show(nodeIds, currentData);
       if (mobileQuery.matches) toolsPane.collapse();
       updateUrl(activeOntology, nodeIds);
     } else {
       infoPanel.hide();
+      if (activeOntology) updateUrl(activeOntology);
+    }
+  }, (focus) => {
+    if (focus) {
+      buildFocusIndicator(focus);
+      // Insert into top-left, after tools toggle
+      const topLeft = canvasContainer.querySelector(".canvas-top-left");
+      if (topLeft && focusIndicator) topLeft.appendChild(focusIndicator);
+      updateUrl(activeOntology, focus.seedNodeIds);
+    } else {
+      removeFocusIndicator();
       if (activeOntology) updateUrl(activeOntology);
     }
   });
@@ -162,6 +234,13 @@ async function main() {
     onNavigateToNode(nodeId) {
       canvas.panToNode(nodeId);
       if (currentData) infoPanel.show([nodeId], currentData);
+    },
+    onFocusChange(seedNodeIds) {
+      if (seedNodeIds && seedNodeIds.length > 0) {
+        canvas.enterFocus(seedNodeIds, 1);
+      } else {
+        if (canvas.isFocused()) canvas.exitFocus();
+      }
     },
     onRenameNodeType(oldType, newType) {
       if (!currentData) return;
@@ -246,6 +325,10 @@ async function main() {
   });
 
   search.onNodeSelect((nodeId) => {
+    // If focused and the node isn't in the subgraph, exit focus first
+    if (canvas.isFocused()) {
+      toolsPane.clearFocusSet();
+    }
     canvas.panToNode(nodeId);
     if (currentData) {
       infoPanel.show([nodeId], currentData);
@@ -279,29 +362,50 @@ async function main() {
 
   // --- URL deep linking ---
   function updateUrl(name: string, nodeIds?: string[] | null) {
+    const parts: string[] = [];
+    if (nodeIds?.length) {
+      parts.push("node=" + nodeIds.map(encodeURIComponent).join(","));
+    }
+    const focusInfo = canvas.getFocusInfo();
+    if (focusInfo) {
+      parts.push("focus=" + focusInfo.seedNodeIds.map(encodeURIComponent).join(","));
+      parts.push("hops=" + focusInfo.hops);
+    }
     const hash = "#" + encodeURIComponent(name) +
-      (nodeIds?.length ? "?node=" + nodeIds.map(encodeURIComponent).join(",") : "");
+      (parts.length ? "?" + parts.join("&") : "");
     history.replaceState(null, "", hash);
   }
 
-  function parseUrl(): { graph: string | null; nodes: string[] } {
+  function parseUrl(): { graph: string | null; nodes: string[]; focus: string[]; hops: number } {
     const hash = window.location.hash.slice(1);
-    if (!hash) return { graph: null, nodes: [] };
+    if (!hash) return { graph: null, nodes: [], focus: [], hops: 1 };
     const [graphPart, queryPart] = hash.split("?");
     const graph = graphPart ? decodeURIComponent(graphPart) : null;
     let nodes: string[] = [];
+    let focus: string[] = [];
+    let hops = 1;
     if (queryPart) {
       const params = new URLSearchParams(queryPart);
       const nodeParam = params.get("node");
       if (nodeParam) nodes = nodeParam.split(",").map(decodeURIComponent);
+      const focusParam = params.get("focus");
+      if (focusParam) focus = focusParam.split(",").map(decodeURIComponent);
+      const hopsParam = params.get("hops");
+      if (hopsParam) hops = Math.max(0, parseInt(hopsParam, 10) || 1);
     }
-    return { graph, nodes };
+    return { graph, nodes, focus, hops };
   }
 
-  async function selectGraph(name: string, focusNodeIds?: string[]) {
+  async function selectGraph(
+    name: string,
+    panToNodeIds?: string[],
+    focusSeedIds?: string[],
+    focusHops?: number
+  ) {
     activeOntology = name;
     sidebar.setActive(name);
     infoPanel.hide();
+    removeFocusIndicator();
     search.clear();
     undoHistory.clear();
     currentData = await loadOntology(name);
@@ -311,9 +415,22 @@ async function main() {
     emptyState.hide();
     updateUrl(name);
 
-    // Focus on specific nodes if requested
-    if (focusNodeIds?.length && currentData) {
-      const validIds = focusNodeIds.filter((id) =>
+    // Restore focus mode if requested
+    if (focusSeedIds?.length && currentData) {
+      const validFocus = focusSeedIds.filter((id) =>
+        currentData!.nodes.some((n) => n.id === id)
+      );
+      if (validFocus.length) {
+        setTimeout(() => {
+          canvas.enterFocus(validFocus, focusHops ?? 1);
+        }, 500);
+        return; // enterFocus handles the URL update
+      }
+    }
+
+    // Pan to specific nodes if requested
+    if (panToNodeIds?.length && currentData) {
+      const validIds = panToNodeIds.filter((id) =>
         currentData!.nodes.some((n) => n.id === id)
       );
       if (validIds.length) {
@@ -339,7 +456,12 @@ async function main() {
       : null;
 
   if (initialName) {
-    await selectGraph(initialName, initialUrl.nodes.length ? initialUrl.nodes : undefined);
+    await selectGraph(
+      initialName,
+      initialUrl.nodes.length ? initialUrl.nodes : undefined,
+      initialUrl.focus.length ? initialUrl.focus : undefined,
+      initialUrl.hops
+    );
   } else {
     emptyState.show();
   }
@@ -363,10 +485,21 @@ async function main() {
         const restored = undoHistory.undo(currentData);
         if (restored) applyState(restored);
       }
+    } else if (e.key === "f" || e.key === "F") {
+      // Toggle focus mode on current selection
+      if (canvas.isFocused()) {
+        toolsPane.clearFocusSet();
+      } else if (currentSelection.length > 0) {
+        toolsPane.addToFocusSet(currentSelection);
+      }
     } else if (e.key === "?") {
       shortcuts.show();
     } else if (e.key === "Escape") {
-      shortcuts.hide();
+      if (canvas.isFocused()) {
+        toolsPane.clearFocusSet();
+      } else {
+        shortcuts.hide();
+      }
     }
   });
 
@@ -374,8 +507,16 @@ async function main() {
   window.addEventListener("hashchange", () => {
     const url = parseUrl();
     if (url.graph && url.graph !== activeOntology) {
-      selectGraph(url.graph, url.nodes.length ? url.nodes : undefined);
+      selectGraph(
+        url.graph,
+        url.nodes.length ? url.nodes : undefined,
+        url.focus.length ? url.focus : undefined,
+        url.hops
+      );
+    } else if (url.graph && url.focus.length && currentData) {
+      canvas.enterFocus(url.focus, url.hops);
     } else if (url.graph && url.nodes.length && currentData) {
+      if (canvas.isFocused()) canvas.exitFocus();
       const validIds = url.nodes.filter((id) =>
         currentData!.nodes.some((n) => n.id === id)
       );

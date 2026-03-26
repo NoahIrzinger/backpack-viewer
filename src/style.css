@@ -274,6 +274,71 @@ body {
   justify-content: center;
 }
 
+/* --- Focus Indicator --- */
+
+.focus-indicator {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-surface);
+  border: 1px solid rgba(212, 162, 127, 0.4);
+  border-radius: 8px;
+  padding: 4px 6px 4px 10px;
+  box-shadow: 0 2px 8px var(--shadow);
+}
+
+.focus-indicator-label {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 500;
+  white-space: nowrap;
+  margin-right: 4px;
+}
+
+.focus-indicator-hops {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: monospace;
+  min-width: 12px;
+  text-align: center;
+}
+
+.focus-indicator-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+  line-height: 1;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.focus-indicator-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.focus-indicator-btn:disabled {
+  color: var(--text-dim);
+  cursor: default;
+  opacity: 0.3;
+}
+
+.focus-indicator-exit {
+  font-size: 16px;
+  margin-left: 2px;
+}
+
+.focus-indicator-exit:hover {
+  color: #ef4444 !important;
+}
+
+.info-focus-btn {
+  font-size: 14px;
+}
+
 /* --- Theme Toggle --- */
 
 .theme-toggle {
@@ -1130,6 +1195,22 @@ body {
 
 .tools-pane-edit:hover {
   color: var(--accent);
+}
+
+.tools-pane-focus-toggle {
+  opacity: 0.4;
+  font-size: 11px;
+}
+
+.tools-pane-focus-active {
+  opacity: 1 !important;
+  color: var(--accent) !important;
+}
+
+.tools-pane-focus-clear {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
 }
 
 .tools-pane-editing {

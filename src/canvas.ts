@@ -1,5 +1,5 @@
 import type { LearningGraphData } from "backpack-ontology";
-import { createLayout, tick, type LayoutState, type LayoutNode } from "./layout";
+import { createLayout, extractSubgraph, tick, type LayoutState, type LayoutNode } from "./layout";
 import { getColor } from "./colors";
 
 interface Camera {
@@ -16,9 +16,16 @@ function cssVar(name: string): string {
 const NODE_RADIUS = 20;
 const ALPHA_MIN = 0.001;
 
+export interface FocusInfo {
+  seedNodeIds: string[];
+  hops: number;
+  totalNodes: number;
+}
+
 export function initCanvas(
   container: HTMLElement,
-  onNodeClick?: (nodeIds: string[] | null) => void
+  onNodeClick?: (nodeIds: string[] | null) => void,
+  onFocusChange?: (focus: FocusInfo | null) => void
 ) {
   const canvas = container.querySelector("canvas") as HTMLCanvasElement;
   const ctx = canvas.getContext("2d")!;
@@ -33,6 +40,13 @@ export function initCanvas(
   let showEdgeLabels = true;
   let showTypeHulls = true;
   let showMinimap = true;
+
+  // Focus mode state
+  let lastLoadedData: LearningGraphData | null = null;
+  let focusSeedIds: string[] | null = null;
+  let focusHops = 1;
+  let savedFullState: LayoutState | null = null;
+  let savedFullCamera: Camera | null = null;
 
   // Pan animation state
   let panTarget: { x: number; y: number } | null = null;
@@ -693,6 +707,11 @@ export function initCanvas(
   return {
     loadGraph(data: LearningGraphData) {
       cancelAnimationFrame(animFrame);
+      lastLoadedData = data;
+      // Exit any active focus when full graph reloads
+      focusSeedIds = null;
+      savedFullState = null;
+      savedFullCamera = null;
       state = createLayout(data);
       alpha = 1;
       selectedNodeIds = new Set();
@@ -826,6 +845,74 @@ export function initCanvas(
   <text x="${pw - 20}" y="${ph - 16}" text-anchor="end" font-family="system-ui, sans-serif" font-size="${fontSize}" fill="#ffffff" opacity="0.4">backpackontology.com</text>
 </svg>`;
       return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+    },
+
+    enterFocus(seedNodeIds: string[], hops: number) {
+      if (!lastLoadedData || !state) return;
+      // Save current full-graph state
+      if (!focusSeedIds) {
+        savedFullState = state;
+        savedFullCamera = { ...camera };
+      }
+      focusSeedIds = seedNodeIds;
+      focusHops = hops;
+
+      const subgraph = extractSubgraph(lastLoadedData, seedNodeIds, hops);
+      cancelAnimationFrame(animFrame);
+      state = createLayout(subgraph);
+      alpha = 1;
+      selectedNodeIds = new Set(seedNodeIds);
+      filteredNodeIds = null;
+
+      // Center camera
+      camera = { x: 0, y: 0, scale: 1 };
+      if (state.nodes.length > 0) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const n of state.nodes) {
+          if (n.x < minX) minX = n.x;
+          if (n.y < minY) minY = n.y;
+          if (n.x > maxX) maxX = n.x;
+          if (n.y > maxY) maxY = n.y;
+        }
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+        camera.x = cx - canvas.clientWidth / 2;
+        camera.y = cy - canvas.clientHeight / 2;
+      }
+
+      simulate();
+      onFocusChange?.({
+        seedNodeIds,
+        hops,
+        totalNodes: subgraph.nodes.length,
+      });
+    },
+
+    exitFocus() {
+      if (!focusSeedIds || !savedFullState) return;
+      cancelAnimationFrame(animFrame);
+      state = savedFullState;
+      camera = savedFullCamera ?? { x: 0, y: 0, scale: 1 };
+      focusSeedIds = null;
+      savedFullState = null;
+      savedFullCamera = null;
+      selectedNodeIds = new Set();
+      filteredNodeIds = null;
+      render();
+      onFocusChange?.(null);
+    },
+
+    isFocused(): boolean {
+      return focusSeedIds !== null;
+    },
+
+    getFocusInfo(): FocusInfo | null {
+      if (!focusSeedIds || !state) return null;
+      return {
+        seedNodeIds: focusSeedIds,
+        hops: focusHops,
+        totalNodes: state.nodes.length,
+      };
     },
 
     destroy() {

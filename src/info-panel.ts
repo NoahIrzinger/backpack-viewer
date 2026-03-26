@@ -22,7 +22,8 @@ const EDIT_ICON = '\u270E'; // pencil
 export function initInfoPanel(
   container: HTMLElement,
   callbacks?: EditCallbacks,
-  onNavigateToNode?: (nodeId: string) => void
+  onNavigateToNode?: (nodeId: string) => void,
+  onFocus?: (nodeIds: string[]) => void
 ) {
   const panel = document.createElement("div");
   panel.id = "info-panel";
@@ -35,6 +36,7 @@ export function initInfoPanel(
   let historyIndex = -1;
   let navigatingHistory = false;
   let lastData: LearningGraphData | null = null;
+  let currentNodeIds: string[] = [];
 
   function hide() {
     panel.classList.add("hidden");
@@ -96,6 +98,18 @@ export function initInfoPanel(
     fwdBtn.disabled = historyIndex >= history.length - 1;
     fwdBtn.addEventListener("click", goForward);
     toolbar.appendChild(fwdBtn);
+
+    // Focus
+    if (onFocus && currentNodeIds.length > 0) {
+      const focusBtn = document.createElement("button");
+      focusBtn.className = "info-toolbar-btn info-focus-btn";
+      focusBtn.textContent = "\u25CE"; // bullseye
+      focusBtn.title = "Focus on neighborhood (F)";
+      focusBtn.addEventListener("click", () => {
+        onFocus(currentNodeIds);
+      });
+      toolbar.appendChild(focusBtn);
+    }
 
     // Maximize/restore
     const maxBtn = document.createElement("button");
@@ -587,6 +601,7 @@ export function initInfoPanel(
   return {
     show(nodeIds: string[], data: LearningGraphData) {
       lastData = data;
+      currentNodeIds = nodeIds;
 
       // Track history for single-node views
       if (nodeIds.length === 1 && !navigatingHistory) {

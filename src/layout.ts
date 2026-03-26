@@ -62,6 +62,39 @@ function nodeLabel(properties: Record<string, unknown>, id: string): string {
   return id;
 }
 
+/** Extract the N-hop neighborhood of seed nodes as a new subgraph. */
+export function extractSubgraph(
+  data: LearningGraphData,
+  seedIds: string[],
+  hops: number
+): LearningGraphData {
+  const visited = new Set<string>(seedIds);
+  let frontier = new Set<string>(seedIds);
+
+  for (let h = 0; h < hops; h++) {
+    const next = new Set<string>();
+    for (const edge of data.edges) {
+      if (frontier.has(edge.sourceId) && !visited.has(edge.targetId)) {
+        next.add(edge.targetId);
+      }
+      if (frontier.has(edge.targetId) && !visited.has(edge.sourceId)) {
+        next.add(edge.sourceId);
+      }
+    }
+    for (const id of next) visited.add(id);
+    frontier = next;
+    if (next.size === 0) break;
+  }
+
+  return {
+    nodes: data.nodes.filter((n) => visited.has(n.id)),
+    edges: data.edges.filter(
+      (e) => visited.has(e.sourceId) && visited.has(e.targetId)
+    ),
+    metadata: data.metadata,
+  };
+}
+
 /** Create a layout state from ontology data. Nodes start grouped by type. */
 export function createLayout(data: LearningGraphData): LayoutState {
   const nodeMap = new Map<string, LayoutNode>();
