@@ -237,7 +237,7 @@ async function main() {
     },
     onFocusChange(seedNodeIds) {
       if (seedNodeIds && seedNodeIds.length > 0) {
-        canvas.enterFocus(seedNodeIds, 1);
+        canvas.enterFocus(seedNodeIds, 0);
       } else {
         if (canvas.isFocused()) canvas.exitFocus();
       }
