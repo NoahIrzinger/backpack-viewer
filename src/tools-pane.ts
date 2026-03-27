@@ -38,7 +38,7 @@ export function initToolsPane(
   let edgeLabelsVisible = true;
   let typeHullsVisible = true;
   let minimapVisible = true;
-  let activeTab: "types" | "quality" | "controls" = "types";
+  let activeTab: "types" | "insights" | "controls" = "types";
   let typesSearch = "";
   let qualitySearch = "";
 
@@ -116,9 +116,9 @@ export function initToolsPane(
     const tabBar = document.createElement("div");
     tabBar.className = "tools-pane-tabs";
 
-    const tabs: { id: "types" | "quality" | "controls"; label: string }[] = [
+    const tabs: { id: "types" | "insights" | "controls"; label: string }[] = [
       { id: "types", label: "Types" },
-      { id: "quality", label: "Quality" },
+      { id: "insights", label: "Insights" },
       { id: "controls", label: "Controls" },
     ];
 
@@ -147,7 +147,7 @@ export function initToolsPane(
         typesSearch = v;
         renderTabContent();
       }));
-    } else if (activeTab === "quality") {
+    } else if (activeTab === "insights") {
       const totalIssues = stats.orphans.length + stats.singletons.length + stats.emptyNodes.length;
       if (totalIssues > 5) {
         content.appendChild(makeSearchInput("Filter issues...", qualitySearch, (v) => {
@@ -172,8 +172,8 @@ export function initToolsPane(
 
     if (activeTab === "types") {
       renderTypesTab(tabContainer as HTMLElement);
-    } else if (activeTab === "quality") {
-      renderQualityTab(tabContainer as HTMLElement);
+    } else if (activeTab === "insights") {
+      renderInsightsTab(tabContainer as HTMLElement);
     } else if (activeTab === "controls") {
       renderControlsTab(tabContainer as HTMLElement);
     }
@@ -436,9 +436,16 @@ export function initToolsPane(
       }));
     }
 
-    // Most connected nodes — click to navigate, focus button (filtered by search)
+  }
+
+  function renderInsightsTab(target: HTMLElement) {
+    if (!stats) return;
+
+    const qq = qualitySearch.toLowerCase();
+
+    // Most connected nodes — click to navigate, focus button
     const filteredConnected = stats.mostConnected.filter((n) =>
-      !q || n.label.toLowerCase().includes(q) || n.type.toLowerCase().includes(q)
+      !qq || n.label.toLowerCase().includes(qq) || n.type.toLowerCase().includes(qq)
     );
     if (filteredConnected.length) {
       target.appendChild(makeSection("Most Connected", (section) => {
@@ -491,13 +498,6 @@ export function initToolsPane(
         }
       }));
     }
-
-  }
-
-  function renderQualityTab(target: HTMLElement) {
-    if (!stats) return;
-
-    const qq = qualitySearch.toLowerCase();
     const orphans = stats.orphans.filter((o) => !qq || o.label.toLowerCase().includes(qq) || o.type.toLowerCase().includes(qq));
     const singletons = stats.singletons.filter((s) => !qq || s.name.toLowerCase().includes(qq));
     const emptyNodes = stats.emptyNodes.filter((e) => !qq || e.label.toLowerCase().includes(qq) || e.type.toLowerCase().includes(qq));

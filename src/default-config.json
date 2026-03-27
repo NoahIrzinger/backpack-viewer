@@ -28,6 +28,39 @@
     "spacingDecrease": "[",
     "spacingIncrease": "]",
     "clusteringDecrease": "{",
-    "clusteringIncrease": "}"
+    "clusteringIncrease": "}",
+    "toggleSidebar": "Tab"
+  },
+  "display": {
+    "edges": true,
+    "edgeLabels": true,
+    "typeHulls": true,
+    "minimap": true,
+    "theme": "system"
+  },
+  "layout": {
+    "spacing": 1.5,
+    "clustering": 0.08
+  },
+  "navigation": {
+    "panSpeed": 60,
+    "panFastMultiplier": 3,
+    "zoomFactor": 1.3,
+    "zoomMin": 0.05,
+    "zoomMax": 10,
+    "panAnimationMs": 300
+  },
+  "lod": {
+    "hideBadges": 0.4,
+    "hideLabels": 0.25,
+    "hideEdgeLabels": 0.35,
+    "smallNodes": 0.2,
+    "hideArrows": 0.15
+  },
+  "limits": {
+    "maxSearchResults": 8,
+    "maxQualityItems": 5,
+    "maxMostConnected": 5,
+    "searchDebounceMs": 150
   }
 }

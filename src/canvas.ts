@@ -16,12 +16,14 @@ function cssVar(name: string): string {
 const NODE_RADIUS = 20;
 const ALPHA_MIN = 0.001;
 
-// Level-of-detail thresholds based on camera scale
-const LOD_HIDE_BADGES = 0.4;    // hide type badges above nodes
-const LOD_HIDE_LABELS = 0.25;   // hide node labels below nodes
-const LOD_HIDE_EDGE_LABELS = 0.35; // hide edge labels even if enabled
-const LOD_SMALL_NODES = 0.2;    // shrink nodes to half size
-const LOD_HIDE_ARROWS = 0.15;   // hide arrowheads, draw 1px edges
+export interface CanvasConfig {
+  lod?: { hideBadges?: number; hideLabels?: number; hideEdgeLabels?: number; smallNodes?: number; hideArrows?: number };
+  navigation?: { zoomFactor?: number; zoomMin?: number; zoomMax?: number; panAnimationMs?: number };
+}
+
+// Defaults — overridden per-instance via config
+const LOD_DEFAULTS = { hideBadges: 0.4, hideLabels: 0.25, hideEdgeLabels: 0.35, smallNodes: 0.2, hideArrows: 0.15 };
+const NAV_DEFAULTS = { zoomFactor: 1.3, zoomMin: 0.05, zoomMax: 10, panAnimationMs: 300 };
 
 /** Check if a point is within the visible viewport (with padding). */
 function isInViewport(
@@ -44,8 +46,12 @@ export interface FocusInfo {
 export function initCanvas(
   container: HTMLElement,
   onNodeClick?: (nodeIds: string[] | null) => void,
-  onFocusChange?: (focus: FocusInfo | null) => void
+  onFocusChange?: (focus: FocusInfo | null) => void,
+  config?: CanvasConfig
 ) {
+  const lod = { ...LOD_DEFAULTS, ...(config?.lod ?? {}) };
+  const nav = { ...NAV_DEFAULTS, ...(config?.navigation ?? {}) };
+
   const canvas = container.querySelector("canvas") as HTMLCanvasElement;
   const ctx = canvas.getContext("2d")!;
   const dpr = window.devicePixelRatio || 1;
@@ -71,7 +77,7 @@ export function initCanvas(
   // Pan animation state
   let panTarget: { x: number; y: number } | null = null;
   let panStart: { x: number; y: number; time: number } | null = null;
-  const PAN_DURATION = 300;
+  const PAN_DURATION = nav.panAnimationMs;
 
   // --- Sizing ---
 
@@ -144,7 +150,7 @@ export function initCanvas(
     ctx.scale(camera.scale, camera.scale);
 
     // Draw type hulls (shaded regions behind same-type nodes)
-    if (showTypeHulls && camera.scale >= LOD_SMALL_NODES) {
+    if (showTypeHulls && camera.scale >= lod.smallNodes) {
       const typeGroups = new Map<string, LayoutNode[]>();
       for (const node of state.nodes) {
         if (filteredNodeIds !== null && !filteredNodeIds.has(node.id)) continue;
@@ -225,16 +231,16 @@ export function initCanvas(
         : edgeDimmed
           ? edgeDimColor
           : edgeColor;
-      ctx.lineWidth = camera.scale < LOD_HIDE_ARROWS ? 1 : highlighted ? 2.5 : 1.5;
+      ctx.lineWidth = camera.scale < lod.hideArrows ? 1 : highlighted ? 2.5 : 1.5;
       ctx.stroke();
 
       // Arrowhead
-      if (camera.scale >= LOD_HIDE_ARROWS) {
+      if (camera.scale >= lod.hideArrows) {
         drawArrowhead(source.x, source.y, target.x, target.y, highlighted, arrowColor, arrowHighlight);
       }
 
       // Edge label at midpoint
-      if (showEdgeLabels && camera.scale >= LOD_HIDE_EDGE_LABELS) {
+      if (showEdgeLabels && camera.scale >= lod.hideEdgeLabels) {
         const mx = (source.x + target.x) / 2;
         const my = (source.y + target.y) / 2;
         ctx.fillStyle = highlighted
@@ -269,7 +275,7 @@ export function initCanvas(
         filteredOut ||
         (selectedNodeIds.size > 0 && !isSelected && !isNeighbor);
 
-      const r = camera.scale < LOD_SMALL_NODES ? NODE_RADIUS * 0.5 : NODE_RADIUS;
+      const r = camera.scale < lod.smallNodes ? NODE_RADIUS * 0.5 : NODE_RADIUS;
 
       // Glow for selected node
       if (isSelected) {
@@ -295,7 +301,7 @@ export function initCanvas(
       ctx.stroke();
 
       // Label below
-      if (camera.scale >= LOD_HIDE_LABELS) {
+      if (camera.scale >= lod.hideLabels) {
         const label =
           node.label.length > 24 ? node.label.slice(0, 22) + "..." : node.label;
         ctx.fillStyle = dimmed ? nodeLabelDim : nodeLabel;
@@ -306,7 +312,7 @@ export function initCanvas(
       }
 
       // Type badge above
-      if (camera.scale >= LOD_HIDE_BADGES) {
+      if (camera.scale >= lod.hideBadges) {
         ctx.fillStyle = dimmed ? typeBadgeDim : typeBadge;
         ctx.font = "9px system-ui, sans-serif";
         ctx.textBaseline = "bottom";
@@ -580,7 +586,7 @@ export function initCanvas(
           ? 0.9
           : 1.1;
 
-      camera.scale = Math.max(0.05, Math.min(10, camera.scale * factor));
+      camera.scale = Math.max(nav.zoomMin, Math.min(nav.zoomMax, camera.scale * factor));
 
       camera.x = wx - mx / camera.scale;
       camera.y = wy - my / camera.scale;
@@ -621,7 +627,7 @@ export function initCanvas(
     if (current.length === 2 && touches.length === 2) {
       const dist = touchDistance(current[0], current[1]);
       const ratio = dist / initialPinchDist;
-      camera.scale = Math.max(0.05, Math.min(10, initialPinchScale * ratio));
+      camera.scale = Math.max(nav.zoomMin, Math.min(nav.zoomMax, initialPinchScale * ratio));
       render();
     } else if (current.length === 1) {
       const dx = current[0].clientX - lastX;
@@ -689,7 +695,7 @@ export function initCanvas(
     const cx = canvas.clientWidth / 2;
     const cy = canvas.clientHeight / 2;
     const [wx, wy] = screenToWorld(cx, cy);
-    camera.scale = Math.min(10, camera.scale * 1.3);
+    camera.scale = Math.min(nav.zoomMax, camera.scale * nav.zoomFactor);
     camera.x = wx - cx / camera.scale;
     camera.y = wy - cy / camera.scale;
     render();
@@ -703,7 +709,7 @@ export function initCanvas(
     const cx = canvas.clientWidth / 2;
     const cy = canvas.clientHeight / 2;
     const [wx, wy] = screenToWorld(cx, cy);
-    camera.scale = Math.max(0.05, camera.scale / 1.3);
+    camera.scale = Math.max(nav.zoomMin, camera.scale / nav.zoomFactor);
     camera.x = wx - cx / camera.scale;
     camera.y = wy - cy / camera.scale;
     render();
@@ -872,7 +878,7 @@ export function initCanvas(
       const cx = canvas.clientWidth / 2;
       const cy = canvas.clientHeight / 2;
       const [wx, wy] = screenToWorld(cx, cy);
-      camera.scale = Math.max(0.05, Math.min(10, camera.scale * factor));
+      camera.scale = Math.max(nav.zoomMin, Math.min(nav.zoomMax, camera.scale * factor));
       camera.x = wx - cx / camera.scale;
       camera.y = wy - cy / camera.scale;
       render();

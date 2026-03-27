@@ -19,6 +19,7 @@ const ACTION_ORDER: KeybindingAction[] = [
   "panFastLeft", "panFastRight", "zoomIn", "zoomOut",
   "spacingDecrease", "spacingIncrease",
   "clusteringDecrease", "clusteringIncrease",
+  "toggleSidebar",
   "escape",
 ];
 

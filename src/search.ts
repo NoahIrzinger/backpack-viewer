@@ -20,7 +20,14 @@ function matchesQuery(node: Node, query: string): boolean {
   return false;
 }
 
-export function initSearch(container: HTMLElement) {
+export interface SearchConfig {
+  maxResults?: number;
+  debounceMs?: number;
+}
+
+export function initSearch(container: HTMLElement, config?: SearchConfig) {
+  const maxResults = config?.maxResults ?? 8;
+  const debounceMs = config?.debounceMs ?? 150;
   let data: LearningGraphData | null = null;
   let filterCallback: ((ids: Set<string> | null) => void) | null = null;
   let selectCallback: ((nodeId: string) => void) | null = null;
@@ -89,7 +96,7 @@ export function initSearch(container: HTMLElement) {
     for (const node of data.nodes) {
       if (matchesQuery(node, query)) {
         matches.push(node);
-        if (matches.length >= 8) break;
+        if (matches.length >= maxResults) break;
       }
     }
 
@@ -136,7 +143,7 @@ export function initSearch(container: HTMLElement) {
 
   input.addEventListener("input", () => {
     if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(applyFilter, 150);
+    debounceTimer = setTimeout(applyFilter, debounceMs);
   });
 
   let activeIndex = -1;

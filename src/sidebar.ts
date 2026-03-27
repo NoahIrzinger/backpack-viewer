@@ -31,7 +31,28 @@ export function initSidebar(
     '<a href="mailto:support@backpackontology.com">support@backpackontology.com</a>' +
     "<span>Feedback & support</span>";
 
-  container.appendChild(heading);
+  // Collapse toggle button
+  const collapseBtn = document.createElement("button");
+  collapseBtn.className = "sidebar-collapse-btn";
+  collapseBtn.title = "Toggle sidebar (Tab)";
+  collapseBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>';
+
+  let collapsed = false;
+  function toggleSidebar() {
+    collapsed = !collapsed;
+    container.classList.toggle("sidebar-collapsed", collapsed);
+    collapseBtn.innerHTML = collapsed
+      ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="13 7 18 12 13 17"/><polyline points="6 7 11 12 6 17"/></svg>'
+      : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>';
+  }
+  collapseBtn.addEventListener("click", toggleSidebar);
+
+  const headingRow = document.createElement("div");
+  headingRow.className = "sidebar-heading-row";
+  headingRow.appendChild(heading);
+  headingRow.appendChild(collapseBtn);
+
+  container.appendChild(headingRow);
   container.appendChild(input);
   container.appendChild(list);
   container.appendChild(footer);
@@ -120,5 +141,7 @@ export function initSidebar(
         item.classList.toggle("active", item.dataset.name === name);
       }
     },
+
+    toggle: toggleSidebar,
   };
 }

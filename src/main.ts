@@ -19,20 +19,29 @@ let currentData: LearningGraphData | null = null;
 async function main() {
   const canvasContainer = document.getElementById("canvas-container")!;
 
-  // --- Load config (keybindings) ---
-  let bindings: KeybindingMap = defaultConfig.keybindings as KeybindingMap;
+  // --- Load config ---
+  const cfg = { ...defaultConfig } as typeof defaultConfig;
   try {
     const res = await fetch("/api/config");
     if (res.ok) {
-      const config = await res.json();
-      bindings = { ...bindings, ...(config.keybindings ?? {}) };
+      const user = await res.json();
+      Object.assign(cfg.keybindings, user.keybindings ?? {});
+      Object.assign(cfg.display, user.display ?? {});
+      Object.assign(cfg.layout, user.layout ?? {});
+      Object.assign(cfg.navigation, user.navigation ?? {});
+      Object.assign(cfg.lod, user.lod ?? {});
+      Object.assign(cfg.limits, user.limits ?? {});
     }
   } catch { /* use defaults */ }
+  const bindings = cfg.keybindings as KeybindingMap;
 
   // --- Theme toggle (top-right of canvas) ---
   const prefersDark = window.matchMedia("(prefers-color-scheme: dark)");
+  const themeDefault = cfg.display.theme === "system"
+    ? (prefersDark.matches ? "dark" : "light")
+    : cfg.display.theme;
   const stored = localStorage.getItem("backpack-theme");
-  const initial = stored ?? (prefersDark.matches ? "dark" : "light");
+  const initial = stored ?? themeDefault;
   document.documentElement.setAttribute("data-theme", initial);
 
   const themeBtn = document.createElement("button");
@@ -149,8 +158,8 @@ async function main() {
 
   // Track current selection for keyboard shortcuts
   let currentSelection: string[] = [];
-  let edgesVisible = true;
-  let panSpeed = 60;
+  let edgesVisible = cfg.display.edges;
+  let panSpeed = cfg.navigation.panSpeed;
   let viewCycleIndex = -1;
 
   // --- Focus indicator (top bar pill) ---
@@ -230,9 +239,12 @@ async function main() {
       infoPanel.setFocusDisabled(false);
       if (activeOntology) updateUrl(activeOntology);
     }
-  });
+  }, { lod: cfg.lod, navigation: cfg.navigation });
 
-  const search = initSearch(canvasContainer);
+  const search = initSearch(canvasContainer, {
+    maxResults: cfg.limits.maxSearchResults,
+    debounceMs: cfg.limits.searchDebounceMs,
+  });
   const toolsPane = initToolsPane(canvasContainer, {
     onFilterByType(type) {
       if (!currentData) return;
@@ -379,6 +391,12 @@ async function main() {
   const shortcuts = initShortcuts(canvasContainer, bindings);
   const emptyState = initEmptyState(canvasContainer);
 
+  // Apply display defaults from config
+  if (!cfg.display.edges) canvas.setEdges(false);
+  if (!cfg.display.edgeLabels) canvas.setEdgeLabels(false);
+  if (!cfg.display.typeHulls) canvas.setTypeHulls(false);
+  if (!cfg.display.minimap) canvas.setMinimap(false);
+
   // --- URL deep linking ---
   function updateUrl(name: string, nodeIds?: string[] | null) {
     const parts: string[] = [];
@@ -428,7 +446,11 @@ async function main() {
     search.clear();
     undoHistory.clear();
     currentData = await loadOntology(name);
-    setLayoutParams(autoLayoutParams(currentData.nodes.length));
+    const autoParams = autoLayoutParams(currentData.nodes.length);
+    setLayoutParams({
+      spacing: Math.max(cfg.layout.spacing, autoParams.spacing),
+      clusterStrength: Math.max(cfg.layout.clustering, autoParams.clusterStrength),
+    });
     canvas.loadGraph(currentData);
     search.setLearningGraphData(currentData);
     toolsPane.setData(currentData);
@@ -516,15 +538,16 @@ async function main() {
     panDown() { canvas.panBy(0, panSpeed); },
     panUp() { canvas.panBy(0, -panSpeed); },
     panRight() { canvas.panBy(panSpeed, 0); },
-    panFastLeft() { canvas.panBy(-panSpeed * 3, 0); },
-    zoomOut() { canvas.zoomBy(0.8); },
-    zoomIn() { canvas.zoomBy(1.25); },
-    panFastRight() { canvas.panBy(panSpeed * 3, 0); },
+    panFastLeft() { canvas.panBy(-panSpeed * cfg.navigation.panFastMultiplier, 0); },
+    zoomOut() { canvas.zoomBy(1 / cfg.navigation.zoomFactor); },
+    zoomIn() { canvas.zoomBy(cfg.navigation.zoomFactor); },
+    panFastRight() { canvas.panBy(panSpeed * cfg.navigation.panFastMultiplier, 0); },
     spacingDecrease() { const p = getLayoutParams(); setLayoutParams({ spacing: Math.max(0.5, p.spacing - 0.5) }); canvas.reheat(); },
     spacingIncrease() { const p = getLayoutParams(); setLayoutParams({ spacing: Math.min(20, p.spacing + 0.5) }); canvas.reheat(); },
     clusteringDecrease() { const p = getLayoutParams(); setLayoutParams({ clusterStrength: Math.max(0, p.clusterStrength - 0.03) }); canvas.reheat(); },
     clusteringIncrease() { const p = getLayoutParams(); setLayoutParams({ clusterStrength: Math.min(1, p.clusterStrength + 0.03) }); canvas.reheat(); },
     help() { shortcuts.toggle(); },
+    toggleSidebar() { sidebar.toggle(); },
     escape() { if (canvas.isFocused()) { toolsPane.clearFocusSet(); } else { shortcuts.hide(); } },
   };
 
@@ -533,7 +556,7 @@ async function main() {
 
     for (const [action, binding] of Object.entries(bindings)) {
       if (matchKey(e, binding)) {
-        const needsPrevent = action === "search" || action === "searchAlt" || action === "undo" || action === "redo";
+        const needsPrevent = action === "search" || action === "searchAlt" || action === "undo" || action === "redo" || action === "toggleSidebar";
         if (needsPrevent) e.preventDefault();
         actions[action]?.();
         return;

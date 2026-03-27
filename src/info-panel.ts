@@ -162,8 +162,12 @@ export function initInfoPanel(
     panel.classList.remove("hidden");
     if (maximized) panel.classList.add("info-panel-maximized");
 
+    // Pinned header area (toolbar + node identity)
+    const pinnedHeader = document.createElement("div");
+    pinnedHeader.className = "info-panel-header";
+
     // Toolbar (back, forward, maximize, close)
-    panel.appendChild(createToolbar());
+    pinnedHeader.appendChild(createToolbar());
 
     // Header: type badge + label
     const header = document.createElement("div");
@@ -218,7 +222,12 @@ export function initInfoPanel(
     header.appendChild(typeBadge);
     header.appendChild(label);
     header.appendChild(nodeIdEl);
-    panel.appendChild(header);
+    pinnedHeader.appendChild(header);
+    panel.appendChild(pinnedHeader);
+
+    // Scrollable body for properties, connections, timestamps
+    const body = document.createElement("div");
+    body.className = "info-panel-body";
 
     // Properties section (editable)
     const propKeys = Object.keys(node.properties);
@@ -320,7 +329,7 @@ export function initInfoPanel(
       propSection.appendChild(addBtn);
     }
 
-    panel.appendChild(propSection);
+    body.appendChild(propSection);
 
     // Connections section
     if (connectedEdges.length > 0) {
@@ -403,7 +412,7 @@ export function initInfoPanel(
       }
 
       section.appendChild(list);
-      panel.appendChild(section);
+      body.appendChild(section);
     }
 
     // Timestamps
@@ -426,7 +435,7 @@ export function initInfoPanel(
     timestamps.appendChild(updatedDt);
     timestamps.appendChild(updatedDd);
     tsSection.appendChild(timestamps);
-    panel.appendChild(tsSection);
+    body.appendChild(tsSection);
 
     // Delete node button
     if (callbacks) {
@@ -441,8 +450,10 @@ export function initInfoPanel(
         hide();
       });
       deleteSection.appendChild(deleteBtn);
-      panel.appendChild(deleteSection);
+      body.appendChild(deleteSection);
     }
+
+    panel.appendChild(body);
   }
 
   function showMulti(nodeIds: string[], data: LearningGraphData) {

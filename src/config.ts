@@ -22,13 +22,14 @@ export function loadViewerConfig(): ViewerConfig {
   const filePath = viewerConfigFile();
   try {
     const raw = fs.readFileSync(filePath, "utf-8");
-    const userConfig = JSON.parse(raw);
+    const user = JSON.parse(raw);
     return {
-      ...defaultConfig,
-      keybindings: {
-        ...defaultConfig.keybindings,
-        ...(userConfig.keybindings ?? {}),
-      },
+      keybindings: { ...defaultConfig.keybindings, ...(user.keybindings ?? {}) },
+      display: { ...defaultConfig.display, ...(user.display ?? {}) },
+      layout: { ...defaultConfig.layout, ...(user.layout ?? {}) },
+      navigation: { ...defaultConfig.navigation, ...(user.navigation ?? {}) },
+      lod: { ...defaultConfig.lod, ...(user.lod ?? {}) },
+      limits: { ...defaultConfig.limits, ...(user.limits ?? {}) },
     };
   } catch {
     return defaultConfig;
