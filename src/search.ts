@@ -77,6 +77,7 @@ export function initSearch(container: HTMLElement) {
 
   function updateResults() {
     results.innerHTML = "";
+    activeIndex = -1;
     const query = input.value.trim();
 
     if (!data || query.length === 0) {
@@ -138,15 +139,46 @@ export function initSearch(container: HTMLElement) {
     debounceTimer = setTimeout(applyFilter, 150);
   });
 
+  let activeIndex = -1;
+
+  function updateActiveResult() {
+    const items = results.querySelectorAll(".search-result-item");
+    items.forEach((el, i) => {
+      (el as HTMLElement).classList.toggle("search-result-active", i === activeIndex);
+    });
+    if (activeIndex >= 0 && items[activeIndex]) {
+      (items[activeIndex] as HTMLElement).scrollIntoView({ block: "nearest" });
+    }
+  }
+
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
+    const items = results.querySelectorAll(".search-result-item");
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (items.length > 0) {
+        activeIndex = Math.min(activeIndex + 1, items.length - 1);
+        updateActiveResult();
+      }
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (items.length > 0) {
+        activeIndex = Math.max(activeIndex - 1, 0);
+        updateActiveResult();
+      }
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (activeIndex >= 0 && items[activeIndex]) {
+        (items[activeIndex] as HTMLElement).click();
+      } else if (items.length > 0) {
+        (items[0] as HTMLElement).click();
+      }
+      input.blur();
+    } else if (e.key === "Escape") {
       input.value = "";
       input.blur();
       results.classList.add("hidden");
+      activeIndex = -1;
       applyFilter();
-    } else if (e.key === "Enter") {
-      const first = results.querySelector(".search-result-item") as HTMLElement | null;
-      first?.click();
     }
   });
 

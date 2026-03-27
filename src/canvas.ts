@@ -56,6 +56,7 @@ export function initCanvas(
   let animFrame = 0;
   let selectedNodeIds: Set<string> = new Set();
   let filteredNodeIds: Set<string> | null = null; // null = no filter (show all)
+  let showEdges = true;
   let showEdgeLabels = true;
   let showTypeHulls = true;
   let showMinimap = true;
@@ -186,7 +187,7 @@ export function initCanvas(
     }
 
     // Draw edges
-    for (const edge of state.edges) {
+    if (showEdges) for (const edge of state.edges) {
       const source = state.nodeMap.get(edge.sourceId);
       const target = state.nodeMap.get(edge.targetId);
       if (!source || !target) continue;
@@ -824,6 +825,11 @@ export function initCanvas(
       animatePan();
     },
 
+    setEdges(visible: boolean) {
+      showEdges = visible;
+      render();
+    },
+
     setEdgeLabels(visible: boolean) {
       showEdgeLabels = visible;
       render();
@@ -836,6 +842,39 @@ export function initCanvas(
 
     setMinimap(visible: boolean) {
       showMinimap = visible;
+      render();
+    },
+
+    centerView() {
+      if (!state) return;
+      camera = { x: 0, y: 0, scale: 1 };
+      if (state.nodes.length > 0) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const n of state.nodes) {
+          if (n.x < minX) minX = n.x;
+          if (n.y < minY) minY = n.y;
+          if (n.x > maxX) maxX = n.x;
+          if (n.y > maxY) maxY = n.y;
+        }
+        camera.x = (minX + maxX) / 2 - canvas.clientWidth / 2;
+        camera.y = (minY + maxY) / 2 - canvas.clientHeight / 2;
+      }
+      render();
+    },
+
+    panBy(dx: number, dy: number) {
+      camera.x += dx / camera.scale;
+      camera.y += dy / camera.scale;
+      render();
+    },
+
+    zoomBy(factor: number) {
+      const cx = canvas.clientWidth / 2;
+      const cy = canvas.clientHeight / 2;
+      const [wx, wy] = screenToWorld(cx, cy);
+      camera.scale = Math.max(0.05, Math.min(10, camera.scale * factor));
+      camera.x = wx - cx / camera.scale;
+      camera.y = wy - cy / camera.scale;
       render();
     },
 
@@ -947,6 +986,18 @@ export function initCanvas(
         hops: focusHops,
         totalNodes: state.nodes.length,
       };
+    },
+
+    /** Get all node IDs in the current layout (subgraph if focused, full graph otherwise). Seed nodes first. */
+    getNodeIds(): string[] {
+      if (!state) return [];
+      if (focusSeedIds) {
+        const seedSet = new Set(focusSeedIds);
+        const seeds = state.nodes.filter((n) => seedSet.has(n.id)).map((n) => n.id);
+        const rest = state.nodes.filter((n) => !seedSet.has(n.id)).map((n) => n.id);
+        return [...seeds, ...rest];
+      }
+      return state.nodes.map((n) => n.id);
     },
 
     destroy() {

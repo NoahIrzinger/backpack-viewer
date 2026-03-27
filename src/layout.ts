@@ -23,20 +23,20 @@ export interface LayoutState {
 }
 
 export interface LayoutParams {
-  clusterStrength: number; // 0–0.5, how tightly same-type nodes group
-  spacing: number;         // 0.5–10, multiplier on edge rest lengths
+  clusterStrength: number; // 0–1, how tightly same-type nodes group
+  spacing: number;         // 0.5–20, multiplier on edge rest lengths
 }
 
 export const DEFAULT_LAYOUT_PARAMS: LayoutParams = {
-  clusterStrength: 0.05,
-  spacing: 1,
+  clusterStrength: 0.08,
+  spacing: 1.5,
 };
 
-const REPULSION = 5000;
-const CROSS_TYPE_REPULSION_BASE = 8000;
-const ATTRACTION = 0.005;
-const REST_LENGTH_SAME_BASE = 100;
-const REST_LENGTH_CROSS_BASE = 250;
+const REPULSION = 6000;
+const CROSS_TYPE_REPULSION_BASE = 12000;
+const ATTRACTION = 0.004;
+const REST_LENGTH_SAME_BASE = 140;
+const REST_LENGTH_CROSS_BASE = 350;
 const DAMPING = 0.9;
 const CENTER_GRAVITY = 0.01;
 const MIN_DISTANCE = 30;
@@ -56,11 +56,11 @@ export function getLayoutParams(): LayoutParams {
 
 /** Compute sensible default layout params based on graph size. */
 export function autoLayoutParams(nodeCount: number): LayoutParams {
-  if (nodeCount <= 50) return { ...DEFAULT_LAYOUT_PARAMS };
-  const scale = Math.log2(nodeCount / 50);
+  if (nodeCount <= 30) return { ...DEFAULT_LAYOUT_PARAMS };
+  const scale = Math.log2(nodeCount / 30);
   return {
-    clusterStrength: Math.min(0.3, 0.05 + 0.04 * scale),
-    spacing: Math.min(8, 1 + 0.8 * scale),
+    clusterStrength: Math.min(0.5, 0.08 + 0.06 * scale),
+    spacing: Math.min(15, 1.5 + 1.2 * scale),
   };
 }
 

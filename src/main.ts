@@ -5,7 +5,7 @@ import { initCanvas, type FocusInfo } from "./canvas";
 import { initInfoPanel } from "./info-panel";
 import { initSearch } from "./search";
 import { initToolsPane } from "./tools-pane";
-import { setLayoutParams, autoLayoutParams } from "./layout";
+import { setLayoutParams, getLayoutParams, autoLayoutParams } from "./layout";
 import { initShortcuts } from "./shortcuts";
 import { initEmptyState } from "./empty-state";
 import { createHistory } from "./history";
@@ -137,6 +137,9 @@ async function main() {
 
   // Track current selection for keyboard shortcuts
   let currentSelection: string[] = [];
+  let edgesVisible = true;
+  let panSpeed = 60;
+  let viewCycleIndex = -1;
 
   // --- Focus indicator (top bar pill) ---
   let focusIndicator: HTMLElement | null = null;
@@ -277,6 +280,9 @@ async function main() {
       setLayoutParams({ [param]: value });
       canvas.reheat();
     },
+    onPanSpeedChange(speed) {
+      panSpeed = speed;
+    },
     onExport(format) {
       const dataUrl = canvas.exportImage(format);
       if (!dataUrl) return;
@@ -359,15 +365,6 @@ async function main() {
   );
 
   const shortcuts = initShortcuts(canvasContainer);
-
-  // Help button in top-right
-  const helpBtn = document.createElement("button");
-  helpBtn.className = "zoom-btn";
-  helpBtn.textContent = "?";
-  helpBtn.title = "Keyboard shortcuts";
-  helpBtn.addEventListener("click", () => shortcuts.show());
-  topRight.appendChild(helpBtn);
-
   const emptyState = initEmptyState(canvasContainer);
 
   // --- URL deep linking ---
@@ -503,8 +500,79 @@ async function main() {
       } else if (currentSelection.length > 0) {
         toolsPane.addToFocusSet(currentSelection);
       }
+    } else if (e.key === "-" || e.key === "_") {
+      const info = canvas.getFocusInfo();
+      if (info && info.hops > 0) {
+        canvas.enterFocus(info.seedNodeIds, info.hops - 1);
+      }
+    } else if (e.key === "=" || e.key === "+") {
+      const info = canvas.getFocusInfo();
+      if (info) {
+        canvas.enterFocus(info.seedNodeIds, info.hops + 1);
+      }
+    } else if (e.key === ".") {
+      const ids = canvas.getNodeIds();
+      if (ids.length > 0) {
+        viewCycleIndex = (viewCycleIndex + 1) % ids.length;
+        canvas.panToNode(ids[viewCycleIndex]);
+        if (currentData) infoPanel.show([ids[viewCycleIndex]], currentData);
+      }
+    } else if (e.key === ",") {
+      const ids = canvas.getNodeIds();
+      if (ids.length > 0) {
+        viewCycleIndex = viewCycleIndex <= 0 ? ids.length - 1 : viewCycleIndex - 1;
+        canvas.panToNode(ids[viewCycleIndex]);
+        if (currentData) infoPanel.show([ids[viewCycleIndex]], currentData);
+      }
+    } else if (e.key === ">") {
+      const nodeId = infoPanel.cycleConnection(1);
+      if (nodeId) canvas.panToNode(nodeId);
+    } else if (e.key === "<") {
+      const nodeId = infoPanel.cycleConnection(-1);
+      if (nodeId) canvas.panToNode(nodeId);
+    } else if (e.key === "(") {
+      infoPanel.goBack();
+    } else if (e.key === ")") {
+      infoPanel.goForward();
+    } else if (e.key === "c") {
+      canvas.centerView();
+    } else if (e.key === "e") {
+      edgesVisible = !edgesVisible;
+      canvas.setEdges(edgesVisible);
+    } else if (e.key === "h") {
+      canvas.panBy(-panSpeed, 0);
+    } else if (e.key === "j") {
+      canvas.panBy(0, panSpeed);
+    } else if (e.key === "k") {
+      canvas.panBy(0, -panSpeed);
+    } else if (e.key === "l") {
+      canvas.panBy(panSpeed, 0);
+    } else if (e.key === "H") {
+      canvas.panBy(-panSpeed * 3, 0);
+    } else if (e.key === "J") {
+      canvas.zoomBy(0.8);
+    } else if (e.key === "K") {
+      canvas.zoomBy(1.25);
+    } else if (e.key === "L") {
+      canvas.panBy(panSpeed * 3, 0);
+    } else if (e.key === "[") {
+      const p = getLayoutParams();
+      setLayoutParams({ spacing: Math.max(0.5, p.spacing - 0.5) });
+      canvas.reheat();
+    } else if (e.key === "]") {
+      const p = getLayoutParams();
+      setLayoutParams({ spacing: Math.min(20, p.spacing + 0.5) });
+      canvas.reheat();
+    } else if (e.key === "{") {
+      const p = getLayoutParams();
+      setLayoutParams({ clusterStrength: Math.max(0, p.clusterStrength - 0.03) });
+      canvas.reheat();
+    } else if (e.key === "}") {
+      const p = getLayoutParams();
+      setLayoutParams({ clusterStrength: Math.min(1, p.clusterStrength + 0.03) });
+      canvas.reheat();
     } else if (e.key === "?") {
-      shortcuts.show();
+      shortcuts.toggle();
     } else if (e.key === "Escape") {
       if (canvas.isFocused()) {
         toolsPane.clearFocusSet();

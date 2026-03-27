@@ -270,9 +270,7 @@ body {
 }
 
 .canvas-top-left {
-  width: 226px;
   flex-shrink: 0;
-  flex-wrap: wrap;
 }
 
 .canvas-top-center {
@@ -516,7 +514,8 @@ body {
   transition: background 0.1s;
 }
 
-.search-result-item:hover {
+.search-result-item:hover,
+.search-result-active {
   background: var(--bg-hover);
 }
 
@@ -841,6 +840,11 @@ body {
   border-radius: 6px;
   font-size: 12px;
   flex-wrap: wrap;
+}
+
+.info-connection-active {
+  outline: 1.5px solid var(--accent);
+  background: var(--bg-hover);
 }
 
 .info-target-dot {

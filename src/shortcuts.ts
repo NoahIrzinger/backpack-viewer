@@ -2,8 +2,19 @@ const SHORTCUTS = [
   { key: "/", alt: "Ctrl+K", description: "Focus search" },
   { key: "Ctrl+Z", description: "Undo" },
   { key: "Ctrl+Shift+Z", description: "Redo" },
-  { key: "?", description: "Show this help" },
+  { key: "?", description: "Toggle this help" },
   { key: "F", description: "Focus on selected / exit focus" },
+  { key: "E", description: "Toggle edges on/off" },
+  { key: ",  .", description: "Cycle previous / next node in view" },
+  { key: "<  >", description: "Cycle previous / next connection" },
+  { key: "(  )", description: "Node history back / forward" },
+  { key: "C", description: "Center view on graph" },
+  { key: "-  =", description: "Decrease / increase hops (in focus mode)" },
+  { key: "h j k l", description: "Pan left / down / up / right" },
+  { key: "H L", description: "Pan fast left / right" },
+  { key: "J K", description: "Zoom out / zoom in" },
+  { key: "[  ]", description: "Decrease / increase spacing" },
+  { key: "{  }", description: "Decrease / increase clustering" },
   { key: "Esc", description: "Exit focus / close panel" },
   { key: "Click", description: "Select node" },
   { key: "Ctrl+Click", description: "Multi-select nodes" },
@@ -74,10 +85,14 @@ export function initShortcuts(container: HTMLElement) {
     overlay.classList.add("hidden");
   }
 
+  function toggle() {
+    overlay.classList.toggle("hidden");
+  }
+
   closeBtn.addEventListener("click", hide);
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) hide();
   });
 
-  return { show, hide };
+  return { show, hide, toggle };
 }

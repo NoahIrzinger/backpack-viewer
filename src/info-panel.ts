@@ -38,6 +38,8 @@ export function initInfoPanel(
   let lastData: LearningGraphData | null = null;
   let currentNodeIds: string[] = [];
   let focusDisabled = false;
+  let connectionNodeIds: string[] = []; // other-end node IDs for each connection
+  let activeConnectionIndex = -1;
 
   function hide() {
     panel.classList.add("hidden");
@@ -63,18 +65,22 @@ export function initInfoPanel(
   }
 
   function goBack() {
-    if (historyIndex <= 0 || !lastData || !onNavigateToNode) return;
+    if (historyIndex <= 0 || !lastData) return;
     historyIndex--;
     navigatingHistory = true;
-    onNavigateToNode(history[historyIndex]);
+    const nodeId = history[historyIndex];
+    onNavigateToNode?.(nodeId);
+    showSingle(nodeId, lastData);
     navigatingHistory = false;
   }
 
   function goForward() {
-    if (historyIndex >= history.length - 1 || !lastData || !onNavigateToNode) return;
+    if (historyIndex >= history.length - 1 || !lastData) return;
     historyIndex++;
     navigatingHistory = true;
-    onNavigateToNode(history[historyIndex]);
+    const nodeId = history[historyIndex];
+    onNavigateToNode?.(nodeId);
+    showSingle(nodeId, lastData);
     navigatingHistory = false;
   }
 
@@ -145,6 +151,12 @@ export function initInfoPanel(
     const connectedEdges = data.edges.filter(
       (e) => e.sourceId === nodeId || e.targetId === nodeId
     );
+
+    // Store connection targets for keyboard cycling
+    connectionNodeIds = connectedEdges.map((e) =>
+      e.sourceId === nodeId ? e.targetId : e.sourceId
+    );
+    activeConnectionIndex = -1;
 
     panel.innerHTML = "";
     panel.classList.remove("hidden");
@@ -627,6 +639,29 @@ export function initInfoPanel(
     },
 
     hide,
+
+    goBack,
+    goForward,
+
+    cycleConnection(direction: 1 | -1): string | null {
+      if (connectionNodeIds.length === 0) return null;
+      if (activeConnectionIndex === -1) {
+        activeConnectionIndex = direction === 1 ? 0 : connectionNodeIds.length - 1;
+      } else {
+        activeConnectionIndex += direction;
+        if (activeConnectionIndex >= connectionNodeIds.length) activeConnectionIndex = 0;
+        if (activeConnectionIndex < 0) activeConnectionIndex = connectionNodeIds.length - 1;
+      }
+      // Highlight active row in the panel
+      const items = panel.querySelectorAll(".info-connection");
+      items.forEach((el, i) => {
+        (el as HTMLElement).classList.toggle("info-connection-active", i === activeConnectionIndex);
+      });
+      if (activeConnectionIndex >= 0 && items[activeConnectionIndex]) {
+        (items[activeConnectionIndex] as HTMLElement).scrollIntoView({ block: "nearest" });
+      }
+      return connectionNodeIds[activeConnectionIndex] ?? null;
+    },
 
     setFocusDisabled(disabled: boolean) {
       focusDisabled = disabled;

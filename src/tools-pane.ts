@@ -11,6 +11,7 @@ interface ToolsPaneCallbacks {
   onToggleTypeHulls: (visible: boolean) => void;
   onToggleMinimap: (visible: boolean) => void;
   onLayoutChange: (param: string, value: number) => void;
+  onPanSpeedChange: (speed: number) => void;
   onExport: (format: "png" | "svg") => void;
   onOpen?: () => void;
 }
@@ -140,13 +141,41 @@ export function initToolsPane(
       renderFocusedSection();
     }
 
-    // Render active tab content
-    if (activeTab === "types") {
-      renderTypesTab();
+    // Search input (for types and quality tabs)
+    if (activeTab === "types" && stats.types.length > 5) {
+      content.appendChild(makeSearchInput("Filter types...", typesSearch, (v) => {
+        typesSearch = v;
+        renderTabContent();
+      }));
     } else if (activeTab === "quality") {
-      renderQualityTab();
+      const totalIssues = stats.orphans.length + stats.singletons.length + stats.emptyNodes.length;
+      if (totalIssues > 5) {
+        content.appendChild(makeSearchInput("Filter issues...", qualitySearch, (v) => {
+          qualitySearch = v;
+          renderTabContent();
+        }));
+      }
+    }
+
+    // Tab content container (re-rendered on search without destroying the input)
+    const tabContainer = document.createElement("div");
+    tabContainer.className = "tools-pane-tab-content";
+    content.appendChild(tabContainer);
+
+    renderTabContent();
+  }
+
+  function renderTabContent() {
+    const tabContainer = content.querySelector(".tools-pane-tab-content");
+    if (!tabContainer) return;
+    tabContainer.innerHTML = "";
+
+    if (activeTab === "types") {
+      renderTypesTab(tabContainer as HTMLElement);
+    } else if (activeTab === "quality") {
+      renderQualityTab(tabContainer as HTMLElement);
     } else if (activeTab === "controls") {
-      renderControlsTab();
+      renderControlsTab(tabContainer as HTMLElement);
     }
   }
 
@@ -348,16 +377,8 @@ export function initToolsPane(
     return input;
   }
 
-  function renderTypesTab() {
+  function renderTypesTab(target: HTMLElement) {
     if (!stats) return;
-
-    // Search field
-    if (stats.types.length > 5) {
-      content.appendChild(makeSearchInput("Filter types...", typesSearch, (v) => {
-        typesSearch = v;
-        render();
-      }));
-    }
 
     const q = typesSearch.toLowerCase();
 
@@ -368,7 +389,7 @@ export function initToolsPane(
         .filter((t) => !q || t.name.toLowerCase().includes(q));
 
       if (unfocusedTypes.length > 0) {
-        content.appendChild(makeSection("Node Types", (section) => {
+        target.appendChild(makeSection("Node Types", (section) => {
           for (const t of unfocusedTypes) {
             section.appendChild(buildTypeRow(t));
           }
@@ -379,7 +400,7 @@ export function initToolsPane(
     // Edge types — with rename (filtered by search)
     const filteredEdgeTypes = stats.edgeTypes.filter((t) => !q || t.name.toLowerCase().includes(q));
     if (filteredEdgeTypes.length) {
-      content.appendChild(makeSection("Edge Types", (section) => {
+      target.appendChild(makeSection("Edge Types", (section) => {
         for (const t of filteredEdgeTypes) {
           const row = document.createElement("div");
           row.className = "tools-pane-row tools-pane-clickable";
@@ -420,7 +441,7 @@ export function initToolsPane(
       !q || n.label.toLowerCase().includes(q) || n.type.toLowerCase().includes(q)
     );
     if (filteredConnected.length) {
-      content.appendChild(makeSection("Most Connected", (section) => {
+      target.appendChild(makeSection("Most Connected", (section) => {
         for (const n of filteredConnected) {
           const row = document.createElement("div");
           row.className = "tools-pane-row tools-pane-clickable";
@@ -473,16 +494,8 @@ export function initToolsPane(
 
   }
 
-  function renderQualityTab() {
+  function renderQualityTab(target: HTMLElement) {
     if (!stats) return;
-
-    const totalIssues = stats.orphans.length + stats.singletons.length + stats.emptyNodes.length;
-    if (totalIssues > 5) {
-      content.appendChild(makeSearchInput("Filter issues...", qualitySearch, (v) => {
-        qualitySearch = v;
-        render();
-      }));
-    }
 
     const qq = qualitySearch.toLowerCase();
     const orphans = stats.orphans.filter((o) => !qq || o.label.toLowerCase().includes(qq) || o.type.toLowerCase().includes(qq));
@@ -497,13 +510,13 @@ export function initToolsPane(
       const msg = document.createElement("div");
       msg.className = "tools-pane-empty-msg";
       msg.textContent = "No issues found";
-      content.appendChild(msg);
+      target.appendChild(msg);
       return;
     }
 
     // Orphans — click to navigate, focus button
     if (hasOrphans) {
-      content.appendChild(makeSection("Orphans", (section) => {
+      target.appendChild(makeSection("Orphans", (section) => {
         for (const o of orphans.slice(0, 5)) {
           const row = document.createElement("div");
           row.className = "tools-pane-row tools-pane-clickable tools-pane-issue";
@@ -563,7 +576,7 @@ export function initToolsPane(
 
     // Singleton types
     if (hasSingletons) {
-      content.appendChild(makeSection("Singletons", (section) => {
+      target.appendChild(makeSection("Singletons", (section) => {
         for (const s of singletons.slice(0, 5)) {
           const row = document.createElement("div");
           row.className = "tools-pane-row tools-pane-issue";
@@ -590,7 +603,7 @@ export function initToolsPane(
 
     // Empty nodes
     if (hasEmptyNodes) {
-      content.appendChild(makeSection("Empty Nodes", (section) => {
+      target.appendChild(makeSection("Empty Nodes", (section) => {
         for (const e of emptyNodes.slice(0, 5)) {
           const row = document.createElement("div");
           row.className = "tools-pane-row tools-pane-issue";
@@ -623,9 +636,9 @@ export function initToolsPane(
     }
   }
 
-  function renderControlsTab() {
+  function renderControlsTab(target: HTMLElement) {
     // Edge labels toggle
-    content.appendChild(makeSection("Display", (section) => {
+    target.appendChild(makeSection("Display", (section) => {
       const labelRow = document.createElement("div");
       labelRow.className = "tools-pane-row tools-pane-clickable";
 
@@ -699,17 +712,20 @@ export function initToolsPane(
     }));
 
     // Layout sliders
-    content.appendChild(makeSection("Layout", (section) => {
-      section.appendChild(makeSlider("Clustering", 0, 0.5, 0.01, 0.05, (v) => {
+    target.appendChild(makeSection("Layout", (section) => {
+      section.appendChild(makeSlider("Clustering", 0, 1, 0.02, 0.08, (v) => {
         callbacks.onLayoutChange("clusterStrength", v);
       }));
-      section.appendChild(makeSlider("Spacing", 0.5, 10, 0.25, 1, (v) => {
+      section.appendChild(makeSlider("Spacing", 0.5, 20, 0.5, 1.5, (v) => {
         callbacks.onLayoutChange("spacing", v);
+      }));
+      section.appendChild(makeSlider("Pan speed", 20, 200, 10, 60, (v) => {
+        callbacks.onPanSpeedChange(v);
       }));
     }));
 
     // Export buttons
-    content.appendChild(makeSection("Export", (section) => {
+    target.appendChild(makeSection("Export", (section) => {
       const exportRow = document.createElement("div");
       exportRow.className = "tools-pane-export-row";
 
