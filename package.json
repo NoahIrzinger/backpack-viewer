@@ -23,7 +23,7 @@
     "release:major": "npm version major && git push && git push --tags"
   },
   "dependencies": {
-    "backpack-ontology": "^0.2.13"
+    "backpack-ontology": "^0.2.24"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",

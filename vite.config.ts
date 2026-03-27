@@ -1,8 +1,12 @@
 import { defineConfig, type Plugin } from "vite";
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { JsonFileBackend, dataDir } from "backpack-ontology";
 import { loadViewerConfig } from "./src/config.js";
+
+const require = createRequire(import.meta.url);
+const pkg = require("./package.json");
 
 function ontologyApiPlugin(): Plugin {
   let storage: JsonFileBackend;
@@ -303,6 +307,9 @@ function ontologyApiPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [ontologyApiPlugin()],
+  define: {
+    __VIEWER_VERSION__: JSON.stringify(pkg.version),
+  },
   build: {
     outDir: "dist/app",
   },

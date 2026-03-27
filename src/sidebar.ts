@@ -33,7 +33,8 @@ export function initSidebar(
   footer.className = "sidebar-footer";
   footer.innerHTML =
     '<a href="mailto:support@backpackontology.com">support@backpackontology.com</a>' +
-    "<span>Feedback & support</span>";
+    "<span>Feedback & support</span>" +
+    `<span class="sidebar-version">v${__VIEWER_VERSION__}</span>`;
 
   // Collapse toggle button
   const collapseBtn = document.createElement("button");
