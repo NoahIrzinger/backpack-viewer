@@ -359,6 +359,15 @@ async function main() {
   );
 
   const shortcuts = initShortcuts(canvasContainer);
+
+  // Help button in top-right
+  const helpBtn = document.createElement("button");
+  helpBtn.className = "zoom-btn";
+  helpBtn.textContent = "?";
+  helpBtn.title = "Keyboard shortcuts";
+  helpBtn.addEventListener("click", () => shortcuts.show());
+  topRight.appendChild(helpBtn);
+
   const emptyState = initEmptyState(canvasContainer);
 
   // --- URL deep linking ---
