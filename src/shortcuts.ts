@@ -1,28 +1,38 @@
-const SHORTCUTS = [
-  { key: "/", alt: "Ctrl+K", description: "Focus search" },
-  { key: "Ctrl+Z", description: "Undo" },
-  { key: "Ctrl+Shift+Z", description: "Redo" },
-  { key: "?", description: "Toggle this help" },
-  { key: "F", description: "Focus on selected / exit focus" },
-  { key: "E", description: "Toggle edges on/off" },
-  { key: ",  .", description: "Cycle previous / next node in view" },
-  { key: "<  >", description: "Cycle previous / next connection" },
-  { key: "(  )", description: "Node history back / forward" },
-  { key: "C", description: "Center view on graph" },
-  { key: "-  =", description: "Decrease / increase hops (in focus mode)" },
-  { key: "h j k l", description: "Pan left / down / up / right" },
-  { key: "H L", description: "Pan fast left / right" },
-  { key: "J K", description: "Zoom out / zoom in" },
-  { key: "[  ]", description: "Decrease / increase spacing" },
-  { key: "{  }", description: "Decrease / increase clustering" },
-  { key: "Esc", description: "Exit focus / close panel" },
+import { type KeybindingAction, type KeybindingMap, actionDescriptions } from "./keybindings";
+
+// Non-keyboard actions shown at the bottom of help
+const MOUSE_ACTIONS = [
   { key: "Click", description: "Select node" },
   { key: "Ctrl+Click", description: "Multi-select nodes" },
   { key: "Drag", description: "Pan canvas" },
   { key: "Scroll", description: "Zoom in/out" },
 ];
 
-export function initShortcuts(container: HTMLElement) {
+// Group and order for display
+const ACTION_ORDER: KeybindingAction[] = [
+  "search", "searchAlt", "undo", "redo", "help",
+  "focus", "toggleEdges", "center",
+  "nextNode", "prevNode", "nextConnection", "prevConnection",
+  "historyBack", "historyForward",
+  "hopsIncrease", "hopsDecrease",
+  "panLeft", "panDown", "panUp", "panRight",
+  "panFastLeft", "panFastRight", "zoomIn", "zoomOut",
+  "spacingDecrease", "spacingIncrease",
+  "clusteringDecrease", "clusteringIncrease",
+  "escape",
+];
+
+/** Format a binding string for display (e.g. "ctrl+z" → "Ctrl+Z"). */
+function formatBinding(binding: string): string {
+  return binding
+    .split("+")
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+    .join("+");
+}
+
+export function initShortcuts(container: HTMLElement, bindings: KeybindingMap) {
+  const descriptions = actionDescriptions();
+
   const overlay = document.createElement("div");
   overlay.className = "shortcuts-overlay hidden";
 
@@ -36,7 +46,32 @@ export function initShortcuts(container: HTMLElement) {
   const list = document.createElement("div");
   list.className = "shortcuts-list";
 
-  for (const s of SHORTCUTS) {
+  // Keybinding actions
+  for (const action of ACTION_ORDER) {
+    const binding = bindings[action];
+    if (!binding) continue;
+
+    const row = document.createElement("div");
+    row.className = "shortcuts-row";
+
+    const keys = document.createElement("div");
+    keys.className = "shortcuts-keys";
+
+    const kbd = document.createElement("kbd");
+    kbd.textContent = formatBinding(binding);
+    keys.appendChild(kbd);
+
+    const desc = document.createElement("span");
+    desc.className = "shortcuts-desc";
+    desc.textContent = descriptions[action];
+
+    row.appendChild(keys);
+    row.appendChild(desc);
+    list.appendChild(row);
+  }
+
+  // Mouse actions
+  for (const s of MOUSE_ACTIONS) {
     const row = document.createElement("div");
     row.className = "shortcuts-row";
 
@@ -46,17 +81,6 @@ export function initShortcuts(container: HTMLElement) {
     const kbd = document.createElement("kbd");
     kbd.textContent = s.key;
     keys.appendChild(kbd);
-
-    if (s.alt) {
-      const or = document.createElement("span");
-      or.className = "shortcuts-or";
-      or.textContent = "or";
-      keys.appendChild(or);
-
-      const kbd2 = document.createElement("kbd");
-      kbd2.textContent = s.alt;
-      keys.appendChild(kbd2);
-    }
 
     const desc = document.createElement("span");
     desc.className = "shortcuts-desc";

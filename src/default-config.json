@@ -1,0 +1,33 @@
+{
+  "keybindings": {
+    "search": "/",
+    "searchAlt": "ctrl+k",
+    "undo": "ctrl+z",
+    "redo": "ctrl+shift+z",
+    "help": "?",
+    "escape": "Escape",
+    "focus": "f",
+    "toggleEdges": "e",
+    "center": "c",
+    "nextNode": ".",
+    "prevNode": ",",
+    "nextConnection": ">",
+    "prevConnection": "<",
+    "historyBack": "(",
+    "historyForward": ")",
+    "hopsIncrease": "=",
+    "hopsDecrease": "-",
+    "panLeft": "h",
+    "panDown": "j",
+    "panUp": "k",
+    "panRight": "l",
+    "panFastLeft": "H",
+    "zoomOut": "J",
+    "zoomIn": "K",
+    "panFastRight": "L",
+    "spacingDecrease": "[",
+    "spacingIncrease": "]",
+    "clusteringDecrease": "{",
+    "clusteringIncrease": "}"
+  }
+}

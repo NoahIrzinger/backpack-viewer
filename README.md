@@ -34,13 +34,85 @@ backpack-ontology (MCP) ──writes──> ~/.local/share/backpack/ontologies/
 backpack-viewer ──reads──────────────────┘
 ```
 
+## Configuration
+
+The viewer reads an optional config file for customizing keybindings and other settings. The config file follows the [XDG Base Directory](https://specifications.freedesktop.org/basedir-spec/latest/) convention:
+
+```
+~/.config/backpack/viewer.json
+```
+
+Override with environment variables:
+- `$XDG_CONFIG_HOME/backpack/viewer.json`
+- `$BACKPACK_DIR/config/viewer.json`
+
+### Keybindings
+
+Create `~/.config/backpack/viewer.json` and override any binding. Unspecified keys keep their defaults.
+
+```json
+{
+  "keybindings": {
+    "search": "s",
+    "focus": "g",
+    "panLeft": "a",
+    "panDown": "s",
+    "panUp": "w",
+    "panRight": "d"
+  }
+}
+```
+
+### Available actions
+
+| Action | Default | Description |
+|---|---|---|
+| `search` | `/` | Focus the search bar |
+| `searchAlt` | `ctrl+k` | Focus the search bar (alternate) |
+| `undo` | `ctrl+z` | Undo last edit |
+| `redo` | `ctrl+shift+z` | Redo last edit |
+| `help` | `?` | Toggle keyboard shortcuts help |
+| `escape` | `Escape` | Exit focus mode or close panel |
+| `focus` | `f` | Focus on selected nodes / exit focus |
+| `toggleEdges` | `e` | Toggle edge visibility |
+| `center` | `c` | Center view on the graph |
+| `nextNode` | `.` | Cycle to next node in view |
+| `prevNode` | `,` | Cycle to previous node in view |
+| `nextConnection` | `>` | Cycle to next connection in info panel |
+| `prevConnection` | `<` | Cycle to previous connection in info panel |
+| `historyBack` | `(` | Go back in node inspection history |
+| `historyForward` | `)` | Go forward in node inspection history |
+| `hopsIncrease` | `=` | Increase hops in focus mode |
+| `hopsDecrease` | `-` | Decrease hops in focus mode |
+| `panLeft` | `h` | Pan camera left |
+| `panDown` | `j` | Pan camera down |
+| `panUp` | `k` | Pan camera up |
+| `panRight` | `l` | Pan camera right |
+| `panFastLeft` | `H` | Pan camera left (fast) |
+| `panFastRight` | `L` | Pan camera right (fast) |
+| `zoomIn` | `K` | Zoom in |
+| `zoomOut` | `J` | Zoom out |
+| `spacingDecrease` | `[` | Decrease node spacing |
+| `spacingIncrease` | `]` | Increase node spacing |
+| `clusteringDecrease` | `{` | Decrease type clustering |
+| `clusteringIncrease` | `}` | Increase type clustering |
+
+### Binding format
+
+Bindings are strings with optional modifier prefixes separated by `+`:
+
+- Single keys: `"f"`, `"/"`, `"?"`, `"Escape"`
+- With modifiers: `"ctrl+z"`, `"ctrl+shift+z"`, `"alt+s"`
+- `ctrl` and `cmd`/`meta` are treated as equivalent (works on both Mac and Linux)
+
 ## Reference
 
 | Variable | Effect |
 |---|---|
 | `PORT` | Override the default port (default: `5173`) |
+| `XDG_CONFIG_HOME` | Override config location (default: `~/.config`) |
 | `XDG_DATA_HOME` | Override data location (default: `~/.local/share`) |
-| `BACKPACK_DIR` | Override data directory |
+| `BACKPACK_DIR` | Override both config and data directories |
 
 ## Support
 

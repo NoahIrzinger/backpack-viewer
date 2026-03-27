@@ -15,9 +15,11 @@ const hasDistBuild = fs.existsSync(path.join(distDir, "index.html"));
 if (hasDistBuild) {
   // --- Production: static file server + API (zero native deps) ---
   const { JsonFileBackend, dataDir } = await import("backpack-ontology");
+  const { loadViewerConfig } = await import("../dist/config.js");
 
   const storage = new JsonFileBackend();
   await storage.initialize();
+  const viewerConfig = loadViewerConfig();
 
   const MIME_TYPES = {
     ".html": "text/html",
@@ -33,6 +35,12 @@ if (hasDistBuild) {
     const url = req.url?.replace(/\?.*$/, "") || "/";
 
     // --- API routes ---
+    if (url === "/api/config") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(viewerConfig));
+      return;
+    }
+
     if (url === "/api/ontologies") {
       try {
         const summaries = await storage.listOntologies();

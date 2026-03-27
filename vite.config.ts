@@ -2,6 +2,7 @@ import { defineConfig, type Plugin } from "vite";
 import fs from "node:fs";
 import path from "node:path";
 import { JsonFileBackend, dataDir } from "backpack-ontology";
+import { loadViewerConfig } from "./src/config.js";
 
 function ontologyApiPlugin(): Plugin {
   let storage: JsonFileBackend;
@@ -28,6 +29,14 @@ function ontologyApiPlugin(): Plugin {
       }
 
       server.middlewares.use((req, res, next) => {
+        // Config endpoint
+        if (req.url === "/api/config" && req.method === "GET") {
+          const config = loadViewerConfig();
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(config));
+          return;
+        }
+
         if (!req.url?.startsWith("/api/ontologies")) return next();
 
         const urlPath = req.url.replace(/\?.*$/, "");

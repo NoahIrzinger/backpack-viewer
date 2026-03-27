@@ -9,6 +9,8 @@ import { setLayoutParams, getLayoutParams, autoLayoutParams } from "./layout";
 import { initShortcuts } from "./shortcuts";
 import { initEmptyState } from "./empty-state";
 import { createHistory } from "./history";
+import { matchKey, type KeybindingMap } from "./keybindings";
+import defaultConfig from "./default-config.json";
 import "./style.css";
 
 let activeOntology = "";
@@ -16,6 +18,16 @@ let currentData: LearningGraphData | null = null;
 
 async function main() {
   const canvasContainer = document.getElementById("canvas-container")!;
+
+  // --- Load config (keybindings) ---
+  let bindings: KeybindingMap = defaultConfig.keybindings as KeybindingMap;
+  try {
+    const res = await fetch("/api/config");
+    if (res.ok) {
+      const config = await res.json();
+      bindings = { ...bindings, ...(config.keybindings ?? {}) };
+    }
+  } catch { /* use defaults */ }
 
   // --- Theme toggle (top-right of canvas) ---
   const prefersDark = window.matchMedia("(prefers-color-scheme: dark)");
@@ -364,7 +376,7 @@ async function main() {
     }
   );
 
-  const shortcuts = initShortcuts(canvasContainer);
+  const shortcuts = initShortcuts(canvasContainer, bindings);
   const emptyState = initEmptyState(canvasContainer);
 
   // --- URL deep linking ---
@@ -474,110 +486,57 @@ async function main() {
     emptyState.show();
   }
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts — dispatched via configurable bindings
+  const actions: Record<string, () => void> = {
+    search() { search.focus(); },
+    searchAlt() { search.focus(); },
+    undo() { if (currentData) { const r = undoHistory.undo(currentData); if (r) applyState(r); } },
+    redo() { if (currentData) { const r = undoHistory.redo(currentData); if (r) applyState(r); } },
+    focus() {
+      if (canvas.isFocused()) { toolsPane.clearFocusSet(); }
+      else if (currentSelection.length > 0) { toolsPane.addToFocusSet(currentSelection); }
+    },
+    hopsDecrease() { const i = canvas.getFocusInfo(); if (i && i.hops > 0) canvas.enterFocus(i.seedNodeIds, i.hops - 1); },
+    hopsIncrease() { const i = canvas.getFocusInfo(); if (i) canvas.enterFocus(i.seedNodeIds, i.hops + 1); },
+    nextNode() {
+      const ids = canvas.getNodeIds();
+      if (ids.length > 0) { viewCycleIndex = (viewCycleIndex + 1) % ids.length; canvas.panToNode(ids[viewCycleIndex]); if (currentData) infoPanel.show([ids[viewCycleIndex]], currentData); }
+    },
+    prevNode() {
+      const ids = canvas.getNodeIds();
+      if (ids.length > 0) { viewCycleIndex = viewCycleIndex <= 0 ? ids.length - 1 : viewCycleIndex - 1; canvas.panToNode(ids[viewCycleIndex]); if (currentData) infoPanel.show([ids[viewCycleIndex]], currentData); }
+    },
+    nextConnection() { const id = infoPanel.cycleConnection(1); if (id) canvas.panToNode(id); },
+    prevConnection() { const id = infoPanel.cycleConnection(-1); if (id) canvas.panToNode(id); },
+    historyBack() { infoPanel.goBack(); },
+    historyForward() { infoPanel.goForward(); },
+    center() { canvas.centerView(); },
+    toggleEdges() { edgesVisible = !edgesVisible; canvas.setEdges(edgesVisible); },
+    panLeft() { canvas.panBy(-panSpeed, 0); },
+    panDown() { canvas.panBy(0, panSpeed); },
+    panUp() { canvas.panBy(0, -panSpeed); },
+    panRight() { canvas.panBy(panSpeed, 0); },
+    panFastLeft() { canvas.panBy(-panSpeed * 3, 0); },
+    zoomOut() { canvas.zoomBy(0.8); },
+    zoomIn() { canvas.zoomBy(1.25); },
+    panFastRight() { canvas.panBy(panSpeed * 3, 0); },
+    spacingDecrease() { const p = getLayoutParams(); setLayoutParams({ spacing: Math.max(0.5, p.spacing - 0.5) }); canvas.reheat(); },
+    spacingIncrease() { const p = getLayoutParams(); setLayoutParams({ spacing: Math.min(20, p.spacing + 0.5) }); canvas.reheat(); },
+    clusteringDecrease() { const p = getLayoutParams(); setLayoutParams({ clusterStrength: Math.max(0, p.clusterStrength - 0.03) }); canvas.reheat(); },
+    clusteringIncrease() { const p = getLayoutParams(); setLayoutParams({ clusterStrength: Math.min(1, p.clusterStrength + 0.03) }); canvas.reheat(); },
+    help() { shortcuts.toggle(); },
+    escape() { if (canvas.isFocused()) { toolsPane.clearFocusSet(); } else { shortcuts.hide(); } },
+  };
+
   document.addEventListener("keydown", (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
-    if (e.key === "/" || (e.key === "k" && (e.metaKey || e.ctrlKey))) {
-      e.preventDefault();
-      search.focus();
-    } else if (e.key === "z" && (e.metaKey || e.ctrlKey) && e.shiftKey) {
-      e.preventDefault();
-      if (currentData) {
-        const restored = undoHistory.redo(currentData);
-        if (restored) applyState(restored);
-      }
-    } else if (e.key === "z" && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      if (currentData) {
-        const restored = undoHistory.undo(currentData);
-        if (restored) applyState(restored);
-      }
-    } else if (e.key === "f" || e.key === "F") {
-      // Toggle focus mode on current selection
-      if (canvas.isFocused()) {
-        toolsPane.clearFocusSet();
-      } else if (currentSelection.length > 0) {
-        toolsPane.addToFocusSet(currentSelection);
-      }
-    } else if (e.key === "-" || e.key === "_") {
-      const info = canvas.getFocusInfo();
-      if (info && info.hops > 0) {
-        canvas.enterFocus(info.seedNodeIds, info.hops - 1);
-      }
-    } else if (e.key === "=" || e.key === "+") {
-      const info = canvas.getFocusInfo();
-      if (info) {
-        canvas.enterFocus(info.seedNodeIds, info.hops + 1);
-      }
-    } else if (e.key === ".") {
-      const ids = canvas.getNodeIds();
-      if (ids.length > 0) {
-        viewCycleIndex = (viewCycleIndex + 1) % ids.length;
-        canvas.panToNode(ids[viewCycleIndex]);
-        if (currentData) infoPanel.show([ids[viewCycleIndex]], currentData);
-      }
-    } else if (e.key === ",") {
-      const ids = canvas.getNodeIds();
-      if (ids.length > 0) {
-        viewCycleIndex = viewCycleIndex <= 0 ? ids.length - 1 : viewCycleIndex - 1;
-        canvas.panToNode(ids[viewCycleIndex]);
-        if (currentData) infoPanel.show([ids[viewCycleIndex]], currentData);
-      }
-    } else if (e.key === ">") {
-      const nodeId = infoPanel.cycleConnection(1);
-      if (nodeId) canvas.panToNode(nodeId);
-    } else if (e.key === "<") {
-      const nodeId = infoPanel.cycleConnection(-1);
-      if (nodeId) canvas.panToNode(nodeId);
-    } else if (e.key === "(") {
-      infoPanel.goBack();
-    } else if (e.key === ")") {
-      infoPanel.goForward();
-    } else if (e.key === "c") {
-      canvas.centerView();
-    } else if (e.key === "e") {
-      edgesVisible = !edgesVisible;
-      canvas.setEdges(edgesVisible);
-    } else if (e.key === "h") {
-      canvas.panBy(-panSpeed, 0);
-    } else if (e.key === "j") {
-      canvas.panBy(0, panSpeed);
-    } else if (e.key === "k") {
-      canvas.panBy(0, -panSpeed);
-    } else if (e.key === "l") {
-      canvas.panBy(panSpeed, 0);
-    } else if (e.key === "H") {
-      canvas.panBy(-panSpeed * 3, 0);
-    } else if (e.key === "J") {
-      canvas.zoomBy(0.8);
-    } else if (e.key === "K") {
-      canvas.zoomBy(1.25);
-    } else if (e.key === "L") {
-      canvas.panBy(panSpeed * 3, 0);
-    } else if (e.key === "[") {
-      const p = getLayoutParams();
-      setLayoutParams({ spacing: Math.max(0.5, p.spacing - 0.5) });
-      canvas.reheat();
-    } else if (e.key === "]") {
-      const p = getLayoutParams();
-      setLayoutParams({ spacing: Math.min(20, p.spacing + 0.5) });
-      canvas.reheat();
-    } else if (e.key === "{") {
-      const p = getLayoutParams();
-      setLayoutParams({ clusterStrength: Math.max(0, p.clusterStrength - 0.03) });
-      canvas.reheat();
-    } else if (e.key === "}") {
-      const p = getLayoutParams();
-      setLayoutParams({ clusterStrength: Math.min(1, p.clusterStrength + 0.03) });
-      canvas.reheat();
-    } else if (e.key === "?") {
-      shortcuts.toggle();
-    } else if (e.key === "Escape") {
-      if (canvas.isFocused()) {
-        toolsPane.clearFocusSet();
-      } else {
-        shortcuts.hide();
+    for (const [action, binding] of Object.entries(bindings)) {
+      if (matchKey(e, binding)) {
+        const needsPrevent = action === "search" || action === "searchAlt" || action === "undo" || action === "redo";
+        if (needsPrevent) e.preventDefault();
+        actions[action]?.();
+        return;
       }
     }
   });
