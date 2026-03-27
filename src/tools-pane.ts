@@ -13,6 +13,8 @@ interface ToolsPaneCallbacks {
   onLayoutChange: (param: string, value: number) => void;
   onPanSpeedChange: (speed: number) => void;
   onExport: (format: "png" | "svg") => void;
+  onSnapshot?: (label?: string) => void;
+  onRollback?: (version: number) => void;
   onOpen?: () => void;
 }
 
@@ -41,6 +43,7 @@ export function initToolsPane(
   let activeTab: "types" | "insights" | "controls" = "types";
   let typesSearch = "";
   let qualitySearch = "";
+  let snapshots: { version: number; timestamp: string; nodeCount: number; edgeCount: number; label?: string }[] = [];
 
   // Unified focus set — two layers that compose via union
   const focusSet = {
@@ -743,6 +746,63 @@ export function initToolsPane(
       exportRow.appendChild(svgBtn);
       section.appendChild(exportRow);
     }));
+
+    // Versions section
+    if (callbacks.onSnapshot || callbacks.onRollback) {
+      target.appendChild(makeSection("Versions", (section) => {
+        // Snapshot button
+        const snapRow = document.createElement("div");
+        snapRow.className = "tools-pane-export-row";
+        const snapBtn = document.createElement("button");
+        snapBtn.className = "tools-pane-export-btn";
+        snapBtn.textContent = "Save snapshot";
+        snapBtn.addEventListener("click", () => {
+          const label = prompt("Snapshot label (optional):");
+          callbacks.onSnapshot?.(label || undefined);
+        });
+        snapRow.appendChild(snapBtn);
+        section.appendChild(snapRow);
+
+        // Snapshot list
+        if (snapshots.length > 0) {
+          for (const snap of snapshots) {
+            const row = document.createElement("div");
+            row.className = "tools-pane-row";
+
+            const info = document.createElement("span");
+            info.className = "tools-pane-name";
+            const ago = timeAgo(snap.timestamp);
+            info.textContent = snap.label ? `#${snap.version} ${snap.label}` : `#${snap.version}`;
+            info.title = `${ago} — ${snap.nodeCount} nodes, ${snap.edgeCount} edges`;
+
+            const time = document.createElement("span");
+            time.className = "tools-pane-count";
+            time.textContent = ago;
+
+            const restoreBtn = document.createElement("button");
+            restoreBtn.className = "tools-pane-edit";
+            restoreBtn.style.opacity = "1";
+            restoreBtn.textContent = "\u21A9";
+            restoreBtn.title = "Restore this snapshot";
+            restoreBtn.addEventListener("click", () => {
+              if (confirm(`Restore snapshot #${snap.version}? Current state will be lost unless you save a snapshot first.`)) {
+                callbacks.onRollback?.(snap.version);
+              }
+            });
+
+            row.appendChild(info);
+            row.appendChild(time);
+            row.appendChild(restoreBtn);
+            section.appendChild(row);
+          }
+        } else {
+          const empty = document.createElement("div");
+          empty.className = "tools-pane-empty-msg";
+          empty.textContent = "No snapshots yet";
+          section.appendChild(empty);
+        }
+      }));
+    }
   }
 
   function makeSlider(
@@ -924,7 +984,23 @@ export function initToolsPane(
         content.classList.add("hidden");
       }
     },
+
+    setSnapshots(list: typeof snapshots) {
+      snapshots = list;
+      if (activeTab === "controls") renderTabContent();
+    },
   };
+}
+
+function timeAgo(timestamp: string): string {
+  const diff = Date.now() - new Date(timestamp).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 function firstStringValue(properties: Record<string, unknown>): string | null {

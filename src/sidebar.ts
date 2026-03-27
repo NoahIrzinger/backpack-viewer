@@ -3,6 +3,9 @@ import type { LearningGraphSummary } from "backpack-ontology";
 export interface SidebarCallbacks {
   onSelect: (name: string) => void;
   onRename?: (oldName: string, newName: string) => void;
+  onBranchSwitch?: (graphName: string, branchName: string) => void;
+  onBranchCreate?: (graphName: string, branchName: string) => void;
+  onBranchDelete?: (graphName: string, branchName: string) => void;
 }
 
 export function initSidebar(
@@ -59,6 +62,7 @@ export function initSidebar(
 
   let items: HTMLLIElement[] = [];
   let activeName = "";
+  let activeBranchName = "main";
 
   // Filter
   input.addEventListener("input", () => {
@@ -85,8 +89,13 @@ export function initSidebar(
         statsSpan.className = "stats";
         statsSpan.textContent = `${s.nodeCount} nodes, ${s.edgeCount} edges`;
 
+        const branchSpan = document.createElement("span");
+        branchSpan.className = "sidebar-branch";
+        branchSpan.dataset.graph = s.name;
+
         li.appendChild(nameSpan);
         li.appendChild(statsSpan);
+        li.appendChild(branchSpan);
 
         if (cbs.onRename) {
           const editBtn = document.createElement("button");
@@ -142,6 +151,97 @@ export function initSidebar(
       }
     },
 
+    setActiveBranch(graphName: string, branchName: string, allBranches?: { name: string; active: boolean }[]) {
+      activeBranchName = branchName;
+      const spans = list.querySelectorAll(`.sidebar-branch[data-graph="${graphName}"]`);
+      for (const span of spans) {
+        (span as HTMLElement).textContent = `/ ${branchName}`;
+        (span as HTMLElement).title = "Click to switch branch";
+        (span as HTMLElement).style.cursor = "pointer";
+
+        // Remove old listener by replacing element
+        const fresh = span.cloneNode(true) as HTMLElement;
+        span.replaceWith(fresh);
+        fresh.addEventListener("click", (e) => {
+          e.stopPropagation();
+          showBranchPicker(graphName, fresh, allBranches ?? []);
+        });
+      }
+    },
+
     toggle: toggleSidebar,
   };
+
+  function showBranchPicker(
+    graphName: string,
+    anchor: HTMLElement,
+    branches: { name: string; active: boolean }[]
+  ) {
+    // Remove existing picker
+    const old = container.querySelector(".branch-picker");
+    if (old) old.remove();
+
+    const picker = document.createElement("div");
+    picker.className = "branch-picker";
+
+    for (const b of branches) {
+      const row = document.createElement("div");
+      row.className = "branch-picker-item";
+      if (b.active) row.classList.add("branch-picker-active");
+
+      const label = document.createElement("span");
+      label.textContent = b.name;
+      row.appendChild(label);
+
+      if (!b.active && cbs.onBranchDelete) {
+        const del = document.createElement("button");
+        del.className = "branch-picker-delete";
+        del.textContent = "\u00d7";
+        del.title = `Delete ${b.name}`;
+        del.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (confirm(`Delete branch "${b.name}"?`)) {
+            cbs.onBranchDelete!(graphName, b.name);
+            picker.remove();
+          }
+        });
+        row.appendChild(del);
+      }
+
+      if (!b.active) {
+        row.addEventListener("click", () => {
+          cbs.onBranchSwitch?.(graphName, b.name);
+          picker.remove();
+        });
+      }
+
+      picker.appendChild(row);
+    }
+
+    // Create new branch row
+    if (cbs.onBranchCreate) {
+      const createRow = document.createElement("div");
+      createRow.className = "branch-picker-item branch-picker-create";
+      createRow.textContent = "+ New branch";
+      createRow.addEventListener("click", () => {
+        const name = prompt("Branch name:");
+        if (name?.trim()) {
+          cbs.onBranchCreate!(graphName, name.trim());
+          picker.remove();
+        }
+      });
+      picker.appendChild(createRow);
+    }
+
+    anchor.after(picker);
+
+    // Close on outside click
+    const close = (e: MouseEvent) => {
+      if (!picker.contains(e.target as Node)) {
+        picker.remove();
+        document.removeEventListener("click", close);
+      }
+    };
+    setTimeout(() => document.addEventListener("click", close), 0);
+  }
 }

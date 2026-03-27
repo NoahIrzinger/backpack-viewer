@@ -1,5 +1,9 @@
 import type { LearningGraphData } from "backpack-ontology";
-import { listOntologies, loadOntology, saveOntology, renameOntology } from "./api";
+import {
+  listOntologies, loadOntology, saveOntology, renameOntology,
+  listBranches, createBranch, switchBranch, deleteBranch,
+  listSnapshots, createSnapshot, rollbackSnapshot,
+} from "./api";
 import { initSidebar } from "./sidebar";
 import { initCanvas, type FocusInfo } from "./canvas";
 import { initInfoPanel } from "./info-panel";
@@ -315,6 +319,20 @@ async function main() {
       link.href = dataUrl;
       link.click();
     },
+    onSnapshot: async (label) => {
+      if (!activeOntology) return;
+      await createSnapshot(activeOntology, label);
+      await refreshSnapshots(activeOntology);
+    },
+    onRollback: async (version) => {
+      if (!activeOntology) return;
+      await rollbackSnapshot(activeOntology, version);
+      currentData = await loadOntology(activeOntology);
+      canvas.loadGraph(currentData);
+      search.setLearningGraphData(currentData);
+      toolsPane.setData(currentData);
+      await refreshSnapshots(activeOntology);
+    },
     onOpen() {
       if (mobileQuery.matches) infoPanel.hide();
     },
@@ -382,11 +400,41 @@ async function main() {
           currentData = await loadOntology(newName);
           canvas.loadGraph(currentData);
           search.setLearningGraphData(currentData);
-    toolsPane.setData(currentData);
+          toolsPane.setData(currentData);
         }
+      },
+      onBranchSwitch: async (graphName, branchName) => {
+        await switchBranch(graphName, branchName);
+        await refreshBranches(graphName);
+        currentData = await loadOntology(graphName);
+        canvas.loadGraph(currentData);
+        search.setLearningGraphData(currentData);
+        toolsPane.setData(currentData);
+        await refreshSnapshots(graphName);
+      },
+      onBranchCreate: async (graphName, branchName) => {
+        await createBranch(graphName, branchName);
+        await refreshBranches(graphName);
+      },
+      onBranchDelete: async (graphName, branchName) => {
+        await deleteBranch(graphName, branchName);
+        await refreshBranches(graphName);
       },
     }
   );
+
+  async function refreshBranches(graphName: string) {
+    const branches = await listBranches(graphName);
+    const active = branches.find((b) => b.active);
+    if (active) {
+      sidebar.setActiveBranch(graphName, active.name, branches);
+    }
+  }
+
+  async function refreshSnapshots(graphName: string) {
+    const snaps = await listSnapshots(graphName);
+    toolsPane.setSnapshots(snaps);
+  }
 
   const shortcuts = initShortcuts(canvasContainer, bindings);
   const emptyState = initEmptyState(canvasContainer);
@@ -456,6 +504,10 @@ async function main() {
     toolsPane.setData(currentData);
     emptyState.hide();
     updateUrl(name);
+
+    // Load branches and snapshots
+    await refreshBranches(name);
+    await refreshSnapshots(name);
 
     // Restore focus mode if requested
     if (focusSeedIds?.length && currentData) {

@@ -38,3 +38,105 @@ export async function renameOntology(
   );
   if (!res.ok) throw new Error(`Failed to rename ontology: ${oldName}`);
 }
+
+// --- Branch API ---
+
+export interface BranchInfo {
+  name: string;
+  nodeCount: number;
+  edgeCount: number;
+  active: boolean;
+}
+
+export async function listBranches(graphName: string): Promise<BranchInfo[]> {
+  const res = await fetch(`/api/graphs/${encodeURIComponent(graphName)}/branches`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function createBranch(graphName: string, branchName: string, from?: string): Promise<void> {
+  const res = await fetch(`/api/graphs/${encodeURIComponent(graphName)}/branches`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: branchName, from }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error((d as any).error || "Failed to create branch");
+  }
+}
+
+export async function switchBranch(graphName: string, branchName: string): Promise<void> {
+  const res = await fetch(`/api/graphs/${encodeURIComponent(graphName)}/branches/switch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: branchName }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error((d as any).error || "Failed to switch branch");
+  }
+}
+
+export async function deleteBranch(graphName: string, branchName: string): Promise<void> {
+  const res = await fetch(`/api/graphs/${encodeURIComponent(graphName)}/branches/${encodeURIComponent(branchName)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error((d as any).error || "Failed to delete branch");
+  }
+}
+
+// --- Snapshot API ---
+
+export interface SnapshotInfo {
+  version: number;
+  timestamp: string;
+  nodeCount: number;
+  edgeCount: number;
+  label?: string;
+}
+
+export async function listSnapshots(graphName: string): Promise<SnapshotInfo[]> {
+  const res = await fetch(`/api/graphs/${encodeURIComponent(graphName)}/snapshots`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function createSnapshot(graphName: string, label?: string): Promise<void> {
+  const res = await fetch(`/api/graphs/${encodeURIComponent(graphName)}/snapshots`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error((d as any).error || "Failed to create snapshot");
+  }
+}
+
+export async function rollbackSnapshot(graphName: string, version: number): Promise<void> {
+  const res = await fetch(`/api/graphs/${encodeURIComponent(graphName)}/rollback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ version }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error((d as any).error || "Failed to rollback");
+  }
+}
+
+export interface DiffResult {
+  nodesAdded: number;
+  nodesRemoved: number;
+  edgesAdded: number;
+  edgesRemoved: number;
+}
+
+export async function diffSnapshot(graphName: string, version: number): Promise<DiffResult> {
+  const res = await fetch(`/api/graphs/${encodeURIComponent(graphName)}/diff/${version}`);
+  if (!res.ok) throw new Error("Failed to compute diff");
+  return res.json();
+}

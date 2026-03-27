@@ -41,6 +41,153 @@ if (hasDistBuild) {
       return;
     }
 
+    // --- Branch routes ---
+    const branchSwitchMatch = url.match(/^\/api\/graphs\/(.+)\/branches\/switch$/);
+    if (branchSwitchMatch && req.method === "POST") {
+      const graphName = decodeURIComponent(branchSwitchMatch[1]);
+      let body = "";
+      req.on("data", (chunk) => { body += chunk.toString(); });
+      req.on("end", async () => {
+        try {
+          const { name: branchName } = JSON.parse(body);
+          await storage.switchBranch(graphName, branchName);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+
+    const deleteBranchMatch = url.match(/^\/api\/graphs\/(.+)\/branches\/(.+)$/);
+    if (deleteBranchMatch && req.method === "DELETE") {
+      const graphName = decodeURIComponent(deleteBranchMatch[1]);
+      const branchName = decodeURIComponent(deleteBranchMatch[2]);
+      try {
+        await storage.deleteBranch(graphName, branchName);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    const branchMatch = url.match(/^\/api\/graphs\/(.+)\/branches$/);
+    if (branchMatch && req.method === "GET") {
+      const graphName = decodeURIComponent(branchMatch[1]);
+      try {
+        const branches = await storage.listBranches(graphName);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(branches));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    if (branchMatch && req.method === "POST") {
+      const graphName = decodeURIComponent(branchMatch[1]);
+      let body = "";
+      req.on("data", (chunk) => { body += chunk.toString(); });
+      req.on("end", async () => {
+        try {
+          const { name: branchName, from } = JSON.parse(body);
+          await storage.createBranch(graphName, branchName, from);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+
+    // --- Snapshot routes ---
+    const snapshotMatch = url.match(/^\/api\/graphs\/(.+)\/snapshots$/);
+    if (snapshotMatch && req.method === "GET") {
+      const graphName = decodeURIComponent(snapshotMatch[1]);
+      try {
+        const snapshots = await storage.listSnapshots(graphName);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(snapshots));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    if (snapshotMatch && req.method === "POST") {
+      const graphName = decodeURIComponent(snapshotMatch[1]);
+      let body = "";
+      req.on("data", (chunk) => { body += chunk.toString(); });
+      req.on("end", async () => {
+        try {
+          const { label } = JSON.parse(body);
+          await storage.createSnapshot(graphName, label);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+
+    // --- Rollback route ---
+    const rollbackMatch = url.match(/^\/api\/graphs\/(.+)\/rollback$/);
+    if (rollbackMatch && req.method === "POST") {
+      const graphName = decodeURIComponent(rollbackMatch[1]);
+      let body = "";
+      req.on("data", (chunk) => { body += chunk.toString(); });
+      req.on("end", async () => {
+        try {
+          const { version } = JSON.parse(body);
+          await storage.rollback(graphName, version);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+
+    // --- Diff route ---
+    const diffMatch = url.match(/^\/api\/graphs\/(.+)\/diff\/(\d+)$/);
+    if (diffMatch && req.method === "GET") {
+      const graphName = decodeURIComponent(diffMatch[1]);
+      const version = parseInt(diffMatch[2], 10);
+      try {
+        const current = await storage.loadOntology(graphName);
+        const snapshot = await storage.loadSnapshot(graphName, version);
+        const currentNodeIds = new Set(current.nodes.map(n => n.id));
+        const snapshotNodeIds = new Set(snapshot.nodes.map(n => n.id));
+        const currentEdgeIds = new Set(current.edges.map(e => e.id));
+        const snapshotEdgeIds = new Set(snapshot.edges.map(e => e.id));
+        const diff = {
+          nodesAdded: current.nodes.filter(n => !snapshotNodeIds.has(n.id)).length,
+          nodesRemoved: snapshot.nodes.filter(n => !currentNodeIds.has(n.id)).length,
+          edgesAdded: current.edges.filter(e => !snapshotEdgeIds.has(e.id)).length,
+          edgesRemoved: snapshot.edges.filter(e => !currentEdgeIds.has(e.id)).length,
+        };
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(diff));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
     if (url === "/api/ontologies") {
       try {
         const summaries = await storage.listOntologies();
