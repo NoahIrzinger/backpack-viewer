@@ -1,4 +1,5 @@
 import type { LearningGraphData, Node } from "backpack-ontology";
+import { showPrompt, showConfirm } from "./dialog";
 import { getColor } from "./colors";
 
 interface ToolsPaneCallbacks {
@@ -757,8 +758,9 @@ export function initToolsPane(
         snapBtn.className = "tools-pane-export-btn";
         snapBtn.textContent = "Save snapshot";
         snapBtn.addEventListener("click", () => {
-          const label = prompt("Snapshot label (optional):");
-          callbacks.onSnapshot?.(label || undefined);
+          showPrompt("Save snapshot", "Label (optional)").then((label) => {
+            callbacks.onSnapshot?.(label || undefined);
+          });
         });
         snapRow.appendChild(snapBtn);
         section.appendChild(snapRow);
@@ -785,9 +787,9 @@ export function initToolsPane(
             restoreBtn.textContent = "\u21A9";
             restoreBtn.title = "Restore this snapshot";
             restoreBtn.addEventListener("click", () => {
-              if (confirm(`Restore snapshot #${snap.version}? Current state will be lost unless you save a snapshot first.`)) {
-                callbacks.onRollback?.(snap.version);
-              }
+              showConfirm("Restore snapshot", `Restore snapshot #${snap.version}? Current state will be lost unless you save a snapshot first.`).then((ok) => {
+                if (ok) callbacks.onRollback?.(snap.version);
+              });
             });
 
             row.appendChild(info);

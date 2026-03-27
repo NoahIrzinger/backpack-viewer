@@ -1,4 +1,5 @@
 import type { LearningGraphSummary } from "backpack-ontology";
+import { showConfirm, showPrompt } from "./dialog";
 
 export interface SidebarCallbacks {
   onSelect: (name: string) => void;
@@ -200,10 +201,12 @@ export function initSidebar(
         del.title = `Delete ${b.name}`;
         del.addEventListener("click", (e) => {
           e.stopPropagation();
-          if (confirm(`Delete branch "${b.name}"?`)) {
-            cbs.onBranchDelete!(graphName, b.name);
-            picker.remove();
-          }
+          showConfirm("Delete branch", `Delete branch "${b.name}"?`).then((ok) => {
+            if (ok) {
+              cbs.onBranchDelete!(graphName, b.name);
+              picker.remove();
+            }
+          });
         });
         row.appendChild(del);
       }
@@ -224,11 +227,12 @@ export function initSidebar(
       createRow.className = "branch-picker-item branch-picker-create";
       createRow.textContent = "+ New branch";
       createRow.addEventListener("click", () => {
-        const name = prompt("Branch name:");
-        if (name?.trim()) {
-          cbs.onBranchCreate!(graphName, name.trim());
-          picker.remove();
-        }
+        showPrompt("New branch", "Branch name").then((name) => {
+          if (name) {
+            cbs.onBranchCreate!(graphName, name);
+            picker.remove();
+          }
+        });
       });
       picker.appendChild(createRow);
     }
