@@ -38,6 +38,8 @@ export function initToolsPane(
   let typeHullsVisible = true;
   let minimapVisible = true;
   let activeTab: "types" | "quality" | "controls" = "types";
+  let typesSearch = "";
+  let qualitySearch = "";
 
   // Unified focus set — two layers that compose via union
   const focusSet = {
@@ -133,6 +135,11 @@ export function initToolsPane(
 
     content.appendChild(tabBar);
 
+    // Global focused section (visible on any tab when something is focused)
+    if (!isFocusSetEmpty()) {
+      renderFocusedSection();
+    }
+
     // Render active tab content
     if (activeTab === "types") {
       renderTypesTab();
@@ -141,6 +148,123 @@ export function initToolsPane(
     } else if (activeTab === "controls") {
       renderControlsTab();
     }
+  }
+
+  function renderFocusedSection() {
+    if (!stats || !data) return;
+    const resolved = resolveFocusSet();
+
+    content.appendChild(makeSection("Focused", (section) => {
+      // Show focused types
+      for (const typeName of focusSet.types) {
+        const t = stats!.types.find((t) => t.name === typeName);
+        if (!t) continue;
+        const row = document.createElement("div");
+        row.className = "tools-pane-row tools-pane-clickable";
+
+        const dot = document.createElement("span");
+        dot.className = "tools-pane-dot";
+        dot.style.backgroundColor = getColor(t.name);
+
+        const name = document.createElement("span");
+        name.className = "tools-pane-name";
+        name.textContent = t.name;
+
+        const badge = document.createElement("span");
+        badge.className = "tools-pane-count";
+        badge.textContent = `${t.count} nodes`;
+
+        const removeBtn = document.createElement("button");
+        removeBtn.className = "tools-pane-edit tools-pane-focus-active";
+        removeBtn.style.opacity = "1";
+        removeBtn.textContent = "\u00d7";
+        removeBtn.title = `Remove ${t.name} from focus`;
+
+        row.appendChild(dot);
+        row.appendChild(name);
+        row.appendChild(badge);
+        row.appendChild(removeBtn);
+
+        removeBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          focusSet.types.delete(t.name);
+          emitFocusChange();
+          render();
+        });
+
+        section.appendChild(row);
+      }
+
+      // Show focused individual nodes
+      for (const nodeId of focusSet.nodeIds) {
+        const node = data!.nodes.find((n) => n.id === nodeId);
+        if (!node) continue;
+        const label = firstStringValue(node.properties) ?? node.id;
+
+        const row = document.createElement("div");
+        row.className = "tools-pane-row tools-pane-clickable";
+
+        const dot = document.createElement("span");
+        dot.className = "tools-pane-dot";
+        dot.style.backgroundColor = getColor(node.type);
+
+        const name = document.createElement("span");
+        name.className = "tools-pane-name";
+        name.textContent = label;
+
+        const typeBadge = document.createElement("span");
+        typeBadge.className = "tools-pane-count";
+        typeBadge.textContent = node.type;
+
+        const removeBtn = document.createElement("button");
+        removeBtn.className = "tools-pane-edit tools-pane-focus-active";
+        removeBtn.style.opacity = "1";
+        removeBtn.textContent = "\u00d7";
+        removeBtn.title = `Remove ${label} from focus`;
+
+        row.appendChild(dot);
+        row.appendChild(name);
+        row.appendChild(typeBadge);
+        row.appendChild(removeBtn);
+
+        row.addEventListener("click", (e) => {
+          if ((e.target as HTMLElement).closest(".tools-pane-edit")) return;
+          callbacks.onNavigateToNode(nodeId);
+        });
+
+        removeBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          focusSet.nodeIds.delete(nodeId);
+          emitFocusChange();
+          render();
+        });
+
+        section.appendChild(row);
+      }
+
+      // Summary + clear all
+      const clearRow = document.createElement("div");
+      clearRow.className = "tools-pane-row tools-pane-clickable tools-pane-focus-clear";
+
+      const label = document.createElement("span");
+      label.className = "tools-pane-name";
+      label.style.color = "var(--accent)";
+      label.textContent = `${resolved.length} total`;
+
+      const clearBtn = document.createElement("span");
+      clearBtn.className = "tools-pane-badge";
+      clearBtn.textContent = "clear all";
+
+      clearRow.appendChild(label);
+      clearRow.appendChild(clearBtn);
+      clearRow.addEventListener("click", () => {
+        focusSet.types.clear();
+        focusSet.nodeIds.clear();
+        emitFocusChange();
+        render();
+      });
+      section.appendChild(clearRow);
+    }));
   }
 
   function buildTypeRow(t: { name: string; count: number }): HTMLElement {
@@ -214,44 +338,35 @@ export function initToolsPane(
     return row;
   }
 
+  function makeSearchInput(placeholder: string, value: string, onChange: (v: string) => void): HTMLElement {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "tools-pane-search";
+    input.placeholder = placeholder;
+    input.value = value;
+    input.addEventListener("input", () => onChange(input.value));
+    return input;
+  }
+
   function renderTypesTab() {
     if (!stats) return;
 
+    // Search field
+    if (stats.types.length > 5) {
+      content.appendChild(makeSearchInput("Filter types...", typesSearch, (v) => {
+        typesSearch = v;
+        render();
+      }));
+    }
+
+    const q = typesSearch.toLowerCase();
+
     if (stats.types.length) {
-      const focusedTypes = stats.types.filter((t) => focusSet.types.has(t.name));
-      const unfocusedTypes = stats.types.filter((t) => !focusSet.types.has(t.name));
+      // Node types (excluding focused ones — those are in the global section)
+      const unfocusedTypes = stats.types
+        .filter((t) => !focusSet.types.has(t.name))
+        .filter((t) => !q || t.name.toLowerCase().includes(q));
 
-      // Focused types — pinned at top with clear button
-      if (focusedTypes.length > 0) {
-        content.appendChild(makeSection("Focused", (section) => {
-          for (const t of focusedTypes) {
-            section.appendChild(buildTypeRow(t));
-          }
-
-          const clearRow = document.createElement("div");
-          clearRow.className = "tools-pane-row tools-pane-clickable tools-pane-focus-clear";
-
-          const label = document.createElement("span");
-          label.className = "tools-pane-name";
-          label.style.color = "var(--accent)";
-          label.textContent = `${focusedTypes.length} type${focusedTypes.length > 1 ? "s" : ""} focused`;
-
-          const clearBtn = document.createElement("span");
-          clearBtn.className = "tools-pane-badge";
-          clearBtn.textContent = "clear";
-
-          clearRow.appendChild(label);
-          clearRow.appendChild(clearBtn);
-          clearRow.addEventListener("click", () => {
-            focusSet.types.clear();
-            emitFocusChange();
-            render();
-          });
-          section.appendChild(clearRow);
-        }));
-      }
-
-      // Remaining node types
       if (unfocusedTypes.length > 0) {
         content.appendChild(makeSection("Node Types", (section) => {
           for (const t of unfocusedTypes) {
@@ -261,10 +376,11 @@ export function initToolsPane(
       }
     }
 
-    // Edge types — with rename
-    if (stats.edgeTypes.length) {
+    // Edge types — with rename (filtered by search)
+    const filteredEdgeTypes = stats.edgeTypes.filter((t) => !q || t.name.toLowerCase().includes(q));
+    if (filteredEdgeTypes.length) {
       content.appendChild(makeSection("Edge Types", (section) => {
-        for (const t of stats!.edgeTypes) {
+        for (const t of filteredEdgeTypes) {
           const row = document.createElement("div");
           row.className = "tools-pane-row tools-pane-clickable";
 
@@ -299,10 +415,13 @@ export function initToolsPane(
       }));
     }
 
-    // Most connected nodes — click to navigate, focus button
-    if (stats.mostConnected.length) {
+    // Most connected nodes — click to navigate, focus button (filtered by search)
+    const filteredConnected = stats.mostConnected.filter((n) =>
+      !q || n.label.toLowerCase().includes(q) || n.type.toLowerCase().includes(q)
+    );
+    if (filteredConnected.length) {
       content.appendChild(makeSection("Most Connected", (section) => {
-        for (const n of stats!.mostConnected) {
+        for (const n of filteredConnected) {
           const row = document.createElement("div");
           row.className = "tools-pane-row tools-pane-clickable";
 
@@ -352,49 +471,27 @@ export function initToolsPane(
       }));
     }
 
-    // Unified focus summary (if anything focused)
-    if (!isFocusSetEmpty()) {
-      const resolved = resolveFocusSet();
-      const summaryParts: string[] = [];
-      if (focusSet.types.size > 0)
-        summaryParts.push(`${focusSet.types.size} type${focusSet.types.size > 1 ? "s" : ""}`);
-      if (focusSet.nodeIds.size > 0)
-        summaryParts.push(`${focusSet.nodeIds.size} node${focusSet.nodeIds.size > 1 ? "s" : ""}`);
-
-      content.appendChild(makeSection("Focus", (section) => {
-        const row = document.createElement("div");
-        row.className = "tools-pane-row";
-
-        const label = document.createElement("span");
-        label.className = "tools-pane-name";
-        label.style.color = "var(--accent)";
-        label.textContent = `${summaryParts.join(" + ")} (${resolved.length} total)`;
-
-        const clearBtn = document.createElement("button");
-        clearBtn.className = "tools-pane-edit tools-pane-focus-active";
-        clearBtn.style.opacity = "1";
-        clearBtn.textContent = "\u00d7";
-        clearBtn.title = "Clear all focus";
-        clearBtn.addEventListener("click", () => {
-          focusSet.types.clear();
-          focusSet.nodeIds.clear();
-          emitFocusChange();
-          render();
-        });
-
-        row.appendChild(label);
-        row.appendChild(clearBtn);
-        section.appendChild(row);
-      }));
-    }
   }
 
   function renderQualityTab() {
     if (!stats) return;
 
-    const hasOrphans = stats.orphans.length > 0;
-    const hasSingletons = stats.singletons.length > 0;
-    const hasEmptyNodes = stats.emptyNodes.length > 0;
+    const totalIssues = stats.orphans.length + stats.singletons.length + stats.emptyNodes.length;
+    if (totalIssues > 5) {
+      content.appendChild(makeSearchInput("Filter issues...", qualitySearch, (v) => {
+        qualitySearch = v;
+        render();
+      }));
+    }
+
+    const qq = qualitySearch.toLowerCase();
+    const orphans = stats.orphans.filter((o) => !qq || o.label.toLowerCase().includes(qq) || o.type.toLowerCase().includes(qq));
+    const singletons = stats.singletons.filter((s) => !qq || s.name.toLowerCase().includes(qq));
+    const emptyNodes = stats.emptyNodes.filter((e) => !qq || e.label.toLowerCase().includes(qq) || e.type.toLowerCase().includes(qq));
+
+    const hasOrphans = orphans.length > 0;
+    const hasSingletons = singletons.length > 0;
+    const hasEmptyNodes = emptyNodes.length > 0;
 
     if (!hasOrphans && !hasSingletons && !hasEmptyNodes) {
       const msg = document.createElement("div");
@@ -407,7 +504,7 @@ export function initToolsPane(
     // Orphans — click to navigate, focus button
     if (hasOrphans) {
       content.appendChild(makeSection("Orphans", (section) => {
-        for (const o of stats!.orphans.slice(0, 5)) {
+        for (const o of orphans.slice(0, 5)) {
           const row = document.createElement("div");
           row.className = "tools-pane-row tools-pane-clickable tools-pane-issue";
 
@@ -455,10 +552,10 @@ export function initToolsPane(
           section.appendChild(row);
         }
 
-        if (stats!.orphans.length > 5) {
+        if (orphans.length > 5) {
           const more = document.createElement("div");
           more.className = "tools-pane-more";
-          more.textContent = `+ ${stats!.orphans.length - 5} more orphans`;
+          more.textContent = `+ ${orphans.length - 5} more orphans`;
           section.appendChild(more);
         }
       }));
@@ -467,7 +564,7 @@ export function initToolsPane(
     // Singleton types
     if (hasSingletons) {
       content.appendChild(makeSection("Singletons", (section) => {
-        for (const s of stats!.singletons.slice(0, 5)) {
+        for (const s of singletons.slice(0, 5)) {
           const row = document.createElement("div");
           row.className = "tools-pane-row tools-pane-issue";
 
@@ -494,7 +591,7 @@ export function initToolsPane(
     // Empty nodes
     if (hasEmptyNodes) {
       content.appendChild(makeSection("Empty Nodes", (section) => {
-        for (const e of stats!.emptyNodes.slice(0, 5)) {
+        for (const e of emptyNodes.slice(0, 5)) {
           const row = document.createElement("div");
           row.className = "tools-pane-row tools-pane-issue";
 

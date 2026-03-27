@@ -37,6 +37,7 @@ export function initInfoPanel(
   let navigatingHistory = false;
   let lastData: LearningGraphData | null = null;
   let currentNodeIds: string[] = [];
+  let focusDisabled = false;
 
   function hide() {
     panel.classList.add("hidden");
@@ -105,8 +106,10 @@ export function initInfoPanel(
       focusBtn.className = "info-toolbar-btn info-focus-btn";
       focusBtn.textContent = "\u25CE"; // bullseye
       focusBtn.title = "Focus on neighborhood (F)";
+      focusBtn.disabled = focusDisabled;
+      if (focusDisabled) focusBtn.style.opacity = "0.3";
       focusBtn.addEventListener("click", () => {
-        onFocus(currentNodeIds);
+        if (!focusDisabled) onFocus(currentNodeIds);
       });
       toolbar.appendChild(focusBtn);
     }
@@ -624,6 +627,15 @@ export function initInfoPanel(
     },
 
     hide,
+
+    setFocusDisabled(disabled: boolean) {
+      focusDisabled = disabled;
+      const btn = panel.querySelector(".info-focus-btn") as HTMLButtonElement | null;
+      if (btn) {
+        btn.disabled = disabled;
+        btn.style.opacity = disabled ? "0.3" : "";
+      }
+    },
 
     get visible() {
       return !panel.classList.contains("hidden");

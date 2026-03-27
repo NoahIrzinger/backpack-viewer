@@ -1330,6 +1330,27 @@ body {
   border-color: var(--border);
 }
 
+.tools-pane-search {
+  width: 100%;
+  padding: 4px 8px;
+  font-size: 11px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  outline: none;
+  margin-bottom: 8px;
+  box-sizing: border-box;
+}
+
+.tools-pane-search:focus {
+  border-color: var(--accent);
+}
+
+.tools-pane-search::placeholder {
+  color: var(--text-dim);
+}
+
 .tools-pane-empty-msg {
   font-size: 11px;
   color: var(--text-dim);

@@ -206,12 +206,13 @@ async function main() {
   }, (focus) => {
     if (focus) {
       buildFocusIndicator(focus);
-      // Insert into top-left, after tools toggle
       const topLeft = canvasContainer.querySelector(".canvas-top-left");
       if (topLeft && focusIndicator) topLeft.appendChild(focusIndicator);
       updateUrl(activeOntology, focus.seedNodeIds);
+      infoPanel.setFocusDisabled(focus.hops === 0);
     } else {
       removeFocusIndicator();
+      infoPanel.setFocusDisabled(false);
       if (activeOntology) updateUrl(activeOntology);
     }
   });
