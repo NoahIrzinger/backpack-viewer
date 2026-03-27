@@ -143,96 +143,102 @@ export function initToolsPane(
     }
   }
 
+  function buildTypeRow(t: { name: string; count: number }): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "tools-pane-row tools-pane-clickable";
+    if (activeTypeFilter === t.name) row.classList.add("active");
+
+    const dot = document.createElement("span");
+    dot.className = "tools-pane-dot";
+    dot.style.backgroundColor = getColor(t.name);
+
+    const name = document.createElement("span");
+    name.className = "tools-pane-name";
+    name.textContent = t.name;
+
+    const count = document.createElement("span");
+    count.className = "tools-pane-count";
+    count.textContent = String(t.count);
+
+    const focusBtn = document.createElement("button");
+    focusBtn.className = "tools-pane-edit tools-pane-focus-toggle";
+    if (focusSet.types.has(t.name)) focusBtn.classList.add("tools-pane-focus-active");
+    focusBtn.textContent = "\u25CE";
+    focusBtn.title = focusSet.types.has(t.name)
+      ? `Remove ${t.name} from focus`
+      : `Add ${t.name} to focus`;
+
+    const editBtn = document.createElement("button");
+    editBtn.className = "tools-pane-edit";
+    editBtn.textContent = "\u270E";
+    editBtn.title = `Rename all ${t.name} nodes`;
+
+    row.appendChild(dot);
+    row.appendChild(name);
+    row.appendChild(count);
+    row.appendChild(focusBtn);
+    row.appendChild(editBtn);
+
+    row.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest(".tools-pane-edit")) return;
+      if (activeTypeFilter === t.name) {
+        activeTypeFilter = null;
+        callbacks.onFilterByType(null);
+      } else {
+        activeTypeFilter = t.name;
+        callbacks.onFilterByType(t.name);
+      }
+      render();
+    });
+
+    focusBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (focusSet.types.has(t.name)) {
+        focusSet.types.delete(t.name);
+      } else {
+        focusSet.types.add(t.name);
+      }
+      emitFocusChange();
+      render();
+    });
+
+    editBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      startInlineEdit(row, t.name, (newName) => {
+        if (newName && newName !== t.name) {
+          callbacks.onRenameNodeType(t.name, newName);
+        }
+      });
+    });
+
+    return row;
+  }
+
   function renderTypesTab() {
     if (!stats) return;
 
-    // Node types — click to filter, bullseye to toggle focus set, pencil to rename
     if (stats.types.length) {
-      content.appendChild(makeSection("Node Types", (section) => {
-        for (const t of stats!.types) {
-          const row = document.createElement("div");
-          row.className = "tools-pane-row tools-pane-clickable";
-          if (activeTypeFilter === t.name) row.classList.add("active");
+      const focusedTypes = stats.types.filter((t) => focusSet.types.has(t.name));
+      const unfocusedTypes = stats.types.filter((t) => !focusSet.types.has(t.name));
 
-          const dot = document.createElement("span");
-          dot.className = "tools-pane-dot";
-          dot.style.backgroundColor = getColor(t.name);
+      // Focused types — pinned at top with clear button
+      if (focusedTypes.length > 0) {
+        content.appendChild(makeSection("Focused", (section) => {
+          for (const t of focusedTypes) {
+            section.appendChild(buildTypeRow(t));
+          }
 
-          const name = document.createElement("span");
-          name.className = "tools-pane-name";
-          name.textContent = t.name;
-
-          const count = document.createElement("span");
-          count.className = "tools-pane-count";
-          count.textContent = String(t.count);
-
-          const focusBtn = document.createElement("button");
-          focusBtn.className = "tools-pane-edit tools-pane-focus-toggle";
-          if (focusSet.types.has(t.name)) focusBtn.classList.add("tools-pane-focus-active");
-          focusBtn.textContent = "\u25CE";
-          focusBtn.title = focusSet.types.has(t.name)
-            ? `Remove ${t.name} from focus`
-            : `Add ${t.name} to focus`;
-
-          const editBtn = document.createElement("button");
-          editBtn.className = "tools-pane-edit";
-          editBtn.textContent = "\u270E";
-          editBtn.title = `Rename all ${t.name} nodes`;
-
-          row.appendChild(dot);
-          row.appendChild(name);
-          row.appendChild(count);
-          row.appendChild(focusBtn);
-          row.appendChild(editBtn);
-
-          row.addEventListener("click", (e) => {
-            if ((e.target as HTMLElement).closest(".tools-pane-edit")) return;
-            if (activeTypeFilter === t.name) {
-              activeTypeFilter = null;
-              callbacks.onFilterByType(null);
-            } else {
-              activeTypeFilter = t.name;
-              callbacks.onFilterByType(t.name);
-            }
-            render();
-          });
-
-          focusBtn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            if (focusSet.types.has(t.name)) {
-              focusSet.types.delete(t.name);
-            } else {
-              focusSet.types.add(t.name);
-            }
-            emitFocusChange();
-            render();
-          });
-
-          editBtn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            startInlineEdit(row, t.name, (newName) => {
-              if (newName && newName !== t.name) {
-                callbacks.onRenameNodeType(t.name, newName);
-              }
-            });
-          });
-
-          section.appendChild(row);
-        }
-
-        // Show clear button when types are focused
-        if (focusSet.types.size > 0) {
           const clearRow = document.createElement("div");
           clearRow.className = "tools-pane-row tools-pane-clickable tools-pane-focus-clear";
 
           const label = document.createElement("span");
           label.className = "tools-pane-name";
           label.style.color = "var(--accent)";
-          label.textContent = `${focusSet.types.size} type${focusSet.types.size > 1 ? "s" : ""} focused`;
+          label.textContent = `${focusedTypes.length} type${focusedTypes.length > 1 ? "s" : ""} focused`;
 
           const clearBtn = document.createElement("span");
           clearBtn.className = "tools-pane-badge";
-          clearBtn.textContent = "clear types";
+          clearBtn.textContent = "clear";
 
           clearRow.appendChild(label);
           clearRow.appendChild(clearBtn);
@@ -242,8 +248,17 @@ export function initToolsPane(
             render();
           });
           section.appendChild(clearRow);
-        }
-      }));
+        }));
+      }
+
+      // Remaining node types
+      if (unfocusedTypes.length > 0) {
+        content.appendChild(makeSection("Node Types", (section) => {
+          for (const t of unfocusedTypes) {
+            section.appendChild(buildTypeRow(t));
+          }
+        }));
+      }
     }
 
     // Edge types — with rename
