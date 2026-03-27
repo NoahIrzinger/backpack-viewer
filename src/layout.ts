@@ -23,8 +23,8 @@ export interface LayoutState {
 }
 
 export interface LayoutParams {
-  clusterStrength: number; // 0–0.15, how tightly same-type nodes group
-  spacing: number;         // 0.5–3, multiplier on edge rest lengths
+  clusterStrength: number; // 0–0.5, how tightly same-type nodes group
+  spacing: number;         // 0.5–10, multiplier on edge rest lengths
 }
 
 export const DEFAULT_LAYOUT_PARAMS: LayoutParams = {
@@ -52,6 +52,16 @@ export function setLayoutParams(p: Partial<LayoutParams>) {
 
 export function getLayoutParams(): LayoutParams {
   return { ...params };
+}
+
+/** Compute sensible default layout params based on graph size. */
+export function autoLayoutParams(nodeCount: number): LayoutParams {
+  if (nodeCount <= 50) return { ...DEFAULT_LAYOUT_PARAMS };
+  const scale = Math.log2(nodeCount / 50);
+  return {
+    clusterStrength: Math.min(0.3, 0.05 + 0.04 * scale),
+    spacing: Math.min(8, 1 + 0.8 * scale),
+  };
 }
 
 /** Extract a display label from a node — first string property value, fallback to id. */
@@ -101,7 +111,7 @@ export function createLayout(data: LearningGraphData): LayoutState {
 
   // Group nodes by type for initial placement
   const types = [...new Set(data.nodes.map((n) => n.type))];
-  const typeRadius = Math.sqrt(types.length) * REST_LENGTH_CROSS_BASE * 0.6;
+  const typeRadius = Math.sqrt(types.length) * REST_LENGTH_CROSS_BASE * 0.6 * Math.max(1, params.spacing);
   const typeCounters = new Map<string, number>();
   const typeSizes = new Map<string, number>();
   for (const n of data.nodes) {

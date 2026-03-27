@@ -5,7 +5,7 @@ import { initCanvas, type FocusInfo } from "./canvas";
 import { initInfoPanel } from "./info-panel";
 import { initSearch } from "./search";
 import { initToolsPane } from "./tools-pane";
-import { setLayoutParams } from "./layout";
+import { setLayoutParams, autoLayoutParams } from "./layout";
 import { initShortcuts } from "./shortcuts";
 import { initEmptyState } from "./empty-state";
 import { createHistory } from "./history";
@@ -409,6 +409,7 @@ async function main() {
     search.clear();
     undoHistory.clear();
     currentData = await loadOntology(name);
+    setLayoutParams(autoLayoutParams(currentData.nodes.length));
     canvas.loadGraph(currentData);
     search.setLearningGraphData(currentData);
     toolsPane.setData(currentData);

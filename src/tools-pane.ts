@@ -37,6 +37,7 @@ export function initToolsPane(
   let edgeLabelsVisible = true;
   let typeHullsVisible = true;
   let minimapVisible = true;
+  let activeTab: "types" | "quality" | "controls" = "types";
 
   // Unified focus set — two layers that compose via union
   const focusSet = {
@@ -99,7 +100,7 @@ export function initToolsPane(
     content.innerHTML = "";
     if (!stats) return;
 
-    // Graph stats summary
+    // Graph stats summary (always visible)
     const summary = document.createElement("div");
     summary.className = "tools-pane-summary";
     summary.innerHTML =
@@ -107,6 +108,43 @@ export function initToolsPane(
       `<span>${stats.edgeCount} edges</span><span class="tools-pane-sep">&middot;</span>` +
       `<span>${stats.types.length} types</span>`;
     content.appendChild(summary);
+
+    // Tab bar
+    const tabBar = document.createElement("div");
+    tabBar.className = "tools-pane-tabs";
+
+    const tabs: { id: "types" | "quality" | "controls"; label: string }[] = [
+      { id: "types", label: "Types" },
+      { id: "quality", label: "Quality" },
+      { id: "controls", label: "Controls" },
+    ];
+
+    for (const tab of tabs) {
+      const btn = document.createElement("button");
+      btn.className = "tools-pane-tab";
+      if (activeTab === tab.id) btn.classList.add("tools-pane-tab-active");
+      btn.textContent = tab.label;
+      btn.addEventListener("click", () => {
+        activeTab = tab.id;
+        render();
+      });
+      tabBar.appendChild(btn);
+    }
+
+    content.appendChild(tabBar);
+
+    // Render active tab content
+    if (activeTab === "types") {
+      renderTypesTab();
+    } else if (activeTab === "quality") {
+      renderQualityTab();
+    } else if (activeTab === "controls") {
+      renderControlsTab();
+    }
+  }
+
+  function renderTypesTab() {
+    if (!stats) return;
 
     // Node types — click to filter, bullseye to toggle focus set, pencil to rename
     if (stats.types.length) {
@@ -299,15 +337,61 @@ export function initToolsPane(
       }));
     }
 
-    // Quality issues
-    const issues: string[] = [];
-    if (stats.orphans.length) issues.push(`${stats.orphans.length} orphan${stats.orphans.length > 1 ? "s" : ""}`);
-    if (stats.singletons.length) issues.push(`${stats.singletons.length} singleton type${stats.singletons.length > 1 ? "s" : ""}`);
-    if (stats.emptyNodes.length) issues.push(`${stats.emptyNodes.length} empty node${stats.emptyNodes.length > 1 ? "s" : ""}`);
+    // Unified focus summary (if anything focused)
+    if (!isFocusSetEmpty()) {
+      const resolved = resolveFocusSet();
+      const summaryParts: string[] = [];
+      if (focusSet.types.size > 0)
+        summaryParts.push(`${focusSet.types.size} type${focusSet.types.size > 1 ? "s" : ""}`);
+      if (focusSet.nodeIds.size > 0)
+        summaryParts.push(`${focusSet.nodeIds.size} node${focusSet.nodeIds.size > 1 ? "s" : ""}`);
 
-    if (issues.length) {
-      content.appendChild(makeSection("Quality", (section) => {
-        // Orphans — click to navigate, focus button
+      content.appendChild(makeSection("Focus", (section) => {
+        const row = document.createElement("div");
+        row.className = "tools-pane-row";
+
+        const label = document.createElement("span");
+        label.className = "tools-pane-name";
+        label.style.color = "var(--accent)";
+        label.textContent = `${summaryParts.join(" + ")} (${resolved.length} total)`;
+
+        const clearBtn = document.createElement("button");
+        clearBtn.className = "tools-pane-edit tools-pane-focus-active";
+        clearBtn.style.opacity = "1";
+        clearBtn.textContent = "\u00d7";
+        clearBtn.title = "Clear all focus";
+        clearBtn.addEventListener("click", () => {
+          focusSet.types.clear();
+          focusSet.nodeIds.clear();
+          emitFocusChange();
+          render();
+        });
+
+        row.appendChild(label);
+        row.appendChild(clearBtn);
+        section.appendChild(row);
+      }));
+    }
+  }
+
+  function renderQualityTab() {
+    if (!stats) return;
+
+    const hasOrphans = stats.orphans.length > 0;
+    const hasSingletons = stats.singletons.length > 0;
+    const hasEmptyNodes = stats.emptyNodes.length > 0;
+
+    if (!hasOrphans && !hasSingletons && !hasEmptyNodes) {
+      const msg = document.createElement("div");
+      msg.className = "tools-pane-empty-msg";
+      msg.textContent = "No issues found";
+      content.appendChild(msg);
+      return;
+    }
+
+    // Orphans — click to navigate, focus button
+    if (hasOrphans) {
+      content.appendChild(makeSection("Orphans", (section) => {
         for (const o of stats!.orphans.slice(0, 5)) {
           const row = document.createElement("div");
           row.className = "tools-pane-row tools-pane-clickable tools-pane-issue";
@@ -362,8 +446,12 @@ export function initToolsPane(
           more.textContent = `+ ${stats!.orphans.length - 5} more orphans`;
           section.appendChild(more);
         }
+      }));
+    }
 
-        // Singleton types
+    // Singleton types
+    if (hasSingletons) {
+      content.appendChild(makeSection("Singletons", (section) => {
         for (const s of stats!.singletons.slice(0, 5)) {
           const row = document.createElement("div");
           row.className = "tools-pane-row tools-pane-issue";
@@ -388,45 +476,44 @@ export function initToolsPane(
       }));
     }
 
-    // Unified focus summary (if anything from any section is focused)
-    if (!isFocusSetEmpty()) {
-      const resolved = resolveFocusSet();
-      const summaryParts: string[] = [];
-      if (focusSet.types.size > 0)
-        summaryParts.push(`${focusSet.types.size} type${focusSet.types.size > 1 ? "s" : ""}`);
-      if (focusSet.nodeIds.size > 0)
-        summaryParts.push(`${focusSet.nodeIds.size} node${focusSet.nodeIds.size > 1 ? "s" : ""}`);
+    // Empty nodes
+    if (hasEmptyNodes) {
+      content.appendChild(makeSection("Empty Nodes", (section) => {
+        for (const e of stats!.emptyNodes.slice(0, 5)) {
+          const row = document.createElement("div");
+          row.className = "tools-pane-row tools-pane-issue";
 
-      content.appendChild(makeSection("Focus", (section) => {
-        const row = document.createElement("div");
-        row.className = "tools-pane-row";
+          const dot = document.createElement("span");
+          dot.className = "tools-pane-dot";
+          dot.style.backgroundColor = getColor(e.type);
 
-        const label = document.createElement("span");
-        label.className = "tools-pane-name";
-        label.style.color = "var(--accent)";
-        label.textContent = `${summaryParts.join(" + ")} (${resolved.length} total)`;
+          const name = document.createElement("span");
+          name.className = "tools-pane-name";
+          name.textContent = e.label;
 
-        const clearBtn = document.createElement("button");
-        clearBtn.className = "tools-pane-edit tools-pane-focus-active";
-        clearBtn.style.opacity = "1";
-        clearBtn.textContent = "\u00d7";
-        clearBtn.title = "Clear all focus";
-        clearBtn.addEventListener("click", () => {
-          focusSet.types.clear();
-          focusSet.nodeIds.clear();
-          emitFocusChange();
-          render();
-        });
+          const badge = document.createElement("span");
+          badge.className = "tools-pane-badge";
+          badge.textContent = "empty";
 
-        row.appendChild(label);
-        row.appendChild(clearBtn);
-        section.appendChild(row);
+          row.appendChild(dot);
+          row.appendChild(name);
+          row.appendChild(badge);
+          section.appendChild(row);
+        }
+
+        if (stats!.emptyNodes.length > 5) {
+          const more = document.createElement("div");
+          more.className = "tools-pane-more";
+          more.textContent = `+ ${stats!.emptyNodes.length - 5} more empty nodes`;
+          section.appendChild(more);
+        }
       }));
     }
+  }
 
-    // Controls section
-    content.appendChild(makeSection("Controls", (section) => {
-      // Edge labels toggle
+  function renderControlsTab() {
+    // Edge labels toggle
+    content.appendChild(makeSection("Display", (section) => {
       const labelRow = document.createElement("div");
       labelRow.className = "tools-pane-row tools-pane-clickable";
 
@@ -497,16 +584,20 @@ export function initToolsPane(
       });
 
       section.appendChild(mapRow);
+    }));
 
-      // Layout sliders
-      section.appendChild(makeSlider("Clustering", 0, 0.15, 0.01, 0.05, (v) => {
+    // Layout sliders
+    content.appendChild(makeSection("Layout", (section) => {
+      section.appendChild(makeSlider("Clustering", 0, 0.5, 0.01, 0.05, (v) => {
         callbacks.onLayoutChange("clusterStrength", v);
       }));
-      section.appendChild(makeSlider("Spacing", 0.5, 3, 0.1, 1, (v) => {
+      section.appendChild(makeSlider("Spacing", 0.5, 10, 0.25, 1, (v) => {
         callbacks.onLayoutChange("spacing", v);
       }));
+    }));
 
-      // Export buttons
+    // Export buttons
+    content.appendChild(makeSection("Export", (section) => {
       const exportRow = document.createElement("div");
       exportRow.className = "tools-pane-export-row";
 

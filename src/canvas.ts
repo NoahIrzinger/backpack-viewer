@@ -16,6 +16,25 @@ function cssVar(name: string): string {
 const NODE_RADIUS = 20;
 const ALPHA_MIN = 0.001;
 
+// Level-of-detail thresholds based on camera scale
+const LOD_HIDE_BADGES = 0.4;    // hide type badges above nodes
+const LOD_HIDE_LABELS = 0.25;   // hide node labels below nodes
+const LOD_HIDE_EDGE_LABELS = 0.35; // hide edge labels even if enabled
+const LOD_SMALL_NODES = 0.2;    // shrink nodes to half size
+const LOD_HIDE_ARROWS = 0.15;   // hide arrowheads, draw 1px edges
+
+/** Check if a point is within the visible viewport (with padding). */
+function isInViewport(
+  x: number, y: number,
+  camera: { x: number; y: number; scale: number },
+  canvasW: number, canvasH: number,
+  pad: number = 100
+): boolean {
+  const sx = (x - camera.x) * camera.scale;
+  const sy = (y - camera.y) * camera.scale;
+  return sx >= -pad && sx <= canvasW + pad && sy >= -pad && sy <= canvasH + pad;
+}
+
 export interface FocusInfo {
   seedNodeIds: string[];
   hops: number;
@@ -124,7 +143,7 @@ export function initCanvas(
     ctx.scale(camera.scale, camera.scale);
 
     // Draw type hulls (shaded regions behind same-type nodes)
-    if (showTypeHulls) {
+    if (showTypeHulls && camera.scale >= LOD_SMALL_NODES) {
       const typeGroups = new Map<string, LayoutNode[]>();
       for (const node of state.nodes) {
         if (filteredNodeIds !== null && !filteredNodeIds.has(node.id)) continue;
@@ -172,6 +191,10 @@ export function initCanvas(
       const target = state.nodeMap.get(edge.targetId);
       if (!source || !target) continue;
 
+      // Viewport culling — skip if both endpoints are off-screen
+      if (!isInViewport(source.x, source.y, camera, canvas.clientWidth, canvas.clientHeight, 200) &&
+          !isInViewport(target.x, target.y, camera, canvas.clientWidth, canvas.clientHeight, 200)) continue;
+
       const sourceMatch = filteredNodeIds === null || filteredNodeIds.has(edge.sourceId);
       const targetMatch = filteredNodeIds === null || filteredNodeIds.has(edge.targetId);
       const bothMatch = sourceMatch && targetMatch;
@@ -201,14 +224,16 @@ export function initCanvas(
         : edgeDimmed
           ? edgeDimColor
           : edgeColor;
-      ctx.lineWidth = highlighted ? 2.5 : 1.5;
+      ctx.lineWidth = camera.scale < LOD_HIDE_ARROWS ? 1 : highlighted ? 2.5 : 1.5;
       ctx.stroke();
 
       // Arrowhead
-      drawArrowhead(source.x, source.y, target.x, target.y, highlighted, arrowColor, arrowHighlight);
+      if (camera.scale >= LOD_HIDE_ARROWS) {
+        drawArrowhead(source.x, source.y, target.x, target.y, highlighted, arrowColor, arrowHighlight);
+      }
 
       // Edge label at midpoint
-      if (showEdgeLabels) {
+      if (showEdgeLabels && camera.scale >= LOD_HIDE_EDGE_LABELS) {
         const mx = (source.x + target.x) / 2;
         const my = (source.y + target.y) / 2;
         ctx.fillStyle = highlighted
@@ -225,6 +250,9 @@ export function initCanvas(
 
     // Draw nodes
     for (const node of state.nodes) {
+      // Viewport culling
+      if (!isInViewport(node.x, node.y, camera, canvas.clientWidth, canvas.clientHeight)) continue;
+
       const color = getColor(node.type);
       const isSelected = selectedNodeIds.has(node.id);
       const isNeighbor =
@@ -240,13 +268,15 @@ export function initCanvas(
         filteredOut ||
         (selectedNodeIds.size > 0 && !isSelected && !isNeighbor);
 
+      const r = camera.scale < LOD_SMALL_NODES ? NODE_RADIUS * 0.5 : NODE_RADIUS;
+
       // Glow for selected node
       if (isSelected) {
         ctx.save();
         ctx.shadowColor = color;
         ctx.shadowBlur = 20;
         ctx.beginPath();
-        ctx.arc(node.x, node.y, NODE_RADIUS + 3, 0, Math.PI * 2);
+        ctx.arc(node.x, node.y, r + 3, 0, Math.PI * 2);
         ctx.fillStyle = color;
         ctx.globalAlpha = 0.3;
         ctx.fill();
@@ -255,7 +285,7 @@ export function initCanvas(
 
       // Circle
       ctx.beginPath();
-      ctx.arc(node.x, node.y, NODE_RADIUS, 0, Math.PI * 2);
+      ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
       ctx.fillStyle = color;
       ctx.globalAlpha = filteredOut ? 0.1 : dimmed ? 0.3 : 1;
       ctx.fill();
@@ -264,19 +294,23 @@ export function initCanvas(
       ctx.stroke();
 
       // Label below
-      const label =
-        node.label.length > 24 ? node.label.slice(0, 22) + "..." : node.label;
-      ctx.fillStyle = dimmed ? nodeLabelDim : nodeLabel;
-      ctx.font = "11px system-ui, sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      ctx.fillText(label, node.x, node.y + NODE_RADIUS + 4);
+      if (camera.scale >= LOD_HIDE_LABELS) {
+        const label =
+          node.label.length > 24 ? node.label.slice(0, 22) + "..." : node.label;
+        ctx.fillStyle = dimmed ? nodeLabelDim : nodeLabel;
+        ctx.font = "11px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(label, node.x, node.y + r + 4);
+      }
 
       // Type badge above
-      ctx.fillStyle = dimmed ? typeBadgeDim : typeBadge;
-      ctx.font = "9px system-ui, sans-serif";
-      ctx.textBaseline = "bottom";
-      ctx.fillText(node.type, node.x, node.y - NODE_RADIUS - 3);
+      if (camera.scale >= LOD_HIDE_BADGES) {
+        ctx.fillStyle = dimmed ? typeBadgeDim : typeBadge;
+        ctx.font = "9px system-ui, sans-serif";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(node.type, node.x, node.y - r - 3);
+      }
 
       ctx.globalAlpha = 1;
     }
