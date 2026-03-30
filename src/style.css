@@ -1841,3 +1841,112 @@ body {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+
+/* --- Context Menu --- */
+
+.context-menu {
+  position: absolute;
+  z-index: 100;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 180px;
+  box-shadow: 0 8px 24px var(--shadow);
+}
+
+.context-menu-item {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.context-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.context-menu-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 8px;
+}
+
+/* --- Path Bar --- */
+
+.path-bar {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  box-shadow: 0 4px 16px var(--shadow);
+  max-width: 80%;
+  overflow-x: auto;
+}
+
+.path-bar.hidden {
+  display: none;
+}
+
+.path-bar-node {
+  font-size: 11px;
+  color: var(--text);
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.path-bar-node:hover {
+  background: var(--bg-hover);
+}
+
+.path-bar-edge {
+  font-size: 9px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.path-bar-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+.path-bar-close:hover {
+  color: var(--text);
+}
+
+/* --- Walk Mode Indicator --- */
+
+.walk-indicator {
+  font-size: 10px;
+  color: var(--accent);
+  padding: 2px 8px;
+  border: 1px solid rgba(212, 162, 127, 0.4);
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.5;
+}
+
+.walk-indicator.active {
+  opacity: 1;
+  background: rgba(212, 162, 127, 0.1);
+}

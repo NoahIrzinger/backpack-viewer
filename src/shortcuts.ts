@@ -20,6 +20,7 @@ const ACTION_ORDER: KeybindingAction[] = [
   "spacingDecrease", "spacingIncrease",
   "clusteringDecrease", "clusteringIncrease",
   "toggleSidebar",
+  "walkMode",
   "escape",
 ];
 

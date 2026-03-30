@@ -14,6 +14,7 @@ import { initShortcuts } from "./shortcuts";
 import { initEmptyState } from "./empty-state";
 import { createHistory } from "./history";
 import { matchKey, type KeybindingMap } from "./keybindings";
+import { initContextMenu } from "./context-menu";
 import defaultConfig from "./default-config.json";
 import "./style.css";
 
@@ -439,6 +440,53 @@ async function main() {
   const shortcuts = initShortcuts(canvasContainer, bindings);
   const emptyState = initEmptyState(canvasContainer);
 
+  // Context menu (right-click on nodes)
+  const contextMenu = initContextMenu(canvasContainer, {
+    onStar(nodeId) {
+      if (!currentData) return;
+      const node = currentData.nodes.find((n) => n.id === nodeId);
+      if (!node) return;
+      const starred = node.properties._starred === true;
+      node.properties._starred = !starred;
+      saveOntology(activeOntology, currentData);
+      canvas.loadGraph(currentData);
+    },
+    onFocusNode(nodeId) {
+      toolsPane.addToFocusSet([nodeId]);
+    },
+    onExploreInBranch(nodeId) {
+      // Create a branch and enter focus
+      if (activeOntology) {
+        const branchName = `explore-${nodeId.slice(0, 8)}`;
+        createBranch(activeOntology, branchName).then(() => {
+          switchBranch(activeOntology, branchName).then(() => {
+            canvas.enterFocus([nodeId], 1);
+          });
+        });
+      }
+    },
+    onCopyId(nodeId) {
+      navigator.clipboard.writeText(nodeId);
+    },
+  });
+
+  // Right-click handler for context menu
+  canvasContainer.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    const canvasEl = canvasContainer.querySelector("canvas");
+    if (!canvasEl || !currentData) return;
+    const rect = canvasEl.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const hit = canvas.nodeAtScreen(x, y);
+    if (!hit) return;
+    const node = currentData.nodes.find((n: any) => n.id === hit.id);
+    if (!node) return;
+    const label = Object.values(node.properties).find((v) => typeof v === "string") as string ?? node.id;
+    const isStarred = node.properties._starred === true;
+    contextMenu.show(node.id, label, isStarred, e.clientX - rect.left, e.clientY - rect.top);
+  });
+
   // Apply display defaults from config
   if (!cfg.display.edges) canvas.setEdges(false);
   if (!cfg.display.edgeLabels) canvas.setEdgeLabels(false);
@@ -600,6 +648,7 @@ async function main() {
     clusteringIncrease() { const p = getLayoutParams(); setLayoutParams({ clusterStrength: Math.min(1, p.clusterStrength + 0.03) }); canvas.reheat(); },
     help() { shortcuts.toggle(); },
     toggleSidebar() { sidebar.toggle(); },
+    walkMode() { canvas.setWalkMode(!canvas.getWalkMode()); },
     escape() { if (canvas.isFocused()) { toolsPane.clearFocusSet(); } else { shortcuts.hide(); } },
   };
 

@@ -74,6 +74,12 @@ export function initCanvas(
   let savedFullState: LayoutState | null = null;
   let savedFullCamera: Camera | null = null;
 
+  // Highlighted path state (for path finding visualization)
+  let highlightedPath: { nodeIds: Set<string>; edgeIds: Set<string> } | null = null;
+
+  // Walk mode state
+  let walkMode = false;
+
   // Pan animation state
   let panTarget: { x: number; y: number } | null = null;
   let panStart: { x: number; y: number; time: number } | null = null;
@@ -216,6 +222,13 @@ export function initCanvas(
       const highlighted = isConnected || (filteredNodeIds !== null && bothMatch);
       const edgeDimmed = filteredNodeIds !== null && !bothMatch;
 
+      // Check if this edge is part of the highlighted path
+      const fullEdge = highlightedPath ? lastLoadedData?.edges.find(e =>
+        (e.sourceId === edge.sourceId && e.targetId === edge.targetId) ||
+        (e.targetId === edge.sourceId && e.sourceId === edge.targetId)
+      ) : null;
+      const isPathEdge = highlightedPath && fullEdge && highlightedPath.edgeIds.has(fullEdge.id);
+
       // Self-loop
       if (edge.sourceId === edge.targetId) {
         drawSelfLoop(source, edge.type, highlighted, edgeColor, edgeHighlight, edgeLabel, edgeLabelHighlight);
@@ -226,12 +239,16 @@ export function initCanvas(
       ctx.beginPath();
       ctx.moveTo(source.x, source.y);
       ctx.lineTo(target.x, target.y);
-      ctx.strokeStyle = highlighted
-        ? edgeHighlight
-        : edgeDimmed
-          ? edgeDimColor
-          : edgeColor;
-      ctx.lineWidth = camera.scale < lod.hideArrows ? 1 : highlighted ? 2.5 : 1.5;
+      ctx.strokeStyle = isPathEdge
+        ? (cssVar("--accent") || "#d4a27f")
+        : highlighted
+          ? edgeHighlight
+          : edgeDimmed
+            ? edgeDimColor
+            : edgeColor;
+      ctx.lineWidth = isPathEdge
+        ? 3
+        : camera.scale < lod.hideArrows ? 1 : highlighted ? 2.5 : 1.5;
       ctx.stroke();
 
       // Arrowhead
@@ -299,6 +316,31 @@ export function initCanvas(
       ctx.strokeStyle = isSelected ? selectionBorder : nodeBorder;
       ctx.lineWidth = isSelected ? 3 : 1.5;
       ctx.stroke();
+
+      // Highlighted path glow
+      if (highlightedPath && highlightedPath.nodeIds.has(node.id) && !isSelected) {
+        ctx.save();
+        ctx.shadowColor = cssVar("--accent") || "#d4a27f";
+        ctx.shadowBlur = 15;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r + 2, 0, Math.PI * 2);
+        ctx.strokeStyle = cssVar("--accent") || "#d4a27f";
+        ctx.globalAlpha = 0.5;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Star indicator for starred nodes
+      const originalNode = lastLoadedData?.nodes.find(n => n.id === node.id);
+      const isStarred = originalNode?.properties?._starred === true;
+      if (isStarred) {
+        ctx.fillStyle = "#ffd700";
+        ctx.font = "10px system-ui, sans-serif";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "bottom";
+        ctx.fillText("\u2605", node.x + r - 2, node.y - r + 2);
+      }
 
       // Label below
       if (camera.scale >= lod.hideLabels) {
@@ -536,6 +578,34 @@ export function initCanvas(
     const my = e.clientY - rect.top;
     const hit = nodeAtScreen(mx, my);
     const multiSelect = e.ctrlKey || e.metaKey;
+
+    if (walkMode && focusSeedIds && hit) {
+      // Walk mode: re-center focus on clicked node
+      focusSeedIds = [hit.id];
+      const subgraph = extractSubgraph(lastLoadedData!, [hit.id], focusHops);
+      cancelAnimationFrame(animFrame);
+      state = createLayout(subgraph);
+      alpha = 1;
+      selectedNodeIds = new Set([hit.id]);
+      filteredNodeIds = null;
+      // Center camera
+      camera = { x: 0, y: 0, scale: 1 };
+      if (state.nodes.length > 0) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const n of state.nodes) {
+          if (n.x < minX) minX = n.x;
+          if (n.y < minY) minY = n.y;
+          if (n.x > maxX) maxX = n.x;
+          if (n.y > maxY) maxY = n.y;
+        }
+        camera.x = (minX + maxX) / 2 - canvas.clientWidth / 2;
+        camera.y = (minY + maxY) / 2 - canvas.clientHeight / 2;
+      }
+      simulate();
+      onFocusChange?.({ seedNodeIds: [hit.id], hops: focusHops, totalNodes: subgraph.nodes.length });
+      onNodeClick?.([hit.id]);
+      return; // skip normal selection
+    }
 
     if (hit) {
       if (multiSelect) {
@@ -992,6 +1062,63 @@ export function initCanvas(
         hops: focusHops,
         totalNodes: state.nodes.length,
       };
+    },
+
+    findPath(sourceId: string, targetId: string): { nodeIds: string[]; edgeIds: string[] } | null {
+      if (!state) return null;
+      const visited = new Set<string>([sourceId]);
+      const queue: Array<{ nodeId: string; path: string[]; edges: string[] }> = [
+        { nodeId: sourceId, path: [sourceId], edges: [] }
+      ];
+      while (queue.length > 0) {
+        const { nodeId, path, edges } = queue.shift()!;
+        if (nodeId === targetId) return { nodeIds: path, edgeIds: edges };
+        for (const edge of state.edges) {
+          let neighbor: string | null = null;
+          if (edge.sourceId === nodeId) neighbor = edge.targetId;
+          else if (edge.targetId === nodeId) neighbor = edge.sourceId;
+          if (neighbor && !visited.has(neighbor)) {
+            visited.add(neighbor);
+            const fullEdge = lastLoadedData?.edges.find(e =>
+              (e.sourceId === edge.sourceId && e.targetId === edge.targetId) ||
+              (e.targetId === edge.sourceId && e.sourceId === edge.targetId)
+            );
+            queue.push({
+              nodeId: neighbor,
+              path: [...path, neighbor],
+              edges: [...edges, fullEdge?.id ?? ""]
+            });
+          }
+        }
+      }
+      return null;
+    },
+
+    setHighlightedPath(nodeIds: string[] | null, edgeIds: string[] | null) {
+      if (nodeIds && edgeIds) {
+        highlightedPath = { nodeIds: new Set(nodeIds), edgeIds: new Set(edgeIds) };
+      } else {
+        highlightedPath = null;
+      }
+      render();
+    },
+
+    clearHighlightedPath() {
+      highlightedPath = null;
+      render();
+    },
+
+    setWalkMode(enabled: boolean) {
+      walkMode = enabled;
+    },
+
+    getWalkMode(): boolean {
+      return walkMode;
+    },
+
+    /** Hit-test a screen coordinate against nodes. Returns the node or null. */
+    nodeAtScreen(sx: number, sy: number) {
+      return nodeAtScreen(sx, sy);
     },
 
     /** Get all node IDs in the current layout (subgraph if focused, full graph otherwise). Seed nodes first. */

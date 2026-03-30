@@ -29,7 +29,8 @@
     "spacingIncrease": "]",
     "clusteringDecrease": "{",
     "clusteringIncrease": "}",
-    "toggleSidebar": "Tab"
+    "toggleSidebar": "Tab",
+    "walkMode": "w"
   },
   "display": {
     "edges": true,
