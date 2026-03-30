@@ -2,7 +2,7 @@
 
 ## 0.2.21 (2026-03-30)
 
-### Curiosity Engine
+### Exploration Features
 - **Path finding** — select two nodes, shortest path highlighted with path bar at bottom
 - **Walk mode** — traverse the graph node-by-node, pulsing trail, accent edges, walk trail panel
 - **Walk isolate** — press `i` to re-render only trail nodes as a fresh subgraph
