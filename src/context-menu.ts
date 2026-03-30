@@ -19,19 +19,19 @@ export function initContextMenu(container: HTMLElement, callbacks: ContextMenuCa
     menuEl.style.top = `${screenY}px`;
 
     const items = [
-      { label: isStarred ? "\u2605 Unstar" : "\u2606 Star", action: () => callbacks.onStar(nodeId) },
-      { label: "\uD83D\uDD0D Focus on node", action: () => callbacks.onFocusNode(nodeId) },
-      { label: "\uD83C\uDF3F Explore in branch", action: () => callbacks.onExploreInBranch(nodeId) },
-      { label: "\uD83D\uDCCB Copy ID", action: () => callbacks.onCopyId(nodeId) },
+      { label: isStarred ? "\u2605 Unstar" : "\u2606 Star", action: () => callbacks.onStar(nodeId), premium: false },
+      { label: "\u25CE Focus on node", action: () => callbacks.onFocusNode(nodeId), premium: false },
+      { label: "\u2442 Explore in branch", action: () => callbacks.onExploreInBranch(nodeId), premium: false },
+      { label: "\u2398 Copy ID", action: () => callbacks.onCopyId(nodeId), premium: false },
     ];
 
-    if (callbacks.onExpand) items.push({ label: "\uD83D\uDD2D Expand node", action: () => callbacks.onExpand!(nodeId) });
-    if (callbacks.onExplainPath) items.push({ label: "\uD83D\uDCA1 Explain path to...", action: () => callbacks.onExplainPath!(nodeId) });
-    if (callbacks.onEnrich) items.push({ label: "\uD83D\uDCDA Enrich from web", action: () => callbacks.onEnrich!(nodeId) });
+    if (callbacks.onExpand) items.push({ label: "\u2295 Expand node", action: () => callbacks.onExpand!(nodeId), premium: true });
+    if (callbacks.onExplainPath) items.push({ label: "\u2194 Explain path to\u2026", action: () => callbacks.onExplainPath!(nodeId), premium: true });
+    if (callbacks.onEnrich) items.push({ label: "\u2261 Enrich from web", action: () => callbacks.onEnrich!(nodeId), premium: true });
 
     let addedSep = false;
     for (const item of items) {
-      if (!addedSep && (item.label.startsWith("\uD83D\uDD2D") || item.label.startsWith("\uD83D\uDCA1") || item.label.startsWith("\uD83D\uDCDA"))) {
+      if (!addedSep && item.premium) {
         const sep = document.createElement("div");
         sep.className = "context-menu-separator";
         menuEl.appendChild(sep);

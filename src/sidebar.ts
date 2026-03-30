@@ -197,7 +197,7 @@ export function initSidebar(
 
         const label = document.createElement("span");
         label.className = "sidebar-snippet-label";
-        label.textContent = `📌 ${s.label}`;
+        label.textContent = `◆ ${s.label}`;
         label.title = `${s.nodeCount} nodes — click to load`;
 
         const del = document.createElement("button");
