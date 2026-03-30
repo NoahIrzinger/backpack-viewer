@@ -1,6 +1,25 @@
 # Changelog
 
-## Unreleased
+## 0.2.21 (2026-03-30)
+
+### Curiosity Engine
+- **Path finding** — select two nodes, shortest path highlighted with path bar at bottom
+- **Walk mode** — traverse the graph node-by-node, pulsing trail, accent edges, walk trail panel
+- **Walk isolate** — press `i` to re-render only trail nodes as a fresh subgraph
+- **Walk trail panel** — numbered list with edge types between nodes, remove button per node, save as snippet
+- **Node context menu** — right-click for star, focus, explore in branch, copy ID
+- **Node starring** — gold star indicator, persisted in properties
+- **Graph snippets** — save walk trails as named snippets, sidebar list with load/delete
+
+### UI Fixes
+- Focus mode centers camera properly (fitToNodes with scale)
+- Sidebar expand button in top bar when collapsed
+- Inline dialog system (replaced all native browser popups)
+- Walk mode button with strobe animation in focus bar
+- Theme-aware walk edge colors (black in light, tan in dark)
+- Unicode symbols replacing emoji in context menu and snippets
+- Version display in sidebar footer
+- Drag threshold increased to 5px
 
 ### Branches & Snapshots UI
 - Branch picker in sidebar — click branch label to switch, create, or delete branches
