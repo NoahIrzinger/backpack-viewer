@@ -30,7 +30,8 @@
     "clusteringDecrease": "{",
     "clusteringIncrease": "}",
     "toggleSidebar": "Tab",
-    "walkMode": "w"
+    "walkMode": "w",
+    "walkIsolate": "i"
   },
   "display": {
     "edges": true,

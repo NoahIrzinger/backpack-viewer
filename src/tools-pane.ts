@@ -7,6 +7,7 @@ interface ToolsPaneCallbacks {
   onNavigateToNode: (nodeId: string) => void;
   onFocusChange: (seedNodeIds: string[] | null) => void;
   onWalkTrailRemove?: (nodeId: string) => void;
+  onWalkIsolate?: () => void;
   onRenameNodeType: (oldType: string, newType: string) => void;
   onRenameEdgeType: (oldType: string, newType: string) => void;
   onToggleEdgeLabels: (visible: boolean) => void;
@@ -237,6 +238,18 @@ export function initToolsPane(
         });
 
         section.appendChild(row);
+      }
+
+      // Isolate button
+      if (callbacks.onWalkIsolate) {
+        const isolateRow = document.createElement("div");
+        isolateRow.className = "tools-pane-export-row";
+        const isolateBtn = document.createElement("button");
+        isolateBtn.className = "tools-pane-export-btn";
+        isolateBtn.textContent = "Isolate trail (I)";
+        isolateBtn.addEventListener("click", () => callbacks.onWalkIsolate!());
+        isolateRow.appendChild(isolateBtn);
+        section.appendChild(isolateRow);
       }
     }));
   }

@@ -285,6 +285,16 @@ async function main() {
       canvas.removeFromWalkTrail(nodeId);
       syncWalkTrail();
     },
+    onWalkIsolate() {
+      const trail = canvas.getWalkTrail();
+      if (trail.length === 0) return;
+      const current = canvas.getFilteredNodeIds();
+      if (current && current.size === trail.length) {
+        canvas.setFilteredNodeIds(null);
+      } else {
+        canvas.setFilteredNodeIds(new Set(trail));
+      }
+    },
     onFocusChange(seedNodeIds) {
       if (seedNodeIds && seedNodeIds.length > 0) {
         canvas.enterFocus(seedNodeIds, 0);
@@ -685,6 +695,17 @@ async function main() {
     clusteringIncrease() { const p = getLayoutParams(); setLayoutParams({ clusterStrength: Math.min(1, p.clusterStrength + 0.03) }); canvas.reheat(); },
     help() { shortcuts.toggle(); },
     toggleSidebar() { sidebar.toggle(); },
+    walkIsolate() {
+      const trail = canvas.getWalkTrail();
+      if (trail.length === 0) return;
+      const current = canvas.getFilteredNodeIds();
+      if (current && current.size === trail.length) {
+        // Already isolated — toggle off
+        canvas.setFilteredNodeIds(null);
+      } else {
+        canvas.setFilteredNodeIds(new Set(trail));
+      }
+    },
     walkMode() {
       // If not in focus mode, enter focus on current selection first
       if (!canvas.isFocused() && currentSelection.length > 0) {

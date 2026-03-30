@@ -1218,6 +1218,10 @@ export function initCanvas(
       return [...walkTrail];
     },
 
+    getFilteredNodeIds(): Set<string> | null {
+      return filteredNodeIds;
+    },
+
     removeFromWalkTrail(nodeId: string) {
       walkTrail = walkTrail.filter((id) => id !== nodeId);
       render();

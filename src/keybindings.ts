@@ -9,7 +9,8 @@ export type KeybindingAction =
   | "spacingDecrease" | "spacingIncrease"
   | "clusteringDecrease" | "clusteringIncrease"
   | "toggleSidebar"
-  | "walkMode";
+  | "walkMode"
+  | "walkIsolate";
 
 export type KeybindingMap = Record<KeybindingAction, string>;
 
@@ -80,5 +81,6 @@ export function actionDescriptions(): Record<KeybindingAction, string> {
     clusteringIncrease: "Increase clustering",
     toggleSidebar: "Toggle sidebar",
     walkMode: "Toggle walk mode (in focus)",
+    walkIsolate: "Isolate walk trail nodes",
   };
 }
