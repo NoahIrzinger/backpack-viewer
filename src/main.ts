@@ -282,19 +282,19 @@ async function main() {
 
   canvas = initCanvas(canvasContainer, (nodeIds) => {
     currentSelection = nodeIds ?? [];
-    if (nodeIds && nodeIds.length === 2) {
-      // Two nodes selected — find and show path
-      const path = canvas.findPath(nodeIds[0], nodeIds[1]);
-      if (path && path.nodeIds.length > 0) {
-        canvas.setHighlightedPath(path.nodeIds, path.edgeIds);
-        showPathBar(path);
+    // Don't touch the path bar when walk mode is active — syncWalkTrail manages it
+    if (!canvas.getWalkMode()) {
+      if (nodeIds && nodeIds.length === 2) {
+        const path = canvas.findPath(nodeIds[0], nodeIds[1]);
+        if (path && path.nodeIds.length > 0) {
+          canvas.setHighlightedPath(path.nodeIds, path.edgeIds);
+          showPathBar(path);
+        } else {
+          hidePathBar();
+        }
       } else {
         hidePathBar();
       }
-    } else if (nodeIds && nodeIds.length > 0) {
-      hidePathBar();
-    } else {
-      hidePathBar();
     }
 
     if (nodeIds && nodeIds.length > 0 && currentData) {
