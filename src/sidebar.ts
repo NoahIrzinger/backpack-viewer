@@ -7,6 +7,8 @@ export interface SidebarCallbacks {
   onBranchSwitch?: (graphName: string, branchName: string) => void;
   onBranchCreate?: (graphName: string, branchName: string) => void;
   onBranchDelete?: (graphName: string, branchName: string) => void;
+  onSnippetLoad?: (graphName: string, snippetId: string) => void;
+  onSnippetDelete?: (graphName: string, snippetId: string) => void;
 }
 
 export function initSidebar(
@@ -174,6 +176,51 @@ export function initSidebar(
           showBranchPicker(graphName, fresh, allBranches ?? []);
         });
       }
+    },
+
+    setSnippets(graphName: string, snippets: { id: string; label: string; nodeCount: number }[]) {
+      // Find the graph's list item and add/update snippet pills
+      const li = items.find((el) => el.dataset.name === graphName);
+      if (!li) return;
+
+      // Remove existing snippet list
+      li.querySelector(".sidebar-snippets")?.remove();
+
+      if (snippets.length === 0) return;
+
+      const snippetList = document.createElement("div");
+      snippetList.className = "sidebar-snippets";
+
+      for (const s of snippets) {
+        const row = document.createElement("div");
+        row.className = "sidebar-snippet";
+
+        const label = document.createElement("span");
+        label.className = "sidebar-snippet-label";
+        label.textContent = `📌 ${s.label}`;
+        label.title = `${s.nodeCount} nodes — click to load`;
+
+        const del = document.createElement("button");
+        del.className = "sidebar-snippet-delete";
+        del.textContent = "\u00d7";
+        del.title = "Delete snippet";
+        del.addEventListener("click", (e) => {
+          e.stopPropagation();
+          cbs.onSnippetDelete?.(graphName, s.id);
+        });
+
+        row.appendChild(label);
+        row.appendChild(del);
+
+        row.addEventListener("click", (e) => {
+          e.stopPropagation();
+          cbs.onSnippetLoad?.(graphName, s.id);
+        });
+
+        snippetList.appendChild(row);
+      }
+
+      li.appendChild(snippetList);
     },
 
     toggle: toggleSidebar,

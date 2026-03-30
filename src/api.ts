@@ -140,3 +140,44 @@ export async function diffSnapshot(graphName: string, version: number): Promise<
   if (!res.ok) throw new Error("Failed to compute diff");
   return res.json();
 }
+
+// --- Snippet API ---
+
+export interface SnippetSummary {
+  id: string;
+  label: string;
+  description: string;
+  nodeCount: number;
+  edgeCount: number;
+  createdAt: string;
+}
+
+export async function listSnippets(graphName: string): Promise<SnippetSummary[]> {
+  const res = await fetch(`/api/graphs/${encodeURIComponent(graphName)}/snippets`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function saveSnippet(graphName: string, label: string, nodeIds: string[], edgeIds: string[], description?: string): Promise<string> {
+  const res = await fetch(`/api/graphs/${encodeURIComponent(graphName)}/snippets`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label, description, nodeIds, edgeIds }),
+  });
+  if (!res.ok) throw new Error("Failed to save snippet");
+  const data = await res.json();
+  return data.id;
+}
+
+export async function loadSnippet(graphName: string, snippetId: string): Promise<any> {
+  const res = await fetch(`/api/graphs/${encodeURIComponent(graphName)}/snippets/${encodeURIComponent(snippetId)}`);
+  if (!res.ok) throw new Error("Snippet not found");
+  return res.json();
+}
+
+export async function deleteSnippet(graphName: string, snippetId: string): Promise<void> {
+  const res = await fetch(`/api/graphs/${encodeURIComponent(graphName)}/snippets/${encodeURIComponent(snippetId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete snippet");
+}

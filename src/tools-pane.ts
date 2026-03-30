@@ -8,6 +8,7 @@ interface ToolsPaneCallbacks {
   onFocusChange: (seedNodeIds: string[] | null) => void;
   onWalkTrailRemove?: (nodeId: string) => void;
   onWalkIsolate?: () => void;
+  onWalkSaveSnippet?: (label: string) => void;
   onRenameNodeType: (oldType: string, newType: string) => void;
   onRenameEdgeType: (oldType: string, newType: string) => void;
   onToggleEdgeLabels: (visible: boolean) => void;
@@ -250,16 +251,31 @@ export function initToolsPane(
       }
 
       // Isolate button
+      // Action buttons row
+      const actionsRow = document.createElement("div");
+      actionsRow.className = "tools-pane-export-row";
+
       if (callbacks.onWalkIsolate) {
-        const isolateRow = document.createElement("div");
-        isolateRow.className = "tools-pane-export-row";
         const isolateBtn = document.createElement("button");
         isolateBtn.className = "tools-pane-export-btn";
-        isolateBtn.textContent = "Isolate trail (I)";
+        isolateBtn.textContent = "Isolate (I)";
         isolateBtn.addEventListener("click", () => callbacks.onWalkIsolate!());
-        isolateRow.appendChild(isolateBtn);
-        section.appendChild(isolateRow);
+        actionsRow.appendChild(isolateBtn);
       }
+
+      if (callbacks.onWalkSaveSnippet && walkTrail.length >= 2) {
+        const saveBtn = document.createElement("button");
+        saveBtn.className = "tools-pane-export-btn";
+        saveBtn.textContent = "Save snippet";
+        saveBtn.addEventListener("click", () => {
+          showPrompt("Save snippet", "Name for this snippet").then((label) => {
+            if (label) callbacks.onWalkSaveSnippet!(label);
+          });
+        });
+        actionsRow.appendChild(saveBtn);
+      }
+
+      section.appendChild(actionsRow);
     }));
   }
 

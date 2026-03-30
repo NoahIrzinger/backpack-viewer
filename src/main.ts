@@ -3,6 +3,7 @@ import {
   listOntologies, loadOntology, saveOntology, renameOntology,
   listBranches, createBranch, switchBranch, deleteBranch,
   listSnapshots, createSnapshot, rollbackSnapshot,
+  listSnippets, saveSnippet, loadSnippet, deleteSnippet,
 } from "./api";
 import { initSidebar } from "./sidebar";
 import { initCanvas, type FocusInfo } from "./canvas";
@@ -353,6 +354,17 @@ async function main() {
       if (trail.length === 0) return;
       canvas.enterFocus(trail, 0);
     },
+    async onWalkSaveSnippet(label) {
+      if (!activeOntology || !currentData) return;
+      const trail = canvas.getWalkTrail();
+      if (trail.length < 2) return;
+      const nodeSet = new Set(trail);
+      const edgeIds = currentData.edges
+        .filter((e) => nodeSet.has(e.sourceId) && nodeSet.has(e.targetId))
+        .map((e) => e.id);
+      await saveSnippet(activeOntology, label, trail, edgeIds);
+      await refreshSnippets(activeOntology);
+    },
     onFocusChange(seedNodeIds) {
       if (seedNodeIds && seedNodeIds.length > 0) {
         canvas.enterFocus(seedNodeIds, 0);
@@ -506,6 +518,16 @@ async function main() {
         await deleteBranch(graphName, branchName);
         await refreshBranches(graphName);
       },
+      onSnippetLoad: async (graphName, snippetId) => {
+        const snippet = await loadSnippet(graphName, snippetId);
+        if (snippet?.nodeIds?.length > 0) {
+          canvas.enterFocus(snippet.nodeIds, 0);
+        }
+      },
+      onSnippetDelete: async (graphName, snippetId) => {
+        await deleteSnippet(graphName, snippetId);
+        await refreshSnippets(graphName);
+      },
     }
   );
 
@@ -559,6 +581,11 @@ async function main() {
   async function refreshSnapshots(graphName: string) {
     const snaps = await listSnapshots(graphName);
     toolsPane.setSnapshots(snaps);
+  }
+
+  async function refreshSnippets(graphName: string) {
+    const snips = await listSnippets(graphName);
+    sidebar.setSnippets(graphName, snips);
   }
 
   // Insert sidebar expand button into top-left bar (before tools toggle)
@@ -683,6 +710,7 @@ async function main() {
     // Load branches and snapshots
     await refreshBranches(name);
     await refreshSnapshots(name);
+    await refreshSnippets(name);
 
     // Restore focus mode if requested
     if (focusSeedIds?.length && currentData) {

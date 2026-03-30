@@ -214,6 +214,74 @@ function ontologyApiPlugin(): Plugin {
           return;
         }
 
+        // --- Snippet routes ---
+        const snippetItemMatch = req.url?.match(/^\/api\/graphs\/(.+)\/snippets\/(.+)$/);
+        if (snippetItemMatch && req.method === "GET") {
+          const graphName = decodeURIComponent(snippetItemMatch[1]);
+          const snippetId = decodeURIComponent(snippetItemMatch[2]);
+          storage.loadSnippet(graphName, snippetId).then((snippet: any) => {
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify(snippet));
+          }).catch((err: Error) => {
+            res.statusCode = 404;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: err.message }));
+          });
+          return;
+        }
+
+        if (snippetItemMatch && req.method === "DELETE") {
+          const graphName = decodeURIComponent(snippetItemMatch[1]);
+          const snippetId = decodeURIComponent(snippetItemMatch[2]);
+          storage.deleteSnippet(graphName, snippetId).then(() => {
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ ok: true }));
+          }).catch((err: Error) => {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: err.message }));
+          });
+          return;
+        }
+
+        const snippetMatch = req.url?.match(/^\/api\/graphs\/(.+)\/snippets$/);
+        if (snippetMatch && req.method === "GET") {
+          const graphName = decodeURIComponent(snippetMatch[1]);
+          storage.listSnippets(graphName).then((snippets: any) => {
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify(snippets));
+          }).catch((err: Error) => {
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: err.message }));
+          });
+          return;
+        }
+
+        if (snippetMatch && req.method === "POST") {
+          const graphName = decodeURIComponent(snippetMatch[1]);
+          let body = "";
+          req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+          req.on("end", () => {
+            try {
+              const { label, description, nodeIds, edgeIds } = JSON.parse(body);
+              storage.saveSnippet(graphName, { label, description, nodeIds, edgeIds: edgeIds ?? [] }).then((id: string) => {
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ ok: true, id }));
+              }).catch((err: Error) => {
+                res.statusCode = 400;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ error: err.message }));
+              });
+            } catch {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "Invalid JSON" }));
+            }
+          });
+          return;
+        }
+
         if (!req.url?.startsWith("/api/ontologies")) return next();
 
         const urlPath = req.url.replace(/\?.*$/, "");

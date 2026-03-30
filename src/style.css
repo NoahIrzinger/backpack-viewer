@@ -311,6 +311,46 @@ body {
   padding: 0 4px;
 }
 
+.sidebar-snippets {
+  margin-top: 4px;
+  padding-left: 8px;
+}
+
+.sidebar-snippet {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.sidebar-snippet:hover {
+  background: var(--bg-hover);
+}
+
+.sidebar-snippet-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-snippet-delete {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0 2px;
+  opacity: 0;
+}
+
+.sidebar-snippet:hover .sidebar-snippet-delete {
+  opacity: 1;
+}
+
 .branch-picker-delete:hover {
   color: var(--danger, #e55);
 }

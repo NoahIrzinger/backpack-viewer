@@ -188,6 +188,68 @@ if (hasDistBuild) {
       return;
     }
 
+    // --- Snippet routes ---
+    const snippetItemMatch = url.match(/^\/api\/graphs\/(.+)\/snippets\/(.+)$/);
+    if (snippetItemMatch && req.method === "GET") {
+      const graphName = decodeURIComponent(snippetItemMatch[1]);
+      const snippetId = decodeURIComponent(snippetItemMatch[2]);
+      try {
+        const snippet = await storage.loadSnippet(graphName, snippetId);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(snippet));
+      } catch {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Snippet not found" }));
+      }
+      return;
+    }
+
+    if (snippetItemMatch && req.method === "DELETE") {
+      const graphName = decodeURIComponent(snippetItemMatch[1]);
+      const snippetId = decodeURIComponent(snippetItemMatch[2]);
+      try {
+        await storage.deleteSnippet(graphName, snippetId);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    const snippetMatch = url.match(/^\/api\/graphs\/(.+)\/snippets$/);
+    if (snippetMatch && req.method === "GET") {
+      const graphName = decodeURIComponent(snippetMatch[1]);
+      try {
+        const snippets = await storage.listSnippets(graphName);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(snippets));
+      } catch {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end("[]");
+      }
+      return;
+    }
+
+    if (snippetMatch && req.method === "POST") {
+      const graphName = decodeURIComponent(snippetMatch[1]);
+      let body = "";
+      req.on("data", (chunk) => { body += chunk.toString(); });
+      req.on("end", async () => {
+        try {
+          const { label, description, nodeIds, edgeIds } = JSON.parse(body);
+          const id = await storage.saveSnippet(graphName, { label, description, nodeIds, edgeIds: edgeIds ?? [] });
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, id }));
+        } catch (err) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+
     if (url === "/api/ontologies") {
       try {
         const summaries = await storage.listOntologies();
