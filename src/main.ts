@@ -453,12 +453,23 @@ async function main() {
       toolsPane.setWalkTrail([]);
       return;
     }
-    const items = trail.map((id) => {
+    const items = trail.map((id, i) => {
       const node = currentData!.nodes.find((n) => n.id === id);
+      // Find edge type connecting this node to the previous one in the trail
+      let edgeType: string | undefined;
+      if (i > 0) {
+        const prevId = trail[i - 1];
+        const edge = currentData!.edges.find((e) =>
+          (e.sourceId === prevId && e.targetId === id) ||
+          (e.targetId === prevId && e.sourceId === id)
+        );
+        edgeType = edge?.type;
+      }
       return {
         id,
         label: node ? (Object.values(node.properties).find((v) => typeof v === "string") as string ?? node.id) : id,
         type: node?.type ?? "?",
+        edgeType,
       };
     });
     toolsPane.setWalkTrail(items);

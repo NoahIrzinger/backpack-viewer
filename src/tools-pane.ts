@@ -47,7 +47,7 @@ export function initToolsPane(
   let typesSearch = "";
   let qualitySearch = "";
   let snapshots: { version: number; timestamp: string; nodeCount: number; edgeCount: number; label?: string }[] = [];
-  let walkTrail: { id: string; label: string; type: string }[] = [];
+  let walkTrail: { id: string; label: string; type: string; edgeType?: string }[] = [];
 
   // Unified focus set — two layers that compose via union
   const focusSet = {
@@ -196,6 +196,15 @@ export function initToolsPane(
       for (let i = 0; i < walkTrail.length; i++) {
         const item = walkTrail[i];
         const isCurrent = i === walkTrail.length - 1;
+
+        // Edge connector from previous node
+        if (item.edgeType) {
+          const connector = document.createElement("div");
+          connector.className = "walk-trail-edge";
+          connector.textContent = `\u2193 ${item.edgeType}`;
+          section.appendChild(connector);
+        }
+
         const row = document.createElement("div");
         row.className = "tools-pane-row tools-pane-clickable";
         if (isCurrent) row.style.fontWeight = "600";

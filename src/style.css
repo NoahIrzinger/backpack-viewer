@@ -1938,6 +1938,13 @@ body {
 
 /* --- Walk Mode Indicator --- */
 
+.walk-trail-edge {
+  font-size: 9px;
+  color: var(--text-dim);
+  padding: 1px 0 1px 24px;
+  opacity: 0.7;
+}
+
 .walk-indicator {
   font-size: 10px;
   color: var(--accent);
