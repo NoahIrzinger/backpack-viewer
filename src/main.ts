@@ -233,8 +233,70 @@ async function main() {
     }
   }
 
+  // --- Path bar ---
+  const pathBar = document.createElement("div");
+  pathBar.className = "path-bar hidden";
+  canvasContainer.appendChild(pathBar);
+
+  function showPathBar(path: { nodeIds: string[]; edgeIds: string[] }) {
+    pathBar.innerHTML = "";
+    if (!currentData) return;
+
+    for (let i = 0; i < path.nodeIds.length; i++) {
+      const nodeId = path.nodeIds[i];
+      const node = currentData.nodes.find((n) => n.id === nodeId);
+      if (!node) continue;
+      const label = Object.values(node.properties).find((v) => typeof v === "string") as string ?? node.id;
+
+      // Edge label before this node (except the first)
+      if (i > 0) {
+        const edgeId = path.edgeIds[i - 1];
+        const edge = currentData.edges.find((e) => e.id === edgeId);
+        const arrow = document.createElement("span");
+        arrow.className = "path-bar-edge";
+        arrow.textContent = edge ? `→ ${edge.type} →` : "→";
+        pathBar.appendChild(arrow);
+      }
+
+      const nodeBtn = document.createElement("span");
+      nodeBtn.className = "path-bar-node";
+      nodeBtn.textContent = label;
+      nodeBtn.addEventListener("click", () => canvas.panToNode(nodeId));
+      pathBar.appendChild(nodeBtn);
+    }
+
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "path-bar-close";
+    closeBtn.textContent = "\u00d7";
+    closeBtn.addEventListener("click", hidePathBar);
+    pathBar.appendChild(closeBtn);
+
+    pathBar.classList.remove("hidden");
+  }
+
+  function hidePathBar() {
+    pathBar.classList.add("hidden");
+    pathBar.innerHTML = "";
+    canvas.clearHighlightedPath();
+  }
+
   canvas = initCanvas(canvasContainer, (nodeIds) => {
     currentSelection = nodeIds ?? [];
+    if (nodeIds && nodeIds.length === 2) {
+      // Two nodes selected — find and show path
+      const path = canvas.findPath(nodeIds[0], nodeIds[1]);
+      if (path && path.nodeIds.length > 0) {
+        canvas.setHighlightedPath(path.nodeIds, path.edgeIds);
+        showPathBar(path);
+      } else {
+        hidePathBar();
+      }
+    } else if (nodeIds && nodeIds.length > 0) {
+      hidePathBar();
+    } else {
+      hidePathBar();
+    }
+
     if (nodeIds && nodeIds.length > 0 && currentData) {
       infoPanel.show(nodeIds, currentData);
       if (mobileQuery.matches) toolsPane.collapse();
