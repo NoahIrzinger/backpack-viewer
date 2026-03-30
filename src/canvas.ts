@@ -629,9 +629,37 @@ export function initCanvas(
     const hit = nodeAtScreen(mx, my);
     const multiSelect = e.ctrlKey || e.metaKey;
 
-    if (walkMode && focusSeedIds && hit) {
-      // Walk mode: re-center focus on clicked node (minimum 1 hop so you see neighbors)
-      if (!walkTrail.includes(hit.id)) walkTrail.push(hit.id);
+    if (walkMode && focusSeedIds && hit && state) {
+      // Walk mode: find path from current position to clicked node
+      const currentId = walkTrail.length > 0 ? walkTrail[walkTrail.length - 1] : focusSeedIds[0];
+
+      // BFS in the current subgraph to find path
+      const visited = new Set<string>([currentId]);
+      const queue: Array<{ id: string; path: string[] }> = [{ id: currentId, path: [currentId] }];
+      let pathToTarget: string[] | null = null;
+
+      while (queue.length > 0) {
+        const { id, path } = queue.shift()!;
+        if (id === hit.id) { pathToTarget = path; break; }
+        for (const edge of state.edges) {
+          let neighbor: string | null = null;
+          if (edge.sourceId === id) neighbor = edge.targetId;
+          else if (edge.targetId === id) neighbor = edge.sourceId;
+          if (neighbor && !visited.has(neighbor)) {
+            visited.add(neighbor);
+            queue.push({ id: neighbor, path: [...path, neighbor] });
+          }
+        }
+      }
+
+      // No path found — node is unreachable, ignore click
+      if (!pathToTarget) return;
+
+      // Add all intermediate nodes to the trail (skip first since it's already the current position)
+      for (const id of pathToTarget.slice(1)) {
+        if (!walkTrail.includes(id)) walkTrail.push(id);
+      }
+
       focusSeedIds = [hit.id];
       const walkHops = Math.max(1, focusHops);
       focusHops = walkHops;
