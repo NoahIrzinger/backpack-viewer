@@ -57,14 +57,12 @@ export function initSidebar(
 
   container.appendChild(headingRow);
 
-  // Place a floating expand button OUTSIDE the sidebar (on the parent)
-  // so it's visible even when sidebar is collapsed
+  // Expand button — inserted into the canvas top-left bar when sidebar is collapsed
   const expandBtn = document.createElement("button");
-  expandBtn.className = "sidebar-expand-btn hidden";
+  expandBtn.className = "tools-pane-toggle hidden";
   expandBtn.title = "Show sidebar (Tab)";
   expandBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="13 7 18 12 13 17"/><polyline points="6 7 11 12 6 17"/></svg>';
   expandBtn.addEventListener("click", toggleSidebar);
-  container.parentElement?.appendChild(expandBtn);
   container.appendChild(input);
   container.appendChild(list);
   container.appendChild(footer);
@@ -179,6 +177,7 @@ export function initSidebar(
     },
 
     toggle: toggleSidebar,
+    expandBtn,
   };
 
   function showBranchPicker(

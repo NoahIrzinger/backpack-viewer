@@ -448,6 +448,9 @@ async function main() {
     toolsPane.setSnapshots(snaps);
   }
 
+  // Insert sidebar expand button into top-left bar (before tools toggle)
+  topLeft.insertBefore(sidebar.expandBtn, topLeft.firstChild);
+
   const shortcuts = initShortcuts(canvasContainer, bindings);
   const emptyState = initEmptyState(canvasContainer);
 
