@@ -663,6 +663,10 @@ async function main() {
     help() { shortcuts.toggle(); },
     toggleSidebar() { sidebar.toggle(); },
     walkMode() {
+      // If not in focus mode, enter focus on current selection first
+      if (!canvas.isFocused() && currentSelection.length > 0) {
+        toolsPane.addToFocusSet(currentSelection);
+      }
       canvas.setWalkMode(!canvas.getWalkMode());
       const walkBtn = canvasContainer.querySelector(".walk-indicator");
       if (walkBtn) walkBtn.classList.toggle("active", canvas.getWalkMode());

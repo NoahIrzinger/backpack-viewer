@@ -580,9 +580,11 @@ export function initCanvas(
     const multiSelect = e.ctrlKey || e.metaKey;
 
     if (walkMode && focusSeedIds && hit) {
-      // Walk mode: re-center focus on clicked node
+      // Walk mode: re-center focus on clicked node (minimum 1 hop so you see neighbors)
       focusSeedIds = [hit.id];
-      const subgraph = extractSubgraph(lastLoadedData!, [hit.id], focusHops);
+      const walkHops = Math.max(1, focusHops);
+      focusHops = walkHops;
+      const subgraph = extractSubgraph(lastLoadedData!, [hit.id], walkHops);
       cancelAnimationFrame(animFrame);
       state = createLayout(subgraph);
       alpha = 1;
@@ -607,7 +609,7 @@ export function initCanvas(
         }
         render();
       }, 300);
-      onFocusChange?.({ seedNodeIds: [hit.id], hops: focusHops, totalNodes: subgraph.nodes.length });
+      onFocusChange?.({ seedNodeIds: [hit.id], hops: walkHops, totalNodes: subgraph.nodes.length });
       onNodeClick?.([hit.id]);
       return; // skip normal selection
     }
