@@ -251,8 +251,11 @@ export function initCanvas(
       ctx.moveTo(source.x, source.y);
       ctx.lineTo(target.x, target.y);
       const accent = cssVar("--accent") || "#d4a27f";
-      ctx.strokeStyle = isPathEdge || isWalkEdge
+      const walkEdgeColor = cssVar("--canvas-walk-edge") || "#1a1a1a";
+      ctx.strokeStyle = isPathEdge
         ? accent
+        : isWalkEdge
+        ? walkEdgeColor
         : highlighted
           ? edgeHighlight
           : edgeDimmed
@@ -1185,6 +1188,11 @@ export function initCanvas(
 
     getWalkTrail(): string[] {
       return [...walkTrail];
+    },
+
+    removeFromWalkTrail(nodeId: string) {
+      walkTrail = walkTrail.filter((id) => id !== nodeId);
+      render();
     },
 
     /** Hit-test a screen coordinate against nodes. Returns the node or null. */

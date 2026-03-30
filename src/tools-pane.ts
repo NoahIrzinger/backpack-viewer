@@ -6,6 +6,7 @@ interface ToolsPaneCallbacks {
   onFilterByType: (type: string | null) => void;
   onNavigateToNode: (nodeId: string) => void;
   onFocusChange: (seedNodeIds: string[] | null) => void;
+  onWalkTrailRemove?: (nodeId: string) => void;
   onRenameNodeType: (oldType: string, newType: string) => void;
   onRenameEdgeType: (oldType: string, newType: string) => void;
   onToggleEdgeLabels: (visible: boolean) => void;
@@ -215,10 +216,21 @@ export function initToolsPane(
         typeBadge.className = "tools-pane-count";
         typeBadge.textContent = item.type;
 
+        const removeBtn = document.createElement("button");
+        removeBtn.className = "tools-pane-edit";
+        removeBtn.style.opacity = "1";
+        removeBtn.textContent = "\u00d7";
+        removeBtn.title = "Remove from trail";
+        removeBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          callbacks.onWalkTrailRemove?.(item.id);
+        });
+
         row.appendChild(num);
         row.appendChild(dot);
         row.appendChild(name);
         row.appendChild(typeBadge);
+        row.appendChild(removeBtn);
 
         row.addEventListener("click", () => {
           callbacks.onNavigateToNode(item.id);

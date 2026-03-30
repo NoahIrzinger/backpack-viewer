@@ -45,6 +45,7 @@
   --canvas-type-badge-dim: rgba(115, 115, 115, 0.15);
   --canvas-selection-border: #d4d4d4;
   --canvas-node-border: rgba(255, 255, 255, 0.15);
+  --canvas-walk-edge: #e8d5c4;
 }
 
 [data-theme="light"] {
@@ -86,6 +87,7 @@
   --canvas-type-badge-dim: rgba(87, 83, 78, 0.15);
   --canvas-selection-border: #292524;
   --canvas-node-border: rgba(0, 0, 0, 0.1);
+  --canvas-walk-edge: #1a1a1a;
 }
 
 body {
@@ -1943,10 +1945,16 @@ body {
   border: 1px solid rgba(212, 162, 127, 0.4);
   border-radius: 4px;
   cursor: pointer;
-  opacity: 0.5;
+  opacity: 0.4;
 }
 
 .walk-indicator.active {
   opacity: 1;
-  background: rgba(212, 162, 127, 0.1);
+  background: rgba(212, 162, 127, 0.15);
+  animation: walk-strobe 2s ease-in-out infinite;
+}
+
+@keyframes walk-strobe {
+  0%, 100% { opacity: 0.6; border-color: rgba(212, 162, 127, 0.3); }
+  50% { opacity: 1; border-color: rgba(212, 162, 127, 0.8); }
 }

@@ -281,6 +281,10 @@ async function main() {
       canvas.panToNode(nodeId);
       if (currentData) infoPanel.show([nodeId], currentData);
     },
+    onWalkTrailRemove(nodeId) {
+      canvas.removeFromWalkTrail(nodeId);
+      syncWalkTrail();
+    },
     onFocusChange(seedNodeIds) {
       if (seedNodeIds && seedNodeIds.length > 0) {
         canvas.enterFocus(seedNodeIds, 0);
