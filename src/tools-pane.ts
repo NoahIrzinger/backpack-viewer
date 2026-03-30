@@ -45,6 +45,7 @@ export function initToolsPane(
   let typesSearch = "";
   let qualitySearch = "";
   let snapshots: { version: number; timestamp: string; nodeCount: number; edgeCount: number; label?: string }[] = [];
+  let walkTrail: { id: string; label: string; type: string }[] = [];
 
   // Unified focus set — two layers that compose via union
   const focusSet = {
@@ -145,6 +146,11 @@ export function initToolsPane(
       renderFocusedSection();
     }
 
+    // Walk trail (visible when walk mode is active)
+    if (walkTrail.length > 0) {
+      renderWalkTrail();
+    }
+
     // Search input (for types and quality tabs)
     if (activeTab === "types" && stats.types.length > 5) {
       content.appendChild(makeSearchInput("Filter types...", typesSearch, (v) => {
@@ -181,6 +187,46 @@ export function initToolsPane(
     } else if (activeTab === "controls") {
       renderControlsTab(tabContainer as HTMLElement);
     }
+  }
+
+  function renderWalkTrail() {
+    content.appendChild(makeSection(`Walk Trail (${walkTrail.length})`, (section) => {
+      for (let i = 0; i < walkTrail.length; i++) {
+        const item = walkTrail[i];
+        const isCurrent = i === walkTrail.length - 1;
+        const row = document.createElement("div");
+        row.className = "tools-pane-row tools-pane-clickable";
+        if (isCurrent) row.style.fontWeight = "600";
+
+        const num = document.createElement("span");
+        num.className = "tools-pane-count";
+        num.style.minWidth = "18px";
+        num.textContent = `${i + 1}`;
+
+        const dot = document.createElement("span");
+        dot.className = "tools-pane-dot";
+        dot.style.backgroundColor = getColor(item.type);
+
+        const name = document.createElement("span");
+        name.className = "tools-pane-name";
+        name.textContent = item.label;
+
+        const typeBadge = document.createElement("span");
+        typeBadge.className = "tools-pane-count";
+        typeBadge.textContent = item.type;
+
+        row.appendChild(num);
+        row.appendChild(dot);
+        row.appendChild(name);
+        row.appendChild(typeBadge);
+
+        row.addEventListener("click", () => {
+          callbacks.onNavigateToNode(item.id);
+        });
+
+        section.appendChild(row);
+      }
+    }));
   }
 
   function renderFocusedSection() {
@@ -990,6 +1036,11 @@ export function initToolsPane(
     setSnapshots(list: typeof snapshots) {
       snapshots = list;
       if (activeTab === "controls") renderTabContent();
+    },
+
+    setWalkTrail(trail: typeof walkTrail) {
+      walkTrail = trail;
+      render();
     },
   };
 }

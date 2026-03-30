@@ -250,10 +250,12 @@ async function main() {
       if (topLeft && focusIndicator) topLeft.appendChild(focusIndicator);
       updateUrl(activeOntology, focus.seedNodeIds);
       infoPanel.setFocusDisabled(focus.hops === 0);
+      syncWalkTrail();
     } else {
       removeFocusIndicator();
       infoPanel.setFocusDisabled(false);
       if (activeOntology) updateUrl(activeOntology);
+      syncWalkTrail();
     }
   }, { lod: cfg.lod, navigation: cfg.navigation, walk: (cfg as any).walk });
 
@@ -434,6 +436,23 @@ async function main() {
       },
     }
   );
+
+  function syncWalkTrail() {
+    const trail = canvas.getWalkTrail();
+    if (!currentData || trail.length === 0) {
+      toolsPane.setWalkTrail([]);
+      return;
+    }
+    const items = trail.map((id) => {
+      const node = currentData!.nodes.find((n) => n.id === id);
+      return {
+        id,
+        label: node ? (Object.values(node.properties).find((v) => typeof v === "string") as string ?? node.id) : id,
+        type: node?.type ?? "?",
+      };
+    });
+    toolsPane.setWalkTrail(items);
+  }
 
   async function refreshBranches(graphName: string) {
     const branches = await listBranches(graphName);
@@ -670,6 +689,7 @@ async function main() {
       canvas.setWalkMode(!canvas.getWalkMode());
       const walkBtn = canvasContainer.querySelector(".walk-indicator");
       if (walkBtn) walkBtn.classList.toggle("active", canvas.getWalkMode());
+      syncWalkTrail();
     },
     escape() { if (canvas.isFocused()) { toolsPane.clearFocusSet(); } else { shortcuts.hide(); } },
   };

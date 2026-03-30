@@ -1183,6 +1183,10 @@ export function initCanvas(
       return walkMode;
     },
 
+    getWalkTrail(): string[] {
+      return [...walkTrail];
+    },
+
     /** Hit-test a screen coordinate against nodes. Returns the node or null. */
     nodeAtScreen(sx: number, sy: number) {
       return nodeAtScreen(sx, sy);
