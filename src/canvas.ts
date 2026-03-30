@@ -630,7 +630,7 @@ export function initCanvas(
     if (!dragging) return;
     const dx = e.clientX - lastX;
     const dy = e.clientY - lastY;
-    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didDrag = true;
+    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) didDrag = true;
     camera.x -= dx / camera.scale;
     camera.y -= dy / camera.scale;
     lastX = e.clientX;
