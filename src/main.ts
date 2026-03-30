@@ -286,14 +286,10 @@ async function main() {
       syncWalkTrail();
     },
     onWalkIsolate() {
+      if (!currentData) return;
       const trail = canvas.getWalkTrail();
       if (trail.length === 0) return;
-      const current = canvas.getFilteredNodeIds();
-      if (current && current.size === trail.length) {
-        canvas.setFilteredNodeIds(null);
-      } else {
-        canvas.setFilteredNodeIds(new Set(trail));
-      }
+      canvas.enterFocus(trail, 0);
     },
     onFocusChange(seedNodeIds) {
       if (seedNodeIds && seedNodeIds.length > 0) {
@@ -696,15 +692,11 @@ async function main() {
     help() { shortcuts.toggle(); },
     toggleSidebar() { sidebar.toggle(); },
     walkIsolate() {
+      if (!currentData) return;
       const trail = canvas.getWalkTrail();
       if (trail.length === 0) return;
-      const current = canvas.getFilteredNodeIds();
-      if (current && current.size === trail.length) {
-        // Already isolated — toggle off
-        canvas.setFilteredNodeIds(null);
-      } else {
-        canvas.setFilteredNodeIds(new Set(trail));
-      }
+      // Extract a subgraph of only the trail nodes and edges between them, re-layout as a fresh graph
+      canvas.enterFocus(trail, 0);
     },
     walkMode() {
       // If not in focus mode, enter focus on current selection first
