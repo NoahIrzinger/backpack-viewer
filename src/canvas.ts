@@ -588,18 +588,12 @@ export function initCanvas(
       alpha = 1;
       selectedNodeIds = new Set([hit.id]);
       filteredNodeIds = null;
-      // Center camera
+      // Center camera on the seed node
       camera = { x: 0, y: 0, scale: 1 };
-      if (state.nodes.length > 0) {
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const n of state.nodes) {
-          if (n.x < minX) minX = n.x;
-          if (n.y < minY) minY = n.y;
-          if (n.x > maxX) maxX = n.x;
-          if (n.y > maxY) maxY = n.y;
-        }
-        camera.x = (minX + maxX) / 2 - canvas.clientWidth / 2;
-        camera.y = (minY + maxY) / 2 - canvas.clientHeight / 2;
+      const seedNode = state.nodes.find((n) => n.id === hit.id);
+      if (seedNode) {
+        camera.x = seedNode.x - canvas.clientWidth / 2;
+        camera.y = seedNode.y - canvas.clientHeight / 2;
       }
       simulate();
       onFocusChange?.({ seedNodeIds: [hit.id], hops: focusHops, totalNodes: subgraph.nodes.length });
@@ -1013,20 +1007,16 @@ export function initCanvas(
       selectedNodeIds = new Set(seedNodeIds);
       filteredNodeIds = null;
 
-      // Center camera
+      // Center camera on the seed node(s), not the bounding box of all nodes
       camera = { x: 0, y: 0, scale: 1 };
-      if (state.nodes.length > 0) {
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const n of state.nodes) {
-          if (n.x < minX) minX = n.x;
-          if (n.y < minY) minY = n.y;
-          if (n.x > maxX) maxX = n.x;
-          if (n.y > maxY) maxY = n.y;
-        }
-        const cx = (minX + maxX) / 2;
-        const cy = (minY + maxY) / 2;
-        camera.x = cx - canvas.clientWidth / 2;
-        camera.y = cy - canvas.clientHeight / 2;
+      const seedNodes = state.nodes.filter((n) => seedNodeIds.includes(n.id));
+      if (seedNodes.length > 0) {
+        let sx = 0, sy = 0;
+        for (const n of seedNodes) { sx += n.x; sy += n.y; }
+        sx /= seedNodes.length;
+        sy /= seedNodes.length;
+        camera.x = sx - canvas.clientWidth / 2;
+        camera.y = sy - canvas.clientHeight / 2;
       }
 
       simulate();

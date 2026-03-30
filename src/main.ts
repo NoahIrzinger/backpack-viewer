@@ -208,10 +208,21 @@ async function main() {
     exit.title = "Exit focus (Esc)";
     exit.addEventListener("click", () => toolsPane.clearFocusSet());
 
+    const walkBtn = document.createElement("button");
+    walkBtn.className = "walk-indicator";
+    if (canvas.getWalkMode()) walkBtn.classList.add("active");
+    walkBtn.textContent = "Walk";
+    walkBtn.title = "Toggle walk mode (W) — click nodes to traverse";
+    walkBtn.addEventListener("click", () => {
+      canvas.setWalkMode(!canvas.getWalkMode());
+      walkBtn.classList.toggle("active", canvas.getWalkMode());
+    });
+
     focusIndicator.appendChild(label);
     focusIndicator.appendChild(minus);
     focusIndicator.appendChild(hopsLabel);
     focusIndicator.appendChild(plus);
+    focusIndicator.appendChild(walkBtn);
     focusIndicator.appendChild(exit);
   }
 
@@ -648,7 +659,11 @@ async function main() {
     clusteringIncrease() { const p = getLayoutParams(); setLayoutParams({ clusterStrength: Math.min(1, p.clusterStrength + 0.03) }); canvas.reheat(); },
     help() { shortcuts.toggle(); },
     toggleSidebar() { sidebar.toggle(); },
-    walkMode() { canvas.setWalkMode(!canvas.getWalkMode()); },
+    walkMode() {
+      canvas.setWalkMode(!canvas.getWalkMode());
+      const walkBtn = canvasContainer.querySelector(".walk-indicator");
+      if (walkBtn) walkBtn.classList.toggle("active", canvas.getWalkMode());
+    },
     escape() { if (canvas.isFocused()) { toolsPane.clearFocusSet(); } else { shortcuts.hide(); } },
   };
 
