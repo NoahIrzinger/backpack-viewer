@@ -19,6 +19,7 @@ const ALPHA_MIN = 0.001;
 export interface CanvasConfig {
   lod?: { hideBadges?: number; hideLabels?: number; hideEdgeLabels?: number; smallNodes?: number; hideArrows?: number };
   navigation?: { zoomFactor?: number; zoomMin?: number; zoomMax?: number; panAnimationMs?: number };
+  walk?: { pulseSpeed?: number };
 }
 
 // Defaults — overridden per-instance via config
@@ -51,6 +52,7 @@ export function initCanvas(
 ) {
   const lod = { ...LOD_DEFAULTS, ...(config?.lod ?? {}) };
   const nav = { ...NAV_DEFAULTS, ...(config?.navigation ?? {}) };
+  const walkCfg = { pulseSpeed: 0.02, ...(config?.walk ?? {}) };
 
   const canvas = container.querySelector("canvas") as HTMLCanvasElement;
   const ctx = canvas.getContext("2d")!;
@@ -135,8 +137,9 @@ export function initCanvas(
 
     // Advance pulse animation for walk mode
     if (walkMode && walkTrail.length > 0) {
-      pulsePhase += 0.05;
+      pulsePhase += walkCfg.pulseSpeed;
     }
+    const walkTrailSet = walkMode ? new Set(walkTrail) : null;
 
     // Read theme colors from CSS variables each frame
     const edgeColor = cssVar("--canvas-edge");
@@ -228,6 +231,7 @@ export function initCanvas(
 
       const highlighted = isConnected || (filteredNodeIds !== null && bothMatch);
       const edgeDimmed = filteredNodeIds !== null && !bothMatch;
+      const isWalkEdge = walkTrailSet !== null && walkTrailSet.has(edge.sourceId) && walkTrailSet.has(edge.targetId);
 
       // Check if this edge is part of the highlighted path
       const fullEdge = highlightedPath ? lastLoadedData?.edges.find(e =>
@@ -246,17 +250,22 @@ export function initCanvas(
       ctx.beginPath();
       ctx.moveTo(source.x, source.y);
       ctx.lineTo(target.x, target.y);
-      ctx.strokeStyle = isPathEdge
-        ? (cssVar("--accent") || "#d4a27f")
+      const accent = cssVar("--accent") || "#d4a27f";
+      ctx.strokeStyle = isPathEdge || isWalkEdge
+        ? accent
         : highlighted
           ? edgeHighlight
           : edgeDimmed
             ? edgeDimColor
             : edgeColor;
-      ctx.lineWidth = isPathEdge
+      ctx.lineWidth = isPathEdge || isWalkEdge
         ? 3
         : camera.scale < lod.hideArrows ? 1 : highlighted ? 2.5 : 1.5;
+      if (isWalkEdge) {
+        ctx.globalAlpha = 0.5 + 0.5 * Math.sin(pulsePhase);
+      }
       ctx.stroke();
+      ctx.globalAlpha = 1;
 
       // Arrowhead
       if (camera.scale >= lod.hideArrows) {
@@ -301,32 +310,18 @@ export function initCanvas(
 
       const r = camera.scale < lod.smallNodes ? NODE_RADIUS * 0.5 : NODE_RADIUS;
 
-      // Walk trail effect — pulsing ring for visited nodes
-      const walkIndex = walkMode ? walkTrail.indexOf(node.id) : -1;
-      if (walkIndex >= 0) {
-        const isCurrent = walkIndex === walkTrail.length - 1;
-        const trailAge = (walkTrail.length - 1 - walkIndex) / Math.max(walkTrail.length, 1);
+      // Walk trail effect — all visited nodes pulse together
+      if (walkTrailSet?.has(node.id)) {
+        const isCurrent = walkTrail[walkTrail.length - 1] === node.id;
+        const pulse = 0.5 + 0.5 * Math.sin(pulsePhase);
+        const accent = cssVar("--accent") || "#d4a27f";
         ctx.save();
-        if (isCurrent) {
-          // Current node: pulsing accent ring
-          const pulse = 0.6 + 0.4 * Math.sin(pulsePhase);
-          ctx.strokeStyle = cssVar("--accent") || "#d4a27f";
-          ctx.lineWidth = 3;
-          ctx.globalAlpha = pulse;
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, r + 6, 0, Math.PI * 2);
-          ctx.stroke();
-        } else {
-          // Past visited: fading dotted ring (more recent = more visible)
-          ctx.strokeStyle = cssVar("--accent") || "#d4a27f";
-          ctx.lineWidth = 1.5;
-          ctx.globalAlpha = 0.15 + 0.35 * (1 - trailAge);
-          ctx.setLineDash([3, 3]);
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, r + 4, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.setLineDash([]);
-        }
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = isCurrent ? 3 : 2;
+        ctx.globalAlpha = isCurrent ? 0.5 + 0.5 * pulse : 0.3 + 0.4 * pulse;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r + (isCurrent ? 6 : 4), 0, Math.PI * 2);
+        ctx.stroke();
         ctx.restore();
       }
 

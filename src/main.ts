@@ -255,7 +255,7 @@ async function main() {
       infoPanel.setFocusDisabled(false);
       if (activeOntology) updateUrl(activeOntology);
     }
-  }, { lod: cfg.lod, navigation: cfg.navigation });
+  }, { lod: cfg.lod, navigation: cfg.navigation, walk: (cfg as any).walk });
 
   const search = initSearch(canvasContainer, {
     maxResults: cfg.limits.maxSearchResults,

@@ -58,6 +58,9 @@
     "smallNodes": 0.2,
     "hideArrows": 0.15
   },
+  "walk": {
+    "pulseSpeed": 0.02
+  },
   "limits": {
     "maxSearchResults": 8,
     "maxQualityItems": 5,

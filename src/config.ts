@@ -29,6 +29,7 @@ export function loadViewerConfig(): ViewerConfig {
       layout: { ...defaultConfig.layout, ...(user.layout ?? {}) },
       navigation: { ...defaultConfig.navigation, ...(user.navigation ?? {}) },
       lod: { ...defaultConfig.lod, ...(user.lod ?? {}) },
+      walk: { ...defaultConfig.walk, ...(user.walk ?? {}) },
       limits: { ...defaultConfig.limits, ...(user.limits ?? {}) },
     };
   } catch {
