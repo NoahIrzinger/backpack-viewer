@@ -579,6 +579,26 @@ export function initCanvas(
     walkAnimFrame = requestAnimationFrame(walkAnimate);
   }
 
+  function fitToNodes() {
+    if (!state || state.nodes.length === 0) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of state.nodes) {
+      if (n.x < minX) minX = n.x;
+      if (n.y < minY) minY = n.y;
+      if (n.x > maxX) maxX = n.x;
+      if (n.y > maxY) maxY = n.y;
+    }
+    const pad = NODE_RADIUS * 4;
+    const graphW = (maxX - minX) + pad * 2;
+    const graphH = (maxY - minY) + pad * 2;
+    const scaleX = canvas.clientWidth / Math.max(graphW, 1);
+    const scaleY = canvas.clientHeight / Math.max(graphH, 1);
+    camera.scale = Math.min(scaleX, scaleY, 2);
+    camera.x = (minX + maxX) / 2 - canvas.clientWidth / (2 * camera.scale);
+    camera.y = (minY + maxY) / 2 - canvas.clientHeight / (2 * camera.scale);
+    render();
+  }
+
   function simulate() {
     if (!state || alpha < ALPHA_MIN) {
       // Start walk animation loop if simulation stopped but walk mode is active
@@ -675,18 +695,7 @@ export function initCanvas(
       // Center after physics settle
       setTimeout(() => {
         if (!state) return;
-        if (state.nodes.length > 0) {
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          for (const n of state.nodes) {
-            if (n.x < minX) minX = n.x;
-            if (n.y < minY) minY = n.y;
-            if (n.x > maxX) maxX = n.x;
-            if (n.y > maxY) maxY = n.y;
-          }
-          camera.x = (minX + maxX) / 2 - canvas.clientWidth / (2 * camera.scale);
-          camera.y = (minY + maxY) / 2 - canvas.clientHeight / (2 * camera.scale);
-        }
-        render();
+        fitToNodes();
       }, 300);
       onFocusChange?.({ seedNodeIds: [hit.id], hops: walkHops, totalNodes: subgraph.nodes.length });
       onNodeClick?.([hit.id]);
@@ -1008,20 +1017,7 @@ export function initCanvas(
     },
 
     centerView() {
-      if (!state) return;
-      camera = { x: 0, y: 0, scale: 1 };
-      if (state.nodes.length > 0) {
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const n of state.nodes) {
-          if (n.x < minX) minX = n.x;
-          if (n.y < minY) minY = n.y;
-          if (n.x > maxX) maxX = n.x;
-          if (n.y > maxY) maxY = n.y;
-        }
-        camera.x = (minX + maxX) / 2 - canvas.clientWidth / 2;
-        camera.y = (minY + maxY) / 2 - canvas.clientHeight / 2;
-      }
-      render();
+      fitToNodes();
     },
 
     panBy(dx: number, dy: number) {
@@ -1103,22 +1099,10 @@ export function initCanvas(
       camera = { x: 0, y: 0, scale: 1 };
       simulate();
 
-      // Center after a short delay to let physics settle
+      // Center + fit after physics settle
       setTimeout(() => {
         if (!state || !focusSeedIds) return;
-        // Use the same centering logic as centerView
-        if (state.nodes.length > 0) {
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          for (const n of state.nodes) {
-            if (n.x < minX) minX = n.x;
-            if (n.y < minY) minY = n.y;
-            if (n.x > maxX) maxX = n.x;
-            if (n.y > maxY) maxY = n.y;
-          }
-          camera.x = (minX + maxX) / 2 - canvas.clientWidth / (2 * camera.scale);
-          camera.y = (minY + maxY) / 2 - canvas.clientHeight / (2 * camera.scale);
-        }
-        render();
+        fitToNodes();
       }, 300);
       onFocusChange?.({
         seedNodeIds,
