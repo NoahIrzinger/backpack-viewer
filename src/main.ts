@@ -513,11 +513,13 @@ async function main() {
     const trail = canvas.getWalkTrail();
     if (!currentData || trail.length === 0) {
       toolsPane.setWalkTrail([]);
+      hidePathBar();
       return;
     }
+
+    const edgeIds: string[] = [];
     const items = trail.map((id, i) => {
       const node = currentData!.nodes.find((n) => n.id === id);
-      // Find edge type connecting this node to the previous one in the trail
       let edgeType: string | undefined;
       if (i > 0) {
         const prevId = trail[i - 1];
@@ -526,6 +528,7 @@ async function main() {
           (e.targetId === prevId && e.sourceId === id)
         );
         edgeType = edge?.type;
+        if (edge) edgeIds.push(edge.id);
       }
       return {
         id,
@@ -535,6 +538,14 @@ async function main() {
       };
     });
     toolsPane.setWalkTrail(items);
+
+    // Show path bar for walk trail
+    if (trail.length >= 2) {
+      canvas.setHighlightedPath(trail, edgeIds);
+      showPathBar({ nodeIds: trail, edgeIds });
+    } else {
+      hidePathBar();
+    }
   }
 
   async function refreshBranches(graphName: string) {
