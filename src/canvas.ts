@@ -79,6 +79,8 @@ export function initCanvas(
 
   // Walk mode state
   let walkMode = false;
+  let walkTrail: string[] = []; // node IDs visited during walk, most recent last
+  let pulsePhase = 0; // animation counter for pulse effect
 
   // Pan animation state
   let panTarget: { x: number; y: number } | null = null;
@@ -129,6 +131,11 @@ export function initCanvas(
     if (!state) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       return;
+    }
+
+    // Advance pulse animation for walk mode
+    if (walkMode && walkTrail.length > 0) {
+      pulsePhase += 0.05;
     }
 
     // Read theme colors from CSS variables each frame
@@ -293,6 +300,35 @@ export function initCanvas(
         (selectedNodeIds.size > 0 && !isSelected && !isNeighbor);
 
       const r = camera.scale < lod.smallNodes ? NODE_RADIUS * 0.5 : NODE_RADIUS;
+
+      // Walk trail effect — pulsing ring for visited nodes
+      const walkIndex = walkMode ? walkTrail.indexOf(node.id) : -1;
+      if (walkIndex >= 0) {
+        const isCurrent = walkIndex === walkTrail.length - 1;
+        const trailAge = (walkTrail.length - 1 - walkIndex) / Math.max(walkTrail.length, 1);
+        ctx.save();
+        if (isCurrent) {
+          // Current node: pulsing accent ring
+          const pulse = 0.6 + 0.4 * Math.sin(pulsePhase);
+          ctx.strokeStyle = cssVar("--accent") || "#d4a27f";
+          ctx.lineWidth = 3;
+          ctx.globalAlpha = pulse;
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, r + 6, 0, Math.PI * 2);
+          ctx.stroke();
+        } else {
+          // Past visited: fading dotted ring (more recent = more visible)
+          ctx.strokeStyle = cssVar("--accent") || "#d4a27f";
+          ctx.lineWidth = 1.5;
+          ctx.globalAlpha = 0.15 + 0.35 * (1 - trailAge);
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, r + 4, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        ctx.restore();
+      }
 
       // Glow for selected node
       if (isSelected) {
@@ -535,8 +571,24 @@ export function initCanvas(
     }
   }
 
+  let walkAnimFrame = 0;
+  function walkAnimate() {
+    if (!walkMode || walkTrail.length === 0) {
+      walkAnimFrame = 0;
+      return;
+    }
+    render();
+    walkAnimFrame = requestAnimationFrame(walkAnimate);
+  }
+
   function simulate() {
-    if (!state || alpha < ALPHA_MIN) return;
+    if (!state || alpha < ALPHA_MIN) {
+      // Start walk animation loop if simulation stopped but walk mode is active
+      if (walkMode && walkTrail.length > 0 && !walkAnimFrame) {
+        walkAnimFrame = requestAnimationFrame(walkAnimate);
+      }
+      return;
+    }
     alpha = tick(state, alpha);
     render();
     animFrame = requestAnimationFrame(simulate);
@@ -581,6 +633,7 @@ export function initCanvas(
 
     if (walkMode && focusSeedIds && hit) {
       // Walk mode: re-center focus on clicked node (minimum 1 hop so you see neighbors)
+      if (!walkTrail.includes(hit.id)) walkTrail.push(hit.id);
       focusSeedIds = [hit.id];
       const walkHops = Math.max(1, focusHops);
       focusHops = walkHops;
@@ -1121,6 +1174,14 @@ export function initCanvas(
 
     setWalkMode(enabled: boolean) {
       walkMode = enabled;
+      if (enabled) {
+        walkTrail = focusSeedIds ? [...focusSeedIds] : [...selectedNodeIds];
+        if (!walkAnimFrame) walkAnimFrame = requestAnimationFrame(walkAnimate);
+      } else {
+        walkTrail = [];
+        if (walkAnimFrame) { cancelAnimationFrame(walkAnimFrame); walkAnimFrame = 0; }
+      }
+      render();
     },
 
     getWalkMode(): boolean {
