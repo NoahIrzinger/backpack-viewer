@@ -9,6 +9,7 @@ interface ToolsPaneCallbacks {
   onWalkTrailRemove?: (nodeId: string) => void;
   onWalkIsolate?: () => void;
   onWalkSaveSnippet?: (label: string) => void;
+  onStarredSaveSnippet?: (label: string, nodeIds: string[]) => void;
   onRenameNodeType: (oldType: string, newType: string) => void;
   onRenameEdgeType: (oldType: string, newType: string) => void;
   onToggleEdgeLabels: (visible: boolean) => void;
@@ -27,6 +28,7 @@ interface DerivedStats {
   edgeCount: number;
   types: { name: string; count: number }[];
   edgeTypes: { name: string; count: number }[];
+  starred: { id: string; label: string; type: string }[];
   orphans: { id: string; label: string; type: string }[];
   singletons: { name: string }[]; // types with only 1 node
   emptyNodes: { id: string; label: string; type: string }[]; // nodes with no properties beyond the label
@@ -543,6 +545,90 @@ export function initToolsPane(
 
     const qq = qualitySearch.toLowerCase();
 
+    // Starred nodes — click to navigate, focus button
+    const filteredStarred = stats.starred.filter((n) =>
+      !qq || n.label.toLowerCase().includes(qq) || n.type.toLowerCase().includes(qq)
+    );
+    if (filteredStarred.length) {
+      target.appendChild(makeSection("\u2605 Starred", (section) => {
+        for (const n of filteredStarred) {
+          const row = document.createElement("div");
+          row.className = "tools-pane-row tools-pane-clickable";
+
+          const dot = document.createElement("span");
+          dot.className = "tools-pane-dot";
+          dot.style.backgroundColor = getColor(n.type);
+
+          const name = document.createElement("span");
+          name.className = "tools-pane-name";
+          name.textContent = n.label;
+
+          const focusBtn = document.createElement("button");
+          focusBtn.className = "tools-pane-edit tools-pane-focus-toggle";
+          if (isNodeFocused(n.id)) focusBtn.classList.add("tools-pane-focus-active");
+          focusBtn.textContent = "\u25CE";
+          focusBtn.title = isNodeFocused(n.id)
+            ? `Remove ${n.label} from focus`
+            : `Add ${n.label} to focus`;
+
+          row.appendChild(dot);
+          row.appendChild(name);
+          row.appendChild(focusBtn);
+
+          row.addEventListener("click", (e) => {
+            if ((e.target as HTMLElement).closest(".tools-pane-edit")) return;
+            callbacks.onNavigateToNode(n.id);
+          });
+
+          focusBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (focusSet.nodeIds.has(n.id)) {
+              focusSet.nodeIds.delete(n.id);
+            } else {
+              focusSet.nodeIds.add(n.id);
+            }
+            emitFocusChange();
+            render();
+          });
+
+          section.appendChild(row);
+        }
+
+        // Action buttons row
+        const actions = document.createElement("div");
+        actions.className = "tools-pane-row tools-pane-actions";
+
+        const focusAllBtn = document.createElement("button");
+        focusAllBtn.className = "tools-pane-action-btn";
+        focusAllBtn.textContent = "Focus all";
+        focusAllBtn.title = "Enter focus mode with all starred nodes";
+        focusAllBtn.addEventListener("click", () => {
+          focusSet.nodeIds.clear();
+          focusSet.types.clear();
+          for (const n of stats!.starred) focusSet.nodeIds.add(n.id);
+          emitFocusChange();
+          render();
+        });
+        actions.appendChild(focusAllBtn);
+
+        if (callbacks.onStarredSaveSnippet) {
+          const saveBtn = document.createElement("button");
+          saveBtn.className = "tools-pane-action-btn";
+          saveBtn.textContent = "Save as snippet";
+          saveBtn.title = "Save starred nodes as a reusable snippet";
+          saveBtn.addEventListener("click", async () => {
+            const label = await showPrompt("Snippet name", "starred");
+            if (label) {
+              callbacks.onStarredSaveSnippet!(label, stats!.starred.map((n) => n.id));
+            }
+          });
+          actions.appendChild(saveBtn);
+        }
+
+        section.appendChild(actions);
+      }));
+    }
+
     // Most connected nodes — click to navigate, focus button
     const filteredConnected = stats.mostConnected.filter((n) =>
       !qq || n.label.toLowerCase().includes(qq) || n.type.toLowerCase().includes(qq)
@@ -1006,6 +1092,10 @@ export function initToolsPane(
 
     const nodeLabel = (n: Node) => firstStringValue(n.properties) ?? n.id;
 
+    const starred = graphData.nodes
+      .filter((n) => n.properties._starred === true)
+      .map((n) => ({ id: n.id, label: nodeLabel(n), type: n.type }));
+
     const orphans = graphData.nodes
       .filter((n) => !connectedNodes.has(n.id))
       .map((n) => ({ id: n.id, label: nodeLabel(n), type: n.type }));
@@ -1038,6 +1128,7 @@ export function initToolsPane(
       edgeTypes: [...edgeTypeCounts.entries()]
         .sort((a, b) => b[1] - a[1])
         .map(([name, count]) => ({ name, count })),
+      starred,
       orphans,
       singletons,
       emptyNodes,

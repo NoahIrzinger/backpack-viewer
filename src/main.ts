@@ -365,6 +365,15 @@ async function main() {
       await saveSnippet(activeOntology, label, trail, edgeIds);
       await refreshSnippets(activeOntology);
     },
+    async onStarredSaveSnippet(label, nodeIds) {
+      if (!activeOntology || !currentData) return;
+      const nodeSet = new Set(nodeIds);
+      const edgeIds = currentData.edges
+        .filter((e) => nodeSet.has(e.sourceId) && nodeSet.has(e.targetId))
+        .map((e) => e.id);
+      await saveSnippet(activeOntology, label, nodeIds, edgeIds);
+      await refreshSnippets(activeOntology);
+    },
     onFocusChange(seedNodeIds) {
       if (seedNodeIds && seedNodeIds.length > 0) {
         canvas.enterFocus(seedNodeIds, 0);
