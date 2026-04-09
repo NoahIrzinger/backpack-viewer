@@ -1,6 +1,8 @@
 import type { LearningGraphData } from "backpack-ontology";
-import { createLayout, extractSubgraph, tick, type LayoutState, type LayoutNode } from "./layout";
+import { createLayout, extractSubgraph, tick, getLayoutParams, type LayoutState, type LayoutNode } from "./layout";
 import { getColor } from "./colors";
+import { SpatialHash } from "./spatial-hash";
+import { drawCachedLabel, clearLabelCache } from "./label-cache";
 
 interface Camera {
   x: number;
@@ -17,13 +19,13 @@ const NODE_RADIUS = 20;
 const ALPHA_MIN = 0.001;
 
 export interface CanvasConfig {
-  lod?: { hideBadges?: number; hideLabels?: number; hideEdgeLabels?: number; smallNodes?: number; hideArrows?: number };
+  lod?: { hideBadges?: number; hideLabels?: number; hideEdgeLabels?: number; smallNodes?: number; hideArrows?: number; dotNodes?: number; hullsOnly?: number };
   navigation?: { zoomFactor?: number; zoomMin?: number; zoomMax?: number; panAnimationMs?: number };
   walk?: { pulseSpeed?: number };
 }
 
 // Defaults — overridden per-instance via config
-const LOD_DEFAULTS = { hideBadges: 0.4, hideLabels: 0.25, hideEdgeLabels: 0.35, smallNodes: 0.2, hideArrows: 0.15 };
+const LOD_DEFAULTS = { hideBadges: 0.4, hideLabels: 0.25, hideEdgeLabels: 0.35, smallNodes: 0.2, hideArrows: 0.15, dotNodes: 0.1, hullsOnly: 0.05 };
 const NAV_DEFAULTS = { zoomFactor: 1.3, zoomMin: 0.05, zoomMax: 10, panAnimationMs: 300 };
 
 /** Check if a point is within the visible viewport (with padding). */
@@ -84,6 +86,52 @@ export function initCanvas(
   let walkTrail: string[] = []; // node IDs visited during walk, most recent last
   let pulsePhase = 0; // animation counter for pulse effect
 
+  // Spatial hash for O(1) hit testing — cell size = 2× node radius
+  const nodeHash = new SpatialHash<LayoutNode>(NODE_RADIUS * 2);
+
+  // Render coalescing — multiple requestRedraw() calls per frame result in one render()
+  let renderPending = 0;
+  function requestRedraw(): void {
+    if (!renderPending) renderPending = requestAnimationFrame(() => { renderPending = 0; render(); });
+  }
+
+  // Layout Web Worker — offloads physics simulation from the main thread.
+  // For small graphs (< WORKER_THRESHOLD nodes), runs on main thread to avoid overhead.
+  const WORKER_THRESHOLD = 150;
+  let layoutWorker: Worker | null = null;
+  let useWorker = false;
+
+  function getWorker(): Worker {
+    if (!layoutWorker) {
+      layoutWorker = new Worker(new URL("./layout-worker.ts", import.meta.url), { type: "module" });
+      layoutWorker.onmessage = onWorkerMessage;
+    }
+    return layoutWorker;
+  }
+
+  function onWorkerMessage(e: MessageEvent) {
+    const msg = e.data;
+    if (msg.type === "tick" && state) {
+      const positions: Float64Array = msg.positions;
+      const nodes = state.nodes;
+      for (let i = 0; i < nodes.length; i++) {
+        nodes[i].x = positions[i * 4];
+        nodes[i].y = positions[i * 4 + 1];
+        nodes[i].vx = positions[i * 4 + 2];
+        nodes[i].vy = positions[i * 4 + 3];
+      }
+      alpha = msg.alpha;
+      nodeHash.rebuild(nodes);
+      render();
+    }
+    if (msg.type === "settled") {
+      alpha = 0;
+      if (walkMode && walkTrail.length > 0 && !walkAnimFrame) {
+        walkAnimFrame = requestAnimationFrame(walkAnimate);
+      }
+    }
+  }
+
   // Pan animation state
   let panTarget: { x: number; y: number } | null = null;
   let panStart: { x: number; y: number; time: number } | null = null;
@@ -94,7 +142,7 @@ export function initCanvas(
   function resize() {
     canvas.width = canvas.clientWidth * dpr;
     canvas.height = canvas.clientHeight * dpr;
-    render();
+    requestRedraw();
   }
 
   const observer = new ResizeObserver(resize);
@@ -115,16 +163,7 @@ export function initCanvas(
   function nodeAtScreen(sx: number, sy: number): LayoutNode | null {
     if (!state) return null;
     const [wx, wy] = screenToWorld(sx, sy);
-    // Iterate in reverse so topmost (last drawn) nodes are hit first
-    for (let i = state.nodes.length - 1; i >= 0; i--) {
-      const node = state.nodes[i];
-      const dx = wx - node.x;
-      const dy = wy - node.y;
-      if (dx * dx + dy * dy <= NODE_RADIUS * NODE_RADIUS) {
-        return node;
-      }
-    }
-    return null;
+    return nodeHash.query(wx, wy, NODE_RADIUS);
   }
 
   // --- Rendering ---
@@ -208,103 +247,145 @@ export function initCanvas(
       }
     }
 
-    // Draw edges
-    if (showEdges) for (const edge of state.edges) {
-      const source = state.nodeMap.get(edge.sourceId);
-      const target = state.nodeMap.get(edge.targetId);
-      if (!source || !target) continue;
-
-      // Viewport culling — skip if both endpoints are off-screen
-      if (!isInViewport(source.x, source.y, camera, canvas.clientWidth, canvas.clientHeight, 200) &&
-          !isInViewport(target.x, target.y, camera, canvas.clientWidth, canvas.clientHeight, 200)) continue;
-
-      const sourceMatch = filteredNodeIds === null || filteredNodeIds.has(edge.sourceId);
-      const targetMatch = filteredNodeIds === null || filteredNodeIds.has(edge.targetId);
-      const bothMatch = sourceMatch && targetMatch;
-
-      // Hide edges where neither endpoint matches the filter
-      if (filteredNodeIds !== null && !sourceMatch && !targetMatch) continue;
-
-      const isConnected =
-        selectedNodeIds.size > 0 &&
-        (selectedNodeIds.has(edge.sourceId) || selectedNodeIds.has(edge.targetId));
-
-      const highlighted = isConnected || (filteredNodeIds !== null && bothMatch);
-      const edgeDimmed = filteredNodeIds !== null && !bothMatch;
-      const isWalkEdge = walkTrailSet !== null && walkTrailSet.has(edge.sourceId) && walkTrailSet.has(edge.targetId);
-
-      // Check if this edge is part of the highlighted path
-      const fullEdge = highlightedPath ? lastLoadedData?.edges.find(e =>
-        (e.sourceId === edge.sourceId && e.targetId === edge.targetId) ||
-        (e.targetId === edge.sourceId && e.sourceId === edge.targetId)
-      ) : null;
-      const isPathEdge = highlightedPath && fullEdge && highlightedPath.edgeIds.has(fullEdge.id);
-
-      // Self-loop
-      if (edge.sourceId === edge.targetId) {
-        drawSelfLoop(source, edge.type, highlighted, edgeColor, edgeHighlight, edgeLabel, edgeLabelHighlight);
-        continue;
-      }
-
-      // Line
-      ctx.beginPath();
-      ctx.moveTo(source.x, source.y);
-      ctx.lineTo(target.x, target.y);
-      const accent = cssVar("--accent") || "#d4a27f";
-      const walkEdgeColor = cssVar("--canvas-walk-edge") || "#1a1a1a";
-      ctx.strokeStyle = isPathEdge
-        ? accent
-        : isWalkEdge
-        ? walkEdgeColor
-        : highlighted
-          ? edgeHighlight
-          : edgeDimmed
-            ? edgeDimColor
-            : edgeColor;
-      ctx.lineWidth = isPathEdge || isWalkEdge
-        ? 3
-        : camera.scale < lod.hideArrows ? 1 : highlighted ? 2.5 : 1.5;
-      if (isWalkEdge) {
-        ctx.globalAlpha = 0.5 + 0.5 * Math.sin(pulsePhase);
-      }
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-
-      // Arrowhead
-      if (camera.scale >= lod.hideArrows) {
-        drawArrowhead(source.x, source.y, target.x, target.y, highlighted, arrowColor, arrowHighlight);
-      }
-
-      // Edge label at midpoint
-      if (showEdgeLabels && camera.scale >= lod.hideEdgeLabels) {
-        const mx = (source.x + target.x) / 2;
-        const my = (source.y + target.y) / 2;
-        ctx.fillStyle = highlighted
-          ? edgeLabelHighlight
-          : edgeDimmed
-            ? edgeLabelDim
-            : edgeLabel;
-        ctx.font = "9px system-ui, sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "bottom";
-        ctx.fillText(edge.type, mx, my - 4);
+    // Pre-compute neighbor set for selected nodes (avoids O(n×e) scan)
+    let neighborIds: Set<string> | null = null;
+    if (selectedNodeIds.size > 0) {
+      neighborIds = new Set<string>();
+      for (const edge of state.edges) {
+        if (selectedNodeIds.has(edge.sourceId)) neighborIds.add(edge.targetId);
+        if (selectedNodeIds.has(edge.targetId)) neighborIds.add(edge.sourceId);
       }
     }
 
-    // Draw nodes
-    for (const node of state.nodes) {
+    const accent = cssVar("--accent") || "#d4a27f";
+    const walkEdgeColor = cssVar("--canvas-walk-edge") || "#1a1a1a";
+    const drawArrows = camera.scale >= lod.hideArrows;
+    const drawEdgeLabelsThisFrame = showEdgeLabels && camera.scale >= lod.hideEdgeLabels;
+
+    // Draw edges — batched by visual state to minimize Canvas state changes
+    if (showEdges) {
+      // Classify edges into batches by visual style
+      const normalBatch: number[] = [];
+      const highlightBatch: number[] = [];
+      const dimBatch: number[] = [];
+      const walkBatch: number[] = [];
+      const pathBatch: number[] = [];
+      const deferred: { sx: number; sy: number; tx: number; ty: number; type: string; highlighted: boolean; edgeDimmed: boolean; isPathEdge: boolean; isWalkEdge: boolean }[] = [];
+
+      for (const edge of state.edges) {
+        const source = state.nodeMap.get(edge.sourceId);
+        const target = state.nodeMap.get(edge.targetId);
+        if (!source || !target) continue;
+
+        // Viewport culling
+        if (!isInViewport(source.x, source.y, camera, canvas.clientWidth, canvas.clientHeight, 200) &&
+            !isInViewport(target.x, target.y, camera, canvas.clientWidth, canvas.clientHeight, 200)) continue;
+
+        const sourceMatch = filteredNodeIds === null || filteredNodeIds.has(edge.sourceId);
+        const targetMatch = filteredNodeIds === null || filteredNodeIds.has(edge.targetId);
+        const bothMatch = sourceMatch && targetMatch;
+        if (filteredNodeIds !== null && !sourceMatch && !targetMatch) continue;
+
+        const isConnected =
+          selectedNodeIds.size > 0 &&
+          (selectedNodeIds.has(edge.sourceId) || selectedNodeIds.has(edge.targetId));
+        const highlighted = isConnected || (filteredNodeIds !== null && bothMatch);
+        const edgeDimmed = filteredNodeIds !== null && !bothMatch;
+        const isWalkEdge = walkTrailSet !== null && walkTrailSet.has(edge.sourceId) && walkTrailSet.has(edge.targetId);
+
+        const fullEdge = highlightedPath ? lastLoadedData?.edges.find(e =>
+          (e.sourceId === edge.sourceId && e.targetId === edge.targetId) ||
+          (e.targetId === edge.sourceId && e.sourceId === edge.targetId)
+        ) : null;
+        const isPathEdge = !!(highlightedPath && fullEdge && highlightedPath.edgeIds.has(fullEdge.id));
+
+        // Self-loop
+        if (edge.sourceId === edge.targetId) {
+          drawSelfLoop(source, edge.type, highlighted, edgeColor, edgeHighlight, edgeLabel, edgeLabelHighlight);
+          continue;
+        }
+
+        // Sort into batch by visual state
+        const batch = isPathEdge ? pathBatch
+          : isWalkEdge ? walkBatch
+          : highlighted ? highlightBatch
+          : edgeDimmed ? dimBatch
+          : normalBatch;
+        batch.push(source.x, source.y, target.x, target.y);
+
+        // Queue deferred work (arrowheads, labels)
+        if (drawArrows || drawEdgeLabelsThisFrame) {
+          deferred.push({ sx: source.x, sy: source.y, tx: target.x, ty: target.y, type: edge.type, highlighted, edgeDimmed, isPathEdge, isWalkEdge });
+        }
+      }
+
+      // Stroke each batch with one beginPath/stroke pair
+      const normalWidth = drawArrows ? 1.5 : 1;
+      const highlightWidth = drawArrows ? 2.5 : 1;
+      const batches: { lines: number[]; color: string; width: number; alpha: number }[] = [
+        { lines: normalBatch, color: edgeColor, width: normalWidth, alpha: 1 },
+        { lines: dimBatch, color: edgeDimColor, width: normalWidth, alpha: 1 },
+        { lines: highlightBatch, color: edgeHighlight, width: highlightWidth, alpha: 1 },
+        { lines: pathBatch, color: accent, width: 3, alpha: 1 },
+        { lines: walkBatch, color: walkEdgeColor, width: 3, alpha: 0.5 + 0.5 * Math.sin(pulsePhase) },
+      ];
+
+      for (const b of batches) {
+        if (b.lines.length === 0) continue;
+        ctx.beginPath();
+        for (let i = 0; i < b.lines.length; i += 4) {
+          ctx.moveTo(b.lines[i], b.lines[i + 1]);
+          ctx.lineTo(b.lines[i + 2], b.lines[i + 3]);
+        }
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = b.width;
+        ctx.globalAlpha = b.alpha;
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+
+      // Draw arrowheads and labels (can't batch — each needs individual positioning)
+      for (const d of deferred) {
+        if (drawArrows) {
+          drawArrowhead(d.sx, d.sy, d.tx, d.ty, d.highlighted || d.isPathEdge, arrowColor, arrowHighlight);
+        }
+        if (drawEdgeLabelsThisFrame) {
+          const mx = (d.sx + d.tx) / 2;
+          const my = (d.sy + d.ty) / 2;
+          ctx.fillStyle = d.highlighted
+            ? edgeLabelHighlight
+            : d.edgeDimmed
+              ? edgeLabelDim
+              : edgeLabel;
+          ctx.font = "9px system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+          ctx.fillText(d.type, mx, my - 4);
+        }
+      }
+    }
+
+    // Draw nodes — skip entirely at extreme zoom-out (hulls-only mode)
+    const hullsOnlyMode = camera.scale < lod.hullsOnly;
+    const dotMode = !hullsOnlyMode && camera.scale < lod.dotNodes;
+
+    if (!hullsOnlyMode) for (const node of state.nodes) {
       // Viewport culling
       if (!isInViewport(node.x, node.y, camera, canvas.clientWidth, canvas.clientHeight)) continue;
 
       const color = getColor(node.type);
+
+      // Dot mode — render as single-pixel colored dots, skip all decorations
+      if (dotMode) {
+        const filteredOut = filteredNodeIds !== null && !filteredNodeIds.has(node.id);
+        ctx.fillStyle = color;
+        ctx.globalAlpha = filteredOut ? 0.1 : 0.8;
+        ctx.fillRect(node.x - 2, node.y - 2, 4, 4);
+        continue;
+      }
+
       const isSelected = selectedNodeIds.has(node.id);
-      const isNeighbor =
-        selectedNodeIds.size > 0 &&
-        state.edges.some(
-          (e) =>
-            (selectedNodeIds.has(e.sourceId) && e.targetId === node.id) ||
-            (selectedNodeIds.has(e.targetId) && e.sourceId === node.id)
-        );
+      const isNeighbor = neighborIds !== null && neighborIds.has(node.id);
       const filteredOut =
         filteredNodeIds !== null && !filteredNodeIds.has(node.id);
       const dimmed =
@@ -350,6 +431,7 @@ export function initCanvas(
       ctx.strokeStyle = isSelected ? selectionBorder : nodeBorder;
       ctx.lineWidth = isSelected ? 3 : 1.5;
       ctx.stroke();
+      ctx.globalAlpha = 1;
 
       // Highlighted path glow
       if (highlightedPath && highlightedPath.nodeIds.has(node.id) && !isSelected) {
@@ -376,23 +458,18 @@ export function initCanvas(
         ctx.fillText("\u2605", node.x + r - 2, node.y - r + 2);
       }
 
-      // Label below
+      // Label below (cached offscreen)
       if (camera.scale >= lod.hideLabels) {
         const label =
           node.label.length > 24 ? node.label.slice(0, 22) + "..." : node.label;
-        ctx.fillStyle = dimmed ? nodeLabelDim : nodeLabel;
-        ctx.font = "11px system-ui, sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "top";
-        ctx.fillText(label, node.x, node.y + r + 4);
+        const labelColor = dimmed ? nodeLabelDim : nodeLabel;
+        drawCachedLabel(ctx, label, node.x, node.y + r + 4, "11px system-ui, sans-serif", labelColor, "top");
       }
 
-      // Type badge above
+      // Type badge above (cached offscreen)
       if (camera.scale >= lod.hideBadges) {
-        ctx.fillStyle = dimmed ? typeBadgeDim : typeBadge;
-        ctx.font = "9px system-ui, sans-serif";
-        ctx.textBaseline = "bottom";
-        ctx.fillText(node.type, node.x, node.y - r - 3);
+        const badgeColor = dimmed ? typeBadgeDim : typeBadge;
+        drawCachedLabel(ctx, node.type, node.x, node.y - r - 3, "9px system-ui, sans-serif", badgeColor, "bottom");
       }
 
       ctx.globalAlpha = 1;
@@ -596,7 +673,7 @@ export function initCanvas(
     camera.scale = Math.min(scaleX, scaleY, 2);
     camera.x = (minX + maxX) / 2 - canvas.clientWidth / (2 * camera.scale);
     camera.y = (minY + maxY) / 2 - canvas.clientHeight / (2 * camera.scale);
-    render();
+    requestRedraw();
   }
 
   function simulate() {
@@ -608,6 +685,7 @@ export function initCanvas(
       return;
     }
     alpha = tick(state, alpha);
+    nodeHash.rebuild(state.nodes);
     render();
     animFrame = requestAnimationFrame(simulate);
   }
@@ -635,7 +713,7 @@ export function initCanvas(
     camera.y -= dy / camera.scale;
     lastX = e.clientX;
     lastY = e.clientY;
-    render();
+    requestRedraw();
   });
 
   canvas.addEventListener("mouseup", (e) => {
@@ -685,12 +763,19 @@ export function initCanvas(
       focusHops = walkHops;
       const subgraph = extractSubgraph(lastLoadedData!, [hit.id], walkHops);
       cancelAnimationFrame(animFrame);
+      if (layoutWorker) layoutWorker.postMessage({ type: "stop" });
       state = createLayout(subgraph);
+      nodeHash.rebuild(state.nodes);
       alpha = 1;
       selectedNodeIds = new Set([hit.id]);
       filteredNodeIds = null;
       camera = { x: 0, y: 0, scale: 1 };
-      simulate();
+      useWorker = subgraph.nodes.length >= WORKER_THRESHOLD;
+      if (useWorker) {
+        getWorker().postMessage({ type: "start", data: subgraph });
+      } else {
+        simulate();
+      }
 
       // Center after physics settle
       setTimeout(() => {
@@ -725,7 +810,7 @@ export function initCanvas(
       selectedNodeIds.clear();
       onNodeClick?.(null);
     }
-    render();
+    requestRedraw();
   });
 
   canvas.addEventListener("mouseleave", () => {
@@ -756,7 +841,7 @@ export function initCanvas(
       camera.x = wx - mx / camera.scale;
       camera.y = wy - my / camera.scale;
 
-      render();
+      requestRedraw();
     },
     { passive: false }
   );
@@ -793,7 +878,7 @@ export function initCanvas(
       const dist = touchDistance(current[0], current[1]);
       const ratio = dist / initialPinchDist;
       camera.scale = Math.max(nav.zoomMin, Math.min(nav.zoomMax, initialPinchScale * ratio));
-      render();
+      requestRedraw();
     } else if (current.length === 1) {
       const dx = current[0].clientX - lastX;
       const dy = current[0].clientY - lastY;
@@ -805,7 +890,7 @@ export function initCanvas(
       camera.y -= dy / camera.scale;
       lastX = current[0].clientX;
       lastY = current[0].clientY;
-      render();
+      requestRedraw();
     }
 
     touches = current;
@@ -834,7 +919,7 @@ export function initCanvas(
       selectedNodeIds.clear();
       onNodeClick?.(null);
     }
-    render();
+    requestRedraw();
   }, { passive: false });
 
   // Prevent Safari page-level pinch zoom on the canvas
@@ -863,7 +948,7 @@ export function initCanvas(
     camera.scale = Math.min(nav.zoomMax, camera.scale * nav.zoomFactor);
     camera.x = wx - cx / camera.scale;
     camera.y = wy - cy / camera.scale;
-    render();
+    requestRedraw();
   });
 
   const zoomOutBtn = document.createElement("button");
@@ -877,7 +962,7 @@ export function initCanvas(
     camera.scale = Math.max(nav.zoomMin, camera.scale / nav.zoomFactor);
     camera.x = wx - cx / camera.scale;
     camera.y = wy - cy / camera.scale;
-    render();
+    requestRedraw();
   });
 
   const zoomResetBtn = document.createElement("button");
@@ -900,7 +985,7 @@ export function initCanvas(
       camera.x = cx - canvas.clientWidth / 2;
       camera.y = cy - canvas.clientHeight / 2;
     }
-    render();
+    requestRedraw();
   });
 
   zoomControls.appendChild(zoomInBtn);
@@ -913,12 +998,15 @@ export function initCanvas(
   return {
     loadGraph(data: LearningGraphData) {
       cancelAnimationFrame(animFrame);
+      if (layoutWorker) layoutWorker.postMessage({ type: "stop" });
+      clearLabelCache();
       lastLoadedData = data;
       // Exit any active focus when full graph reloads
       focusSeedIds = null;
       savedFullState = null;
       savedFullCamera = null;
       state = createLayout(data);
+      nodeHash.rebuild(state.nodes);
       alpha = 1;
       selectedNodeIds = new Set();
       filteredNodeIds = null;
@@ -941,12 +1029,18 @@ export function initCanvas(
         camera.y = cy - h / 2;
       }
 
-      simulate();
+      // Use worker for large graphs, main thread for small ones
+      useWorker = data.nodes.length >= WORKER_THRESHOLD;
+      if (useWorker) {
+        getWorker().postMessage({ type: "start", data });
+      } else {
+        simulate();
+      }
     },
 
     setFilteredNodeIds(ids: Set<string> | null) {
       filteredNodeIds = ids;
-      render();
+      requestRedraw();
     },
 
     panToNode(nodeId: string) {
@@ -998,22 +1092,22 @@ export function initCanvas(
 
     setEdges(visible: boolean) {
       showEdges = visible;
-      render();
+      requestRedraw();
     },
 
     setEdgeLabels(visible: boolean) {
       showEdgeLabels = visible;
-      render();
+      requestRedraw();
     },
 
     setTypeHulls(visible: boolean) {
       showTypeHulls = visible;
-      render();
+      requestRedraw();
     },
 
     setMinimap(visible: boolean) {
       showMinimap = visible;
-      render();
+      requestRedraw();
     },
 
     centerView() {
@@ -1023,7 +1117,7 @@ export function initCanvas(
     panBy(dx: number, dy: number) {
       camera.x += dx / camera.scale;
       camera.y += dy / camera.scale;
-      render();
+      requestRedraw();
     },
 
     zoomBy(factor: number) {
@@ -1033,13 +1127,17 @@ export function initCanvas(
       camera.scale = Math.max(nav.zoomMin, Math.min(nav.zoomMax, camera.scale * factor));
       camera.x = wx - cx / camera.scale;
       camera.y = wy - cy / camera.scale;
-      render();
+      requestRedraw();
     },
 
     reheat() {
-      alpha = 0.5;
-      cancelAnimationFrame(animFrame);
-      simulate();
+      if (useWorker && layoutWorker) {
+        layoutWorker.postMessage({ type: "params", params: getLayoutParams() });
+      } else {
+        alpha = 0.5;
+        cancelAnimationFrame(animFrame);
+        simulate();
+      }
     },
 
     exportImage(format: "png" | "svg"): string {
@@ -1090,14 +1188,21 @@ export function initCanvas(
 
       const subgraph = extractSubgraph(lastLoadedData, seedNodeIds, hops);
       cancelAnimationFrame(animFrame);
+      if (layoutWorker) layoutWorker.postMessage({ type: "stop" });
       state = createLayout(subgraph);
+      nodeHash.rebuild(state.nodes);
       alpha = 1;
       selectedNodeIds = new Set(seedNodeIds);
       filteredNodeIds = null;
 
       // Start simulation, then center after layout settles
       camera = { x: 0, y: 0, scale: 1 };
-      simulate();
+      useWorker = subgraph.nodes.length >= WORKER_THRESHOLD;
+      if (useWorker) {
+        getWorker().postMessage({ type: "start", data: subgraph });
+      } else {
+        simulate();
+      }
 
       // Center + fit after physics settle
       setTimeout(() => {
@@ -1114,14 +1219,16 @@ export function initCanvas(
     exitFocus() {
       if (!focusSeedIds || !savedFullState) return;
       cancelAnimationFrame(animFrame);
+      if (layoutWorker) layoutWorker.postMessage({ type: "stop" });
       state = savedFullState;
+      nodeHash.rebuild(state.nodes);
       camera = savedFullCamera ?? { x: 0, y: 0, scale: 1 };
       focusSeedIds = null;
       savedFullState = null;
       savedFullCamera = null;
       selectedNodeIds = new Set();
       filteredNodeIds = null;
-      render();
+      requestRedraw();
       onFocusChange?.(null);
     },
 
@@ -1174,12 +1281,12 @@ export function initCanvas(
       } else {
         highlightedPath = null;
       }
-      render();
+      requestRedraw();
     },
 
     clearHighlightedPath() {
       highlightedPath = null;
-      render();
+      requestRedraw();
     },
 
     setWalkMode(enabled: boolean) {
@@ -1191,7 +1298,7 @@ export function initCanvas(
         walkTrail = [];
         if (walkAnimFrame) { cancelAnimationFrame(walkAnimFrame); walkAnimFrame = 0; }
       }
-      render();
+      requestRedraw();
     },
 
     getWalkMode(): boolean {
@@ -1208,7 +1315,7 @@ export function initCanvas(
 
     removeFromWalkTrail(nodeId: string) {
       walkTrail = walkTrail.filter((id) => id !== nodeId);
-      render();
+      requestRedraw();
     },
 
     /** Hit-test a screen coordinate against nodes. Returns the node or null. */
@@ -1230,6 +1337,9 @@ export function initCanvas(
 
     destroy() {
       cancelAnimationFrame(animFrame);
+      if (renderPending) { cancelAnimationFrame(renderPending); renderPending = 0; }
+      if (walkAnimFrame) { cancelAnimationFrame(walkAnimFrame); walkAnimFrame = 0; }
+      if (layoutWorker) { layoutWorker.terminate(); layoutWorker = null; }
       observer.disconnect();
     },
   };

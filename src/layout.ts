@@ -1,4 +1,5 @@
 import type { LearningGraphData } from "backpack-ontology";
+import { buildQuadtree, applyRepulsion, type Body } from "./quadtree.js";
 
 export interface LayoutNode {
   id: string;
@@ -152,29 +153,82 @@ export function createLayout(data: LearningGraphData): LayoutState {
   return { nodes, edges, nodeMap };
 }
 
+// Barnes-Hut accuracy parameter (0.5 = accurate, 1.0 = fast).
+// 0.7 is a good balance for interactive use.
+const BH_THETA = 0.7;
+
+// Threshold below which we fall back to direct O(n²) — quadtree overhead isn't worth it
+const BH_THRESHOLD = 80;
+
 /** Run one tick of the force simulation. Returns new alpha. */
 export function tick(state: LayoutState, alpha: number): number {
   const { nodes, edges, nodeMap } = state;
 
-  // Repulsion — all pairs (stronger between different types)
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      const a = nodes[i];
-      const b = nodes[j];
-      let dx = b.x - a.x;
-      let dy = b.y - a.y;
-      let dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < MIN_DISTANCE) dist = MIN_DISTANCE;
+  // Repulsion — Barnes-Hut O(n log n) for large graphs, direct O(n²) for small
+  const crossRep = CROSS_TYPE_REPULSION_BASE * params.spacing;
 
-      const rep = a.type === b.type ? REPULSION : CROSS_TYPE_REPULSION_BASE * params.spacing;
-      const force = (rep * alpha) / (dist * dist);
-      const fx = (dx / dist) * force;
-      const fy = (dy / dist) * force;
+  if (nodes.length >= BH_THRESHOLD) {
+    // Barnes-Hut: apply cross-type repulsion strength globally via quadtree
+    const tree = buildQuadtree(nodes as Body[]);
+    if (tree) {
+      for (const node of nodes) {
+        applyRepulsion(tree, node as Body, BH_THETA, crossRep, alpha, MIN_DISTANCE);
+      }
+    }
 
-      a.vx -= fx;
-      a.vy -= fy;
-      b.vx += fx;
-      b.vy += fy;
+    // Same-type correction: same-type pairs should use REPULSION (weaker) not crossRep.
+    // Apply a negative correction of (crossRep - REPULSION) for same-type pairs.
+    // Group by type to avoid checking all n² pairs — only intra-group pairs.
+    const repDiff = crossRep - REPULSION;
+    if (repDiff > 0) {
+      const typeGroups = new Map<string, LayoutNode[]>();
+      for (const node of nodes) {
+        let group = typeGroups.get(node.type);
+        if (!group) { group = []; typeGroups.set(node.type, group); }
+        group.push(node);
+      }
+      for (const group of typeGroups.values()) {
+        for (let i = 0; i < group.length; i++) {
+          for (let j = i + 1; j < group.length; j++) {
+            const a = group[i];
+            const b = group[j];
+            let dx = b.x - a.x;
+            let dy = b.y - a.y;
+            let dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < MIN_DISTANCE) dist = MIN_DISTANCE;
+            // Subtract the excess repulsion (correction is attractive between same-type)
+            const force = (repDiff * alpha) / (dist * dist);
+            const fx = (dx / dist) * force;
+            const fy = (dy / dist) * force;
+            a.vx += fx;
+            a.vy += fy;
+            b.vx -= fx;
+            b.vy -= fy;
+          }
+        }
+      }
+    }
+  } else {
+    // Small graph — direct all-pairs (original algorithm)
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i];
+        const b = nodes[j];
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        let dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < MIN_DISTANCE) dist = MIN_DISTANCE;
+
+        const rep = a.type === b.type ? REPULSION : crossRep;
+        const force = (rep * alpha) / (dist * dist);
+        const fx = (dx / dist) * force;
+        const fy = (dy / dist) * force;
+
+        a.vx -= fx;
+        a.vy -= fy;
+        b.vx += fx;
+        b.vy += fy;
+      }
     }
   }
 
