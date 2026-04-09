@@ -92,6 +92,7 @@ export function initCanvas(
   // Render coalescing — multiple requestRedraw() calls per frame result in one render()
   let renderPending = 0;
   function requestRedraw(): void {
+    invalidateSceneCache();
     if (!renderPending) renderPending = requestAnimationFrame(() => { renderPending = 0; render(); });
   }
 
@@ -132,6 +133,17 @@ export function initCanvas(
     }
   }
 
+  // Scene cache — avoids full redraws during walk pulse animation.
+  // When the graph is settled, we snapshot the rendered scene (minus walk effects)
+  // to an OffscreenCanvas. Walk animate then composites cache + draws pulse overlay.
+  let sceneCache: OffscreenCanvas | null = null;
+  let sceneCacheCtx: OffscreenCanvasRenderingContext2D | null = null;
+  let sceneCacheDirty = true;
+
+  function invalidateSceneCache(): void {
+    sceneCacheDirty = true;
+  }
+
   // Pan animation state
   let panTarget: { x: number; y: number } | null = null;
   let panStart: { x: number; y: number; time: number } | null = null;
@@ -142,6 +154,7 @@ export function initCanvas(
   function resize() {
     canvas.width = canvas.clientWidth * dpr;
     canvas.height = canvas.clientHeight * dpr;
+    invalidateSceneCache();
     requestRedraw();
   }
 
@@ -168,17 +181,98 @@ export function initCanvas(
 
   // --- Rendering ---
 
+  /** Draw only walk pulse effects (edges + node glows) + minimap on top of cached scene. */
+  function renderWalkOverlay() {
+    if (!state) return;
+    pulsePhase += walkCfg.pulseSpeed;
+    const walkTrailSet = new Set(walkTrail);
+
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Composite cached scene
+    if (sceneCache) {
+      ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+      ctx.drawImage(sceneCache, 0, 0, canvas.clientWidth, canvas.clientHeight);
+    }
+
+    ctx.save();
+    ctx.translate(-camera.x * camera.scale, -camera.y * camera.scale);
+    ctx.scale(camera.scale, camera.scale);
+
+    // Walk edge pulse — redraw only walk trail edges
+    const walkEdgeColor = cssVar("--canvas-walk-edge") || "#1a1a1a";
+    const walkLines: number[] = [];
+    for (const edge of state.edges) {
+      if (!walkTrailSet.has(edge.sourceId) || !walkTrailSet.has(edge.targetId)) continue;
+      if (edge.sourceId === edge.targetId) continue;
+      const source = state.nodeMap.get(edge.sourceId);
+      const target = state.nodeMap.get(edge.targetId);
+      if (!source || !target) continue;
+      walkLines.push(source.x, source.y, target.x, target.y);
+    }
+    if (walkLines.length > 0) {
+      ctx.beginPath();
+      for (let i = 0; i < walkLines.length; i += 4) {
+        ctx.moveTo(walkLines[i], walkLines[i + 1]);
+        ctx.lineTo(walkLines[i + 2], walkLines[i + 3]);
+      }
+      ctx.strokeStyle = walkEdgeColor;
+      ctx.lineWidth = 3;
+      ctx.globalAlpha = 0.5 + 0.5 * Math.sin(pulsePhase);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    // Walk node glows
+    const r = camera.scale < lod.smallNodes ? NODE_RADIUS * 0.5 : NODE_RADIUS;
+    const accent = cssVar("--accent") || "#d4a27f";
+    for (const nodeId of walkTrail) {
+      const node = state.nodeMap.get(nodeId);
+      if (!node) continue;
+      if (!isInViewport(node.x, node.y, camera, canvas.clientWidth, canvas.clientHeight)) continue;
+      const isCurrent = nodeId === walkTrail[walkTrail.length - 1];
+      const pulse = 0.5 + 0.5 * Math.sin(pulsePhase);
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = isCurrent ? 3 : 2;
+      ctx.globalAlpha = isCurrent ? 0.5 + 0.5 * pulse : 0.3 + 0.4 * pulse;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r + (isCurrent ? 6 : 4), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.restore();
+
+    // Minimap
+    if (showMinimap && state.nodes.length > 1) {
+      drawMinimap();
+    }
+
+    ctx.restore();
+  }
+
   function render() {
     if (!state) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       return;
     }
 
+    // Fast path: walk-only animation with valid scene cache
+    if (!sceneCacheDirty && sceneCache && walkMode && walkTrail.length > 0 && alpha < ALPHA_MIN) {
+      renderWalkOverlay();
+      return;
+    }
+
+    // Determine if we should cache the scene (settled + walk mode active).
+    // When caching, we skip walk effects so the cache is a clean base layer.
+    const shouldCache = alpha < ALPHA_MIN && walkMode && walkTrail.length > 0;
+
     // Advance pulse animation for walk mode
     if (walkMode && walkTrail.length > 0) {
       pulsePhase += walkCfg.pulseSpeed;
     }
-    const walkTrailSet = walkMode ? new Set(walkTrail) : null;
+    const walkTrailSet = (walkMode && !shouldCache) ? new Set(walkTrail) : null;
 
     // Read theme colors from CSS variables each frame
     const edgeColor = cssVar("--canvas-edge");
@@ -478,6 +572,25 @@ export function initCanvas(
     ctx.restore();
     ctx.restore();
 
+    // Snapshot scene to cache BEFORE walk overlay and minimap.
+    // The cache contains the clean scene (hulls + edges + nodes) without walk effects.
+    if (shouldCache) {
+      const w = canvas.width;
+      const h = canvas.height;
+      if (!sceneCache || sceneCache.width !== w || sceneCache.height !== h) {
+        sceneCache = new OffscreenCanvas(w, h);
+        sceneCacheCtx = sceneCache.getContext("2d");
+      }
+      if (sceneCacheCtx) {
+        sceneCacheCtx.clearRect(0, 0, w, h);
+        sceneCacheCtx.drawImage(canvas, 0, 0);
+        sceneCacheDirty = false;
+      }
+      // Now draw walk effects + minimap on top for this frame
+      renderWalkOverlay();
+      return;
+    }
+
     // Minimap
     if (showMinimap && state.nodes.length > 1) {
       drawMinimap();
@@ -637,6 +750,7 @@ export function initCanvas(
     const ease = 1 - Math.pow(1 - t, 3);
     camera.x = panStart.x + (panTarget.x - panStart.x) * ease;
     camera.y = panStart.y + (panTarget.y - panStart.y) * ease;
+    invalidateSceneCache();
     render();
     if (t < 1) {
       requestAnimationFrame(animatePan);
@@ -1340,6 +1454,8 @@ export function initCanvas(
       if (renderPending) { cancelAnimationFrame(renderPending); renderPending = 0; }
       if (walkAnimFrame) { cancelAnimationFrame(walkAnimFrame); walkAnimFrame = 0; }
       if (layoutWorker) { layoutWorker.terminate(); layoutWorker = null; }
+      sceneCache = null;
+      sceneCacheCtx = null;
       observer.disconnect();
     },
   };
