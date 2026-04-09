@@ -2,6 +2,8 @@
 
 **See your learning graph.** A web-based visualizer for [Backpack](https://www.npmjs.com/package/backpack-ontology) learning graphs with force-directed layout, interactive navigation, and live reload.
 
+![Backpack Viewer demo](docs/assets/demo.gif)
+
 ## Quick start
 
 Tell Claude:
