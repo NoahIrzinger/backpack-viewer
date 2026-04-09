@@ -102,10 +102,21 @@ export function initCanvas(
   let layoutWorker: Worker | null = null;
   let useWorker = false;
 
-  function getWorker(): Worker {
+  function getWorker(): Worker | null {
     if (!layoutWorker) {
-      layoutWorker = new Worker(new URL("./layout-worker.js", import.meta.url), { type: "module" });
-      layoutWorker.onmessage = onWorkerMessage;
+      try {
+        layoutWorker = new Worker(new URL("./layout-worker.js", import.meta.url), { type: "module" });
+        layoutWorker.onmessage = onWorkerMessage;
+        layoutWorker.onerror = () => {
+          // Worker failed to load — fall back to main-thread layout
+          useWorker = false;
+          layoutWorker = null;
+          simulate();
+        };
+      } catch {
+        useWorker = false;
+        return null;
+      }
     }
     return layoutWorker;
   }
@@ -885,9 +896,11 @@ export function initCanvas(
       filteredNodeIds = null;
       camera = { x: 0, y: 0, scale: 1 };
       useWorker = subgraph.nodes.length >= WORKER_THRESHOLD;
-      if (useWorker) {
-        getWorker().postMessage({ type: "start", data: subgraph });
+      const w = useWorker ? getWorker() : null;
+      if (w) {
+        w.postMessage({ type: "start", data: subgraph });
       } else {
+        useWorker = false;
         simulate();
       }
 
@@ -1145,9 +1158,11 @@ export function initCanvas(
 
       // Use worker for large graphs, main thread for small ones
       useWorker = data.nodes.length >= WORKER_THRESHOLD;
-      if (useWorker) {
-        getWorker().postMessage({ type: "start", data });
+      const w = useWorker ? getWorker() : null;
+      if (w) {
+        w.postMessage({ type: "start", data });
       } else {
+        useWorker = false;
         simulate();
       }
     },
@@ -1312,9 +1327,11 @@ export function initCanvas(
       // Start simulation, then center after layout settles
       camera = { x: 0, y: 0, scale: 1 };
       useWorker = subgraph.nodes.length >= WORKER_THRESHOLD;
-      if (useWorker) {
-        getWorker().postMessage({ type: "start", data: subgraph });
+      const w = useWorker ? getWorker() : null;
+      if (w) {
+        w.postMessage({ type: "start", data: subgraph });
       } else {
+        useWorker = false;
         simulate();
       }
 
