@@ -103,7 +103,7 @@ export function initCanvas(
 
   function getWorker(): Worker {
     if (!layoutWorker) {
-      layoutWorker = new Worker(new URL("./layout-worker.ts", import.meta.url), { type: "module" });
+      layoutWorker = new Worker(new URL("./layout-worker.js", import.meta.url), { type: "module" });
       layoutWorker.onmessage = onWorkerMessage;
     }
     return layoutWorker;
