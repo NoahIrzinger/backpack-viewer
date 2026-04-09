@@ -1,6 +1,15 @@
 import type { LearningGraphSummary } from "backpack-ontology";
 import { showConfirm, showPrompt } from "./dialog";
 
+function formatTokenCount(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k tokens`;
+  return `${n} tokens`;
+}
+
+function estimateTokensFromCounts(nodeCount: number, edgeCount: number): number {
+  return nodeCount * 50 + edgeCount * 25 + 50; // rough: 50 tok/node, 25 tok/edge, 50 metadata
+}
+
 export interface SidebarCallbacks {
   onSelect: (name: string) => void;
   onRename?: (oldName: string, newName: string) => void;
@@ -96,7 +105,8 @@ export function initSidebar(
 
         const statsSpan = document.createElement("span");
         statsSpan.className = "stats";
-        statsSpan.textContent = `${s.nodeCount} nodes, ${s.edgeCount} edges`;
+        const tokens = estimateTokensFromCounts(s.nodeCount, s.edgeCount);
+        statsSpan.textContent = `${s.nodeCount} nodes, ${s.edgeCount} edges · ~${formatTokenCount(tokens)}`;
 
         const branchSpan = document.createElement("span");
         branchSpan.className = "sidebar-branch";

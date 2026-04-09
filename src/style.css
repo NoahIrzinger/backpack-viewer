@@ -543,6 +543,23 @@ body {
   background: var(--bg-hover);
 }
 
+/* --- Node Tooltip --- */
+
+.node-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 20;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  opacity: 0.95;
+}
+
 /* --- Canvas --- */
 
 #canvas-container {
@@ -1324,6 +1341,41 @@ body {
   color: var(--text-dim);
 }
 
+.tools-pane-token-card {
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-hover);
+  font-size: 11px;
+}
+
+.token-card-label {
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.token-card-stat {
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.token-card-bar {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  margin: 6px 0;
+  overflow: hidden;
+}
+
+.token-card-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
 .tools-pane-clickable {
   cursor: pointer;
   border-radius: 4px;
@@ -1578,16 +1630,52 @@ body {
   justify-content: center;
   z-index: 5;
   pointer-events: none;
+  overflow: hidden;
 }
 
 .empty-state.hidden {
   display: none;
 }
 
+.empty-state-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.empty-state-circle {
+  position: absolute;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.07;
+}
+
+.empty-state-circle.c1 { width: 80px; height: 80px; left: 20%; top: 15%; animation: float-circle 8s ease-in-out infinite; }
+.empty-state-circle.c2 { width: 50px; height: 50px; right: 25%; top: 25%; animation: float-circle 6s ease-in-out 1s infinite; }
+.empty-state-circle.c3 { width: 65px; height: 65px; left: 55%; bottom: 20%; animation: float-circle 7s ease-in-out 2s infinite; }
+.empty-state-circle.c4 { width: 40px; height: 40px; left: 15%; bottom: 30%; animation: float-circle 9s ease-in-out 0.5s infinite; }
+.empty-state-circle.c5 { width: 55px; height: 55px; right: 15%; bottom: 35%; animation: float-circle 7.5s ease-in-out 1.5s infinite; }
+
+.empty-state-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--text-dim);
+  animation: float-circle 10s ease-in-out infinite;
+}
+
+@keyframes float-circle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+
 .empty-state-content {
   text-align: center;
   max-width: 420px;
   padding: 40px 24px;
+  position: relative;
+  z-index: 1;
 }
 
 .empty-state-icon {

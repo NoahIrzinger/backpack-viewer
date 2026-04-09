@@ -86,6 +86,10 @@ export function initCanvas(
   let walkTrail: string[] = []; // node IDs visited during walk, most recent last
   let pulsePhase = 0; // animation counter for pulse effect
 
+  // Entrance animation state
+  let loadTime = 0;
+  const ENTRANCE_DURATION = 400; // ms
+
   // Spatial hash for O(1) hit testing — cell size = 2× node radius
   const nodeHash = new SpatialHash<LayoutNode>(NODE_RADIUS * 2);
 
@@ -470,6 +474,12 @@ export function initCanvas(
       }
     }
 
+    // Entrance animation — fade/scale nodes in over ENTRANCE_DURATION ms
+    const entranceElapsed = performance.now() - loadTime;
+    const entranceT = Math.min(1, entranceElapsed / ENTRANCE_DURATION);
+    const entranceProgress = 1 - (1 - entranceT) * (1 - entranceT); // ease-out quad
+    const isEntering = entranceT < 1;
+
     // Draw nodes — skip entirely at extreme zoom-out (hulls-only mode)
     const hullsOnlyMode = camera.scale < lod.hullsOnly;
     const dotMode = !hullsOnlyMode && camera.scale < lod.dotNodes;
@@ -484,7 +494,8 @@ export function initCanvas(
       if (dotMode) {
         const filteredOut = filteredNodeIds !== null && !filteredNodeIds.has(node.id);
         ctx.fillStyle = color;
-        ctx.globalAlpha = filteredOut ? 0.1 : 0.8;
+        const dotAlpha = filteredOut ? 0.1 : 0.8;
+        ctx.globalAlpha = isEntering ? dotAlpha * entranceProgress : dotAlpha;
         ctx.fillRect(node.x - 2, node.y - 2, 4, 4);
         continue;
       }
@@ -497,7 +508,8 @@ export function initCanvas(
         filteredOut ||
         (selectedNodeIds.size > 0 && !isSelected && !isNeighbor);
 
-      const r = camera.scale < lod.smallNodes ? NODE_RADIUS * 0.5 : NODE_RADIUS;
+      const baseR = camera.scale < lod.smallNodes ? NODE_RADIUS * 0.5 : NODE_RADIUS;
+      const r = isEntering ? baseR * entranceProgress : baseR;
 
       // Walk trail effect — all visited nodes pulse together
       if (walkTrailSet?.has(node.id)) {
@@ -531,7 +543,8 @@ export function initCanvas(
       ctx.beginPath();
       ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
       ctx.fillStyle = color;
-      ctx.globalAlpha = filteredOut ? 0.1 : dimmed ? 0.3 : 1;
+      const baseAlpha = filteredOut ? 0.1 : dimmed ? 0.3 : 1;
+      ctx.globalAlpha = isEntering ? baseAlpha * entranceProgress : baseAlpha;
       ctx.fill();
       ctx.strokeStyle = isSelected ? selectionBorder : nodeBorder;
       ctx.lineWidth = isSelected ? 3 : 1.5;
@@ -1120,6 +1133,60 @@ export function initCanvas(
   zoomControls.appendChild(zoomOutBtn);
   container.appendChild(zoomControls);
 
+  // --- Hover tooltip ---
+  const tooltip = document.createElement("div");
+  tooltip.className = "node-tooltip";
+  tooltip.style.display = "none";
+  container.appendChild(tooltip);
+
+  let hoverNodeId: string | null = null;
+  let hoverTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  canvas.addEventListener("mousemove", (e) => {
+    if (dragging) {
+      if (tooltip.style.display !== "none") {
+        tooltip.style.display = "none";
+        hoverNodeId = null;
+      }
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const hit = nodeAtScreen(mx, my);
+    const hitId = hit?.id ?? null;
+
+    if (hitId !== hoverNodeId) {
+      hoverNodeId = hitId;
+      tooltip.style.display = "none";
+      if (hoverTimeout) clearTimeout(hoverTimeout);
+      hoverTimeout = null;
+
+      if (hitId && hit) {
+        hoverTimeout = setTimeout(() => {
+          if (!state || !lastLoadedData) return;
+          const edgeCount = state.edges.filter(
+            (edge) => edge.sourceId === hitId || edge.targetId === hitId
+          ).length;
+          tooltip.textContent = `${hit.label} · ${hit.type} · ${edgeCount} edge${edgeCount !== 1 ? "s" : ""}`;
+          tooltip.style.left = `${e.clientX - rect.left + 12}px`;
+          tooltip.style.top = `${e.clientY - rect.top - 8}px`;
+          tooltip.style.display = "block";
+        }, 200);
+      }
+    } else if (hitId && tooltip.style.display === "block") {
+      tooltip.style.left = `${e.clientX - rect.left + 12}px`;
+      tooltip.style.top = `${e.clientY - rect.top - 8}px`;
+    }
+  });
+
+  canvas.addEventListener("mouseleave", () => {
+    tooltip.style.display = "none";
+    hoverNodeId = null;
+    if (hoverTimeout) clearTimeout(hoverTimeout);
+    hoverTimeout = null;
+  });
+
   // --- Public API ---
 
   return {
@@ -1132,6 +1199,7 @@ export function initCanvas(
       focusSeedIds = null;
       savedFullState = null;
       savedFullCamera = null;
+      loadTime = performance.now();
       state = createLayout(data);
       nodeHash.rebuild(state.nodes);
       alpha = 1;

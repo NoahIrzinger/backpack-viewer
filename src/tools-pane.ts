@@ -122,6 +122,24 @@ export function initToolsPane(
       `<span>${stats.types.length} types</span>`;
     content.appendChild(summary);
 
+    // Token efficiency card
+    if (data && stats.nodeCount > 0) {
+      const graphTokens = Math.ceil(JSON.stringify(data).length / 4);
+      // Estimate a typical search response: ~5 NodeSummary results, each ~30 chars
+      const avgNodeTokens = Math.round(graphTokens / stats.nodeCount);
+      const searchTokens = Math.max(10, Math.round(avgNodeTokens * 0.3) * Math.min(5, stats.nodeCount));
+      const percent = graphTokens > searchTokens ? Math.round((1 - searchTokens / graphTokens) * 100) : 0;
+      const tokenCard = document.createElement("div");
+      tokenCard.className = "tools-pane-token-card";
+      const barWidth = Math.min(100, percent);
+      tokenCard.innerHTML =
+        `<div class="token-card-label">Token Efficiency</div>` +
+        `<div class="token-card-stat">~${graphTokens.toLocaleString()} tokens stored</div>` +
+        `<div class="token-card-bar"><div class="token-card-bar-fill" style="width:${barWidth}%"></div></div>` +
+        `<div class="token-card-stat">A search returns ~${searchTokens} tokens instead of ~${graphTokens.toLocaleString()} (${percent}% reduction)</div>`;
+      content.appendChild(tokenCard);
+    }
+
     // Tab bar
     const tabBar = document.createElement("div");
     tabBar.className = "tools-pane-tabs";
