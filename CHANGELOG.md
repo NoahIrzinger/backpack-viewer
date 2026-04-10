@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Security
+- **Strict CSP in production** — `bin/serve.js` and `vite preview` now ship `style-src 'self'` (no `'unsafe-inline'`). Defense-in-depth against XSS via injected styles, important now that remote graph loading is on the roadmap.
+- Vite dev server keeps `'unsafe-inline'` for `style-src` only because Vite injects CSS inline for HMR. Dev server is local-only and not exposed.
+- All inline `style="..."` attributes, `style.cssText` assignments, and inline `<style>` blocks removed from the viewer source.
+- Token efficiency card refactored from `innerHTML` string to `createElement` so the bar fill width can be set via CSSOM (allowed under strict CSP).
+- New CSS classes: `info-badge-row`, `info-empty-message`, `share-list-message`.
+
 ## 0.2.21 (2026-03-30)
 
 ### Exploration Features
