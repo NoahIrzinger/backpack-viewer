@@ -373,10 +373,61 @@ function ontologyApiPlugin(): Plugin {
   };
 }
 
+// CSP for the viewer.
+//
+// Production (bin/serve.js, vite preview): strict — style-src 'self'.
+// Dev server (vite dev): style-src must allow 'unsafe-inline' because Vite
+// injects CSS as inline <style> blocks for HMR. The dev server is local-only
+// and not exposed to the internet, so the relaxed style-src is acceptable
+// in dev only. Production CSP (in bin/serve.js) stays strict; see CLAUDE.md.
+const PROD_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "img-src 'self' data:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
+const DEV_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'", // required by Vite HMR
+  "img-src 'self' data:",
+  "connect-src 'self' ws: wss:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
+const baseHeaders = {
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+};
+
+const DEV_HEADERS = {
+  ...baseHeaders,
+  "Content-Security-Policy": DEV_CSP,
+};
+
+const PREVIEW_HEADERS = {
+  ...baseHeaders,
+  "Content-Security-Policy": PROD_CSP,
+};
+
 export default defineConfig({
   plugins: [ontologyApiPlugin()],
   define: {
     __VIEWER_VERSION__: JSON.stringify(pkg.version),
+  },
+  server: {
+    headers: DEV_HEADERS,
+  },
+  preview: {
+    headers: PREVIEW_HEADERS,
   },
   build: {
     outDir: "dist/app",

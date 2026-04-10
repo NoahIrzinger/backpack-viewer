@@ -482,7 +482,7 @@ export function initInfoPanel(
     header.appendChild(label);
 
     const badgeRow = document.createElement("div");
-    badgeRow.style.cssText = "display:flex;flex-wrap:wrap;gap:4px;margin-top:6px";
+    badgeRow.className = "info-badge-row";
     const typeCounts = new Map<string, number>();
     for (const node of nodes) {
       typeCounts.set(node.type, (typeCounts.get(node.type) ?? 0) + 1);
@@ -542,7 +542,7 @@ export function initInfoPanel(
 
     if (sharedEdges.length === 0) {
       const empty = document.createElement("p");
-      empty.style.cssText = "font-size:12px;color:var(--text-dim)";
+      empty.className = "info-empty-message";
       empty.textContent = "No direct connections between selected nodes";
       connSection.appendChild(empty);
     } else {

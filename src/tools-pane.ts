@@ -132,11 +132,30 @@ export function initToolsPane(
       const tokenCard = document.createElement("div");
       tokenCard.className = "tools-pane-token-card";
       const barWidth = Math.min(100, percent);
-      tokenCard.innerHTML =
-        `<div class="token-card-label">Token Efficiency</div>` +
-        `<div class="token-card-stat">~${graphTokens.toLocaleString()} tokens stored</div>` +
-        `<div class="token-card-bar"><div class="token-card-bar-fill" style="width:${barWidth}%"></div></div>` +
-        `<div class="token-card-stat">A search returns ~${searchTokens} tokens instead of ~${graphTokens.toLocaleString()} (${percent}% reduction)</div>`;
+
+      const label = document.createElement("div");
+      label.className = "token-card-label";
+      label.textContent = "Token Efficiency";
+      tokenCard.appendChild(label);
+
+      const storedStat = document.createElement("div");
+      storedStat.className = "token-card-stat";
+      storedStat.textContent = `~${graphTokens.toLocaleString()} tokens stored`;
+      tokenCard.appendChild(storedStat);
+
+      const bar = document.createElement("div");
+      bar.className = "token-card-bar";
+      const barFill = document.createElement("div");
+      barFill.className = "token-card-bar-fill";
+      barFill.style.width = `${barWidth}%`;
+      bar.appendChild(barFill);
+      tokenCard.appendChild(bar);
+
+      const reductionStat = document.createElement("div");
+      reductionStat.className = "token-card-stat";
+      reductionStat.textContent = `A search returns ~${searchTokens} tokens instead of ~${graphTokens.toLocaleString()} (${percent}% reduction)`;
+      tokenCard.appendChild(reductionStat);
+
       content.appendChild(tokenCard);
     }
 

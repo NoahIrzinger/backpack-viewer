@@ -31,7 +31,25 @@ if (hasDistBuild) {
     ".ico": "image/x-icon",
   };
 
+  // Strict CSP — style-src 'self' means no inline styles allowed.
+  // Keep it that way; see CLAUDE.md for the rule.
+  const CSP = [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+  ].join("; ");
+
   const server = http.createServer(async (req, res) => {
+    res.setHeader("Content-Security-Policy", CSP);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+
     const url = req.url?.replace(/\?.*$/, "") || "/";
 
     // --- API routes ---
