@@ -12,6 +12,32 @@ export async function loadOntology(name: string): Promise<LearningGraphData> {
   return res.json();
 }
 
+// --- Remote graphs ---
+
+export interface RemoteSummary {
+  name: string;
+  url: string;
+  source?: string;
+  addedAt: string;
+  lastFetched: string;
+  pinned: boolean;
+  sizeBytes: number;
+  nodeCount: number;
+  edgeCount: number;
+}
+
+export async function listRemotes(): Promise<RemoteSummary[]> {
+  const res = await fetch("/api/remotes");
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function loadRemote(name: string): Promise<LearningGraphData> {
+  const res = await fetch(`/api/remotes/${encodeURIComponent(name)}`);
+  if (!res.ok) throw new Error(`Failed to load remote graph: ${name}`);
+  return res.json();
+}
+
 export async function saveOntology(
   name: string,
   data: LearningGraphData

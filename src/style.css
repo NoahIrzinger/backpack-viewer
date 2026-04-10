@@ -237,6 +237,54 @@ body {
   opacity: 0.7;
 }
 
+/* --- Remote graphs section in sidebar --- */
+
+.sidebar-section-heading {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+  margin: 16px 12px 6px;
+}
+
+.remote-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.ontology-item-remote .name {
+  display: inline;
+}
+
+.remote-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.remote-badge {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--bg-hover);
+  padding: 1px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--border);
+}
+
+.remote-source {
+  display: block;
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sidebar-edit-btn:hover {
   opacity: 1 !important;
   color: var(--text);
@@ -265,6 +313,22 @@ body {
 
 .sidebar-branch:hover {
   opacity: 1;
+}
+
+.sidebar-lock-badge {
+  font-size: 10px;
+  color: #c08c00;
+  display: none;
+  margin-top: 2px;
+}
+
+.sidebar-lock-badge.active {
+  display: block;
+}
+
+.sidebar-lock-badge.active::before {
+  content: "● ";
+  color: #c08c00;
 }
 
 .branch-picker {

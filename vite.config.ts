@@ -2,7 +2,7 @@ import { defineConfig, type Plugin } from "vite";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { JsonFileBackend, dataDir } from "backpack-ontology";
+import { JsonFileBackend, dataDir, RemoteRegistry } from "backpack-ontology";
 import { loadViewerConfig } from "./src/config.js";
 
 const require = createRequire(import.meta.url);
@@ -10,13 +10,25 @@ const pkg = require("./package.json");
 
 function ontologyApiPlugin(): Plugin {
   let storage: JsonFileBackend;
+  let remoteRegistry: RemoteRegistry;
+  // Promise that resolves when both stores are ready. Every middleware
+  // request awaits this before touching storage so a fast initial request
+  // can't race a slow init.
+  let readyPromise: Promise<void>;
 
   return {
     name: "ontology-api",
 
     configureServer(server) {
       storage = new JsonFileBackend();
-      storage.initialize();
+      remoteRegistry = new RemoteRegistry();
+      readyPromise = Promise.all([
+        storage.initialize(),
+        remoteRegistry.initialize(),
+      ]).then(() => undefined);
+      readyPromise.catch((err) => {
+        console.error(`[backpack-viewer] storage init failed: ${err.message}`);
+      });
 
       // Watch the ontologies directory for live updates from Claude/MCP
       const ontologiesDir = path.join(dataDir(), "graphs");
@@ -32,12 +44,83 @@ function ontologyApiPlugin(): Plugin {
         // Directory may not exist yet
       }
 
-      server.middlewares.use((req, res, next) => {
+      server.middlewares.use(async (req, res, next) => {
+        // Wait for storage + remote registry to finish initializing before
+        // touching them. Cheap once init is done (a resolved promise).
+        try {
+          await readyPromise;
+        } catch {
+          // Init failed; let the request fall through to next() so static
+          // files still serve. API routes below will surface errors per-call.
+        }
         // Config endpoint
         if (req.url === "/api/config" && req.method === "GET") {
           const config = loadViewerConfig();
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify(config));
+          return;
+        }
+
+        // --- Remote graph routes (read-only) ---
+        if (req.url === "/api/remotes" && req.method === "GET") {
+          remoteRegistry
+            .list()
+            .then(async (remotes) => {
+              const summaries = await Promise.all(
+                remotes.map(async (r) => {
+                  try {
+                    const data = await remoteRegistry.loadCached(r.name);
+                    return {
+                      name: r.name,
+                      url: r.url,
+                      source: r.source,
+                      addedAt: r.addedAt,
+                      lastFetched: r.lastFetched,
+                      pinned: r.pinned,
+                      sizeBytes: r.sizeBytes,
+                      nodeCount: data.nodes.length,
+                      edgeCount: data.edges.length,
+                    };
+                  } catch {
+                    return {
+                      name: r.name,
+                      url: r.url,
+                      source: r.source,
+                      addedAt: r.addedAt,
+                      lastFetched: r.lastFetched,
+                      pinned: r.pinned,
+                      sizeBytes: r.sizeBytes,
+                      nodeCount: 0,
+                      edgeCount: 0,
+                    };
+                  }
+                }),
+              );
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify(summaries));
+            })
+            .catch((err: Error) => {
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: err.message }));
+            });
+          return;
+        }
+
+        const remoteItemMatch = req.url?.match(/^\/api\/remotes\/(.+)$/);
+        if (remoteItemMatch && req.method === "GET") {
+          const remoteName = decodeURIComponent(remoteItemMatch[1]);
+          remoteRegistry
+            .loadCached(remoteName)
+            .then((data) => {
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify(data));
+            })
+            .catch((err: Error) => {
+              res.statusCode = 404;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: err.message }));
+            });
           return;
         }
 
@@ -279,6 +362,51 @@ function ontologyApiPlugin(): Plugin {
               res.end(JSON.stringify({ error: "Invalid JSON" }));
             }
           });
+          return;
+        }
+
+        // GET /api/locks — batch heartbeat for collaboration awareness
+        if (req.url === "/api/locks" && req.method === "GET") {
+          storage
+            .listOntologies()
+            .then(async (summaries) => {
+              const result: Record<string, unknown> = {};
+              if (typeof (storage as any).readLock === "function") {
+                await Promise.all(
+                  summaries.map(async (s) => {
+                    try {
+                      result[s.name] = await (storage as any).readLock(s.name);
+                    } catch {
+                      result[s.name] = null;
+                    }
+                  }),
+                );
+              }
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify(result));
+            })
+            .catch(() => {
+              res.setHeader("Content-Type", "application/json");
+              res.end("{}");
+            });
+          return;
+        }
+
+        // GET /api/graphs/:name/lock — single-graph heartbeat (kept for compat)
+        const lockMatch = req.url?.match(/^\/api\/graphs\/(.+)\/lock$/);
+        if (lockMatch && req.method === "GET") {
+          const graphName = decodeURIComponent(lockMatch[1]);
+          (typeof (storage as any).readLock === "function"
+            ? (storage as any).readLock(graphName)
+            : Promise.resolve(null))
+            .then((lock: unknown) => {
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify(lock));
+            })
+            .catch(() => {
+              res.setHeader("Content-Type", "application/json");
+              res.end("null");
+            });
           return;
         }
 

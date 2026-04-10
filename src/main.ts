@@ -4,6 +4,8 @@ import {
   listBranches, createBranch, switchBranch, deleteBranch,
   listSnapshots, createSnapshot, rollbackSnapshot,
   listSnippets, saveSnippet, loadSnippet, deleteSnippet,
+  listRemotes, loadRemote,
+  type RemoteSummary,
 } from "./api";
 import { initSidebar } from "./sidebar";
 import { initCanvas, type FocusInfo } from "./canvas";
@@ -21,6 +23,8 @@ import "./style.css";
 
 let activeOntology = "";
 let currentData: LearningGraphData | null = null;
+let remoteNames = new Set<string>();
+let activeIsRemote = false;
 
 async function main() {
   const canvasContainer = document.getElementById("canvas-container")!;
@@ -699,12 +703,13 @@ async function main() {
     focusHops?: number
   ) {
     activeOntology = name;
+    activeIsRemote = remoteNames.has(name);
     sidebar.setActive(name);
     infoPanel.hide();
     removeFocusIndicator();
     search.clear();
     undoHistory.clear();
-    currentData = await loadOntology(name);
+    currentData = activeIsRemote ? await loadRemote(name) : await loadOntology(name);
     const autoParams = autoLayoutParams(currentData.nodes.length);
     setLayoutParams({
       spacing: Math.max(cfg.layout.spacing, autoParams.spacing),
@@ -716,10 +721,13 @@ async function main() {
     emptyState.hide();
     updateUrl(name);
 
-    // Load branches and snapshots
-    await refreshBranches(name);
-    await refreshSnapshots(name);
-    await refreshSnippets(name);
+    // Load branches and snapshots — skipped for remote graphs (read-only,
+    // no branch/snapshot/snippet APIs on the remote endpoint)
+    if (!activeIsRemote) {
+      await refreshBranches(name);
+      await refreshSnapshots(name);
+      await refreshSnippets(name);
+    }
 
     // Restore focus mode if requested
     if (focusSeedIds?.length && currentData) {
@@ -749,17 +757,27 @@ async function main() {
     }
   }
 
-  // Load ontology list
-  const summaries = await listOntologies();
+  // Load ontology list (local + remote in parallel)
+  const [summaries, remotes] = await Promise.all([
+    listOntologies(),
+    listRemotes().catch(() => [] as RemoteSummary[]),
+  ]);
   sidebar.setSummaries(summaries);
+  sidebar.setRemotes(remotes);
+  remoteNames = new Set(remotes.map((r) => r.name));
 
   // Auto-load from URL hash, or first graph
   const initialUrl = parseUrl();
-  const initialName = initialUrl.graph && summaries.some((s) => s.name === initialUrl.graph)
-    ? initialUrl.graph
-    : summaries.length > 0
-      ? summaries[0].name
-      : null;
+  const initialName =
+    initialUrl.graph && summaries.some((s) => s.name === initialUrl.graph)
+      ? initialUrl.graph
+      : initialUrl.graph && remoteNames.has(initialUrl.graph)
+        ? initialUrl.graph
+        : summaries.length > 0
+          ? summaries[0].name
+          : remotes.length > 0
+            ? remotes[0].name
+            : null;
 
   if (initialName) {
     await selectGraph(
@@ -872,27 +890,35 @@ async function main() {
   // Live reload — when Claude adds nodes via MCP, re-fetch and re-render
   if (import.meta.hot) {
     import.meta.hot.on("ontology-change", async () => {
-      const updated = await listOntologies();
+      const [updated, updatedRemotes] = await Promise.all([
+        listOntologies(),
+        listRemotes().catch(() => [] as RemoteSummary[]),
+      ]);
       sidebar.setSummaries(updated);
+      sidebar.setRemotes(updatedRemotes);
+      remoteNames = new Set(updatedRemotes.map((r) => r.name));
 
-      if (updated.length > 0) emptyState.hide();
+      if (updated.length > 0 || updatedRemotes.length > 0) emptyState.hide();
 
       if (activeOntology) {
         try {
-          currentData = await loadOntology(activeOntology);
+          currentData = activeIsRemote
+            ? await loadRemote(activeOntology)
+            : await loadOntology(activeOntology);
           canvas.loadGraph(currentData);
           search.setLearningGraphData(currentData);
-    toolsPane.setData(currentData);
+          toolsPane.setData(currentData);
         } catch {
           // Ontology may have been deleted
         }
       } else if (updated.length > 0) {
         activeOntology = updated[0].name;
+        activeIsRemote = false;
         sidebar.setActive(activeOntology);
         currentData = await loadOntology(activeOntology);
         canvas.loadGraph(currentData);
         search.setLearningGraphData(currentData);
-    toolsPane.setData(currentData);
+        toolsPane.setData(currentData);
       }
     });
   }

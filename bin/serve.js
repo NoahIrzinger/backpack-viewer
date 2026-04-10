@@ -14,11 +14,13 @@ const hasDistBuild = fs.existsSync(path.join(distDir, "index.html"));
 
 if (hasDistBuild) {
   // --- Production: static file server + API (zero native deps) ---
-  const { JsonFileBackend, dataDir } = await import("backpack-ontology");
+  const { JsonFileBackend, dataDir, RemoteRegistry } = await import("backpack-ontology");
   const { loadViewerConfig } = await import("../dist/config.js");
 
   const storage = new JsonFileBackend();
   await storage.initialize();
+  const remoteRegistry = new RemoteRegistry();
+  await remoteRegistry.initialize();
   const viewerConfig = loadViewerConfig();
 
   const MIME_TYPES = {
@@ -56,6 +58,63 @@ if (hasDistBuild) {
     if (url === "/api/config") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(viewerConfig));
+      return;
+    }
+
+    // --- Remote graph routes (read-only) ---
+    if (url === "/api/remotes" && req.method === "GET") {
+      try {
+        const remotes = await remoteRegistry.list();
+        const summaries = await Promise.all(
+          remotes.map(async (r) => {
+            try {
+              const data = await remoteRegistry.loadCached(r.name);
+              return {
+                name: r.name,
+                url: r.url,
+                source: r.source,
+                addedAt: r.addedAt,
+                lastFetched: r.lastFetched,
+                pinned: r.pinned,
+                sizeBytes: r.sizeBytes,
+                nodeCount: data.nodes.length,
+                edgeCount: data.edges.length,
+              };
+            } catch {
+              return {
+                name: r.name,
+                url: r.url,
+                source: r.source,
+                addedAt: r.addedAt,
+                lastFetched: r.lastFetched,
+                pinned: r.pinned,
+                sizeBytes: r.sizeBytes,
+                nodeCount: 0,
+                edgeCount: 0,
+              };
+            }
+          }),
+        );
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(summaries));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    const remoteItemMatch = url.match(/^\/api\/remotes\/(.+)$/);
+    if (remoteItemMatch && req.method === "GET") {
+      const remoteName = decodeURIComponent(remoteItemMatch[1]);
+      try {
+        const data = await remoteRegistry.loadCached(remoteName);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(data));
+      } catch (err) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message }));
+      }
       return;
     }
 
@@ -265,6 +324,50 @@ if (hasDistBuild) {
           res.end(JSON.stringify({ error: err.message }));
         }
       });
+      return;
+    }
+
+    // --- Lock heartbeat ---
+    if (url === "/api/locks" && req.method === "GET") {
+      // Batch endpoint: returns { graphName: lockInfo|null } for all graphs.
+      // One request instead of N on every sidebar refresh.
+      try {
+        const summaries = await storage.listOntologies();
+        const result = {};
+        if (typeof storage.readLock === "function") {
+          await Promise.all(
+            summaries.map(async (s) => {
+              try {
+                result[s.name] = await storage.readLock(s.name);
+              } catch {
+                result[s.name] = null;
+              }
+            }),
+          );
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end("{}");
+      }
+      return;
+    }
+
+    const lockMatch = url.match(/^\/api\/graphs\/(.+)\/lock$/);
+    if (lockMatch && req.method === "GET") {
+      const graphName = decodeURIComponent(lockMatch[1]);
+      try {
+        const lock =
+          typeof storage.readLock === "function"
+            ? await storage.readLock(graphName)
+            : null;
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(lock));
+      } catch {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end("null");
+      }
       return;
     }
 

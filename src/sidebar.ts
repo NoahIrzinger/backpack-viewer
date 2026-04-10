@@ -1,4 +1,5 @@
 import type { LearningGraphSummary } from "backpack-ontology";
+import type { RemoteSummary } from "./api.js";
 import { showConfirm, showPrompt } from "./dialog";
 
 function formatTokenCount(n: number): string {
@@ -40,6 +41,16 @@ export function initSidebar(
   const list = document.createElement("ul");
   list.id = "ontology-list";
 
+  const remoteHeading = document.createElement("h3");
+  remoteHeading.className = "sidebar-section-heading";
+  remoteHeading.textContent = "REMOTE GRAPHS";
+  remoteHeading.hidden = true;
+
+  const remoteList = document.createElement("ul");
+  remoteList.id = "remote-list";
+  remoteList.className = "remote-list";
+  remoteList.hidden = true;
+
   const footer = document.createElement("div");
   footer.className = "sidebar-footer";
   footer.innerHTML =
@@ -76,9 +87,12 @@ export function initSidebar(
   expandBtn.addEventListener("click", toggleSidebar);
   container.appendChild(input);
   container.appendChild(list);
+  container.appendChild(remoteHeading);
+  container.appendChild(remoteList);
   container.appendChild(footer);
 
   let items: HTMLLIElement[] = [];
+  let remoteItems: HTMLLIElement[] = [];
   let activeName = "";
   let activeBranchName = "main";
 
@@ -89,11 +103,21 @@ export function initSidebar(
       const name = item.dataset.name ?? "";
       item.style.display = name.includes(query) ? "" : "none";
     }
+    for (const item of remoteItems) {
+      const name = item.dataset.name ?? "";
+      item.style.display = name.includes(query) ? "" : "none";
+    }
   });
 
   return {
     setSummaries(summaries: LearningGraphSummary[]) {
       list.innerHTML = "";
+      // Fetch all locks in one batch request, then distribute to items
+      // as they render. One HTTP roundtrip per sidebar refresh, not N.
+      const lockBatchPromise = fetch("/api/locks")
+        .then((r) => r.json())
+        .catch(() => ({} as Record<string, { author?: string; lastActivity?: string } | null>));
+
       items = summaries.map((s) => {
         const li = document.createElement("li");
         li.className = "ontology-item";
@@ -112,8 +136,25 @@ export function initSidebar(
         branchSpan.className = "sidebar-branch";
         branchSpan.dataset.graph = s.name;
 
+        // Lock heartbeat badge — populated from the batched fetch above
+        const lockBadge = document.createElement("span");
+        lockBadge.className = "sidebar-lock-badge";
+        lockBadge.dataset.graph = s.name;
+        lockBatchPromise.then((locks) => {
+          // Bail if this badge has been detached from the DOM (sidebar
+          // re-rendered before the batch resolved)
+          if (!lockBadge.isConnected) return;
+          const lock = locks[s.name];
+          if (lock && typeof lock === "object" && lock.author) {
+            lockBadge.textContent = `editing: ${lock.author}`;
+            lockBadge.title = `Last activity: ${lock.lastActivity ?? ""}`;
+            lockBadge.classList.add("active");
+          }
+        });
+
         li.appendChild(nameSpan);
         li.appendChild(statsSpan);
+        li.appendChild(lockBadge);
         li.appendChild(branchSpan);
 
         if (cbs.onRename) {
@@ -167,6 +208,61 @@ export function initSidebar(
       activeName = name;
       for (const item of items) {
         item.classList.toggle("active", item.dataset.name === name);
+      }
+      for (const item of remoteItems) {
+        item.classList.toggle("active", item.dataset.name === name);
+      }
+    },
+
+    setRemotes(remotes: RemoteSummary[]) {
+      remoteList.replaceChildren();
+      remoteItems = remotes.map((r) => {
+        const li = document.createElement("li");
+        li.className = "ontology-item ontology-item-remote";
+        li.dataset.name = r.name;
+
+        const nameRow = document.createElement("div");
+        nameRow.className = "remote-name-row";
+
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "name";
+        nameSpan.textContent = r.name;
+
+        const badge = document.createElement("span");
+        badge.className = "remote-badge";
+        badge.textContent = r.pinned ? "remote · pinned" : "remote";
+        badge.title = `Source: ${r.source ?? r.url}`;
+
+        nameRow.appendChild(nameSpan);
+        nameRow.appendChild(badge);
+
+        const statsSpan = document.createElement("span");
+        statsSpan.className = "stats";
+        const tokens = estimateTokensFromCounts(r.nodeCount, r.edgeCount);
+        statsSpan.textContent = `${r.nodeCount} nodes, ${r.edgeCount} edges · ~${formatTokenCount(tokens)}`;
+
+        const sourceSpan = document.createElement("span");
+        sourceSpan.className = "remote-source";
+        sourceSpan.textContent = r.source ?? new URL(r.url).hostname;
+        sourceSpan.title = r.url;
+
+        li.appendChild(nameRow);
+        li.appendChild(statsSpan);
+        li.appendChild(sourceSpan);
+
+        li.addEventListener("click", () => cbs.onSelect(r.name));
+
+        remoteList.appendChild(li);
+        return li;
+      });
+
+      const visible = remotes.length > 0;
+      remoteHeading.hidden = !visible;
+      remoteList.hidden = !visible;
+
+      // Re-apply active state in case the active graph is a remote
+      if (activeName) {
+        this.setActive(activeName);
       }
     },
 
