@@ -1,8 +1,36 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (unreleased)
 
-### Security
+This release pairs with `backpack-ontology@0.3.0` and inherits its event-sourced
+storage, optimistic concurrency, and lock heartbeat. Existing graphs from older
+versions are migrated automatically on first start.
+
+### Collaboration awareness
+- **Sidebar lock badge** — each graph item now shows `editing: <author>` when
+  another writer has touched the graph in the last 5 minutes. Backed by the new
+  `GET /api/locks` batch endpoint (one HTTP roundtrip per sidebar refresh, not N).
+- New CSS class `sidebar-lock-badge.active` (CSP-compliant, no inline styles).
+
+### Remote graphs
+- New API client functions `listRemotes` and `loadRemote`.
+- `main.ts` tracks `remoteNames` set and `activeIsRemote` flag for read-only
+  remote graph viewing.
+- Sidebar renders a remotes section alongside local graphs.
+
+### Reliability
+- **Vite dev plugin awaits storage init.** Both `JsonFileBackend.initialize()`
+  and `RemoteRegistry.initialize()` are now awaited via a shared `readyPromise`,
+  and every middleware request waits for it before touching storage. Eliminates
+  a race where the first sidebar fetch could land before the registry was ready.
+- Init failures log to stderr instead of breaking silently.
+
+### Dependencies
+- Bumped `backpack-ontology` to `^0.3.0` (was `^0.2.24`). The new ontology
+  introduces breaking storage changes — see its CHANGELOG. The viewer is
+  read-compatible with both formats via the auto-migration path.
+
+### Security (carried from earlier unreleased work)
 - **Strict CSP in production** — `bin/serve.js` and `vite preview` now ship `style-src 'self'` (no `'unsafe-inline'`). Defense-in-depth against XSS via injected styles, important now that remote graph loading is on the roadmap.
 - Vite dev server keeps `'unsafe-inline'` for `style-src` only because Vite injects CSS inline for HMR. Dev server is local-only and not exposed.
 - All inline `style="..."` attributes, `style.cssText` assignments, and inline `<style>` blocks removed from the viewer source.
