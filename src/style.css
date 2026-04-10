@@ -330,10 +330,10 @@ body {
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 4px 8px;
+  padding: 6px 10px;
   background: var(--bg-base);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 6px;
   color: var(--fg);
   font-size: 11px;
   font-family: inherit;
@@ -2133,6 +2133,68 @@ body {
 
 .bp-dialog-input:focus {
   border-color: var(--accent);
+}
+
+.bp-dialog-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  margin-top: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.bp-dialog-path-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.bp-dialog-path-input {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.bp-dialog-browse-btn {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  font-size: 12px;
+}
+
+.bp-dialog-browse-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.bp-dialog-path-input.bp-dialog-drag-over {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.bp-dialog-picker-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-height: 1em;
+  margin-bottom: 8px;
+}
+
+.bp-dialog-activate-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.bp-dialog-activate-row input[type="checkbox"] {
+  margin: 0;
+}
+
+.bp-dialog-activate-row label {
+  cursor: pointer;
 }
 
 .bp-dialog-buttons {

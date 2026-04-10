@@ -8,7 +8,6 @@ import http from "node:http";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 const distDir = path.resolve(root, "dist/app");
-const port = parseInt(process.env.PORT || "5173", 10);
 
 const hasDistBuild = fs.existsSync(path.join(distDir, "index.html"));
 
@@ -25,6 +24,16 @@ if (hasDistBuild) {
     unregisterBackpack,
   } = await import("backpack-ontology");
   const { loadViewerConfig } = await import("../dist/config.js");
+
+  // Resolve host + port from the viewer config, with env vars taking
+  // precedence for quick overrides. Default is 127.0.0.1 loopback —
+  // the viewer must never bind to all interfaces by default because
+  // its API exposes read/write access to the user's learning graphs.
+  const viewerConfigForServer = loadViewerConfig();
+  const configuredHost = viewerConfigForServer?.server?.host ?? "127.0.0.1";
+  const configuredPort = viewerConfigForServer?.server?.port ?? 5173;
+  const bindHost = process.env.BACKPACK_VIEWER_HOST ?? configuredHost;
+  const port = parseInt(process.env.PORT || String(configuredPort), 10);
 
   // Storage points at the active backpack. Wrapped in a mutable
   // holder so a `/api/backpacks/switch` POST can swap it out in place
@@ -529,8 +538,25 @@ if (hasDistBuild) {
     }
   });
 
-  server.listen(port, () => {
-    console.log(`  Backpack Viewer running at http://localhost:${port}/`);
+  // Bind to whatever the config + env var resolved to. The default is
+  // 127.0.0.1 because the viewer API exposes read/write access to the
+  // user's learning graphs and must never be reachable from other
+  // machines on the same network by default. Users who really need to
+  // bind to another interface (e.g. for a devcontainer scenario) can
+  // set server.host in ~/.config/backpack/viewer.json or the
+  // BACKPACK_VIEWER_HOST env var, and will see a loud warning.
+  server.listen(port, bindHost, () => {
+    const displayHost = bindHost === "0.0.0.0" || bindHost === "::" ? "localhost" : bindHost;
+    console.log(`  Backpack Viewer running at http://${displayHost}:${port}/`);
+    const isLoopback =
+      bindHost === "127.0.0.1" ||
+      bindHost === "localhost" ||
+      bindHost === "::1";
+    if (!isLoopback) {
+      console.warn(
+        `  WARNING: viewer is bound to ${bindHost}, not loopback. The API exposes read/write access to your learning graphs — anyone on your network can reach it. Set server.host to "127.0.0.1" in ~/.config/backpack/viewer.json to restrict to localhost.`,
+      );
+    }
   });
 } else {
   // --- Development: use Vite for HMR + TypeScript compilation ---

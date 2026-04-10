@@ -552,11 +552,11 @@ async function main() {
         // live-reload channel, so we refresh immediately as fallback.
         await refreshBackpacksAndGraphs();
       },
-      onBackpackRegister: async (name, p, activate) => {
+      onBackpackRegister: async (p, activate) => {
         await fetch("/api/backpacks", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, path: p, activate }),
+          body: JSON.stringify({ path: p, activate }),
         });
         await refreshBackpacksAndGraphs();
       },

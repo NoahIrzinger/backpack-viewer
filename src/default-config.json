@@ -33,6 +33,10 @@
     "walkMode": "w",
     "walkIsolate": "i"
   },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 5173
+  },
   "display": {
     "edges": true,
     "edgeLabels": true,

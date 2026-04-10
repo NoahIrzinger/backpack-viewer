@@ -690,15 +690,30 @@ const PREVIEW_HEADERS = {
   "Content-Security-Policy": PROD_CSP,
 };
 
+// Resolve server bind host + port from the viewer config for the dev
+// and preview servers too, so `npm run dev` and `vite preview` respect
+// the same settings as production. Default is 127.0.0.1 loopback.
+const viewerConfigForDev = loadViewerConfig();
+const devHost =
+  process.env.BACKPACK_VIEWER_HOST ?? viewerConfigForDev?.server?.host ?? "127.0.0.1";
+const devPort = parseInt(
+  process.env.PORT ?? String(viewerConfigForDev?.server?.port ?? 5173),
+  10,
+);
+
 export default defineConfig({
   plugins: [ontologyApiPlugin()],
   define: {
     __VIEWER_VERSION__: JSON.stringify(pkg.version),
   },
   server: {
+    host: devHost,
+    port: devPort,
     headers: DEV_HEADERS,
   },
   preview: {
+    host: devHost,
+    port: devPort,
     headers: PREVIEW_HEADERS,
   },
   build: {

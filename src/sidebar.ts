@@ -1,6 +1,6 @@
 import type { LearningGraphSummary } from "backpack-ontology";
 import type { RemoteSummary } from "./api.js";
-import { showConfirm, showPrompt } from "./dialog";
+import { showConfirm, showPrompt, showBackpackAddDialog } from "./dialog";
 
 function formatTokenCount(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k tokens`;
@@ -26,8 +26,8 @@ export interface SidebarCallbacks {
   onBranchDelete?: (graphName: string, branchName: string) => void;
   onSnippetLoad?: (graphName: string, snippetId: string) => void;
   onSnippetDelete?: (graphName: string, snippetId: string) => void;
-  onBackpackSwitch?: (name: string) => void;
-  onBackpackRegister?: (name: string, path: string, activate: boolean) => void;
+  onBackpackSwitch?: (pathOrName: string) => void;
+  onBackpackRegister?: (path: string, activate: boolean) => void;
 }
 
 export function initSidebar(
@@ -191,23 +191,9 @@ export function initSidebar(
       e.stopPropagation();
       closePicker();
       if (!cbs.onBackpackRegister) return;
-      const name = await showPrompt(
-        "Backpack name",
-        "Short kebab-case name (e.g. work, family, project-alpha)",
-        "",
-      );
-      if (!name) return;
-      const p = await showPrompt(
-        "Backpack path",
-        "Absolute or tilde-expanded path to the graphs directory",
-        "",
-      );
-      if (!p) return;
-      const activate = await showConfirm(
-        "Switch to new backpack?",
-        `Make "${name}" the active backpack immediately?`,
-      );
-      cbs.onBackpackRegister(name, p, activate);
+      const result = await showBackpackAddDialog();
+      if (!result) return;
+      cbs.onBackpackRegister(result.path, result.activate);
     });
     pickerDropdown.appendChild(addItem);
   }

@@ -24,6 +24,7 @@ export function loadViewerConfig(): ViewerConfig {
     const raw = fs.readFileSync(filePath, "utf-8");
     const user = JSON.parse(raw);
     return {
+      server: { ...defaultConfig.server, ...(user.server ?? {}) },
       keybindings: { ...defaultConfig.keybindings, ...(user.keybindings ?? {}) },
       display: { ...defaultConfig.display, ...(user.display ?? {}) },
       layout: { ...defaultConfig.layout, ...(user.layout ?? {}) },

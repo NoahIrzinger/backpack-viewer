@@ -128,11 +128,31 @@ Bindings are strings with optional modifier prefixes separated by `+`:
 - With modifiers: `"ctrl+z"`, `"ctrl+shift+z"`, `"alt+s"`
 - `ctrl` and `cmd`/`meta` are treated as equivalent (works on both Mac and Linux)
 
+## Network binding
+
+The viewer binds to **loopback only (`127.0.0.1`) by default** — its API exposes read/write access to your learning graphs, so it must never be reachable from other machines on your network without explicit opt-in. To change the bind host or port, edit `~/.config/backpack/viewer.json`:
+
+```json
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 5173
+  }
+}
+```
+
+Setting `host` to anything other than `127.0.0.1`, `localhost`, or `::1` prints a startup warning because the API becomes reachable from other machines on the network. Only do this for devcontainer / VM scenarios where you understand the trust boundary, and consider putting a reverse proxy with auth in front of it.
+
+Environment variables override the config file:
+- `BACKPACK_VIEWER_HOST` — bind host (use `0.0.0.0` for all interfaces)
+- `PORT` — bind port
+
 ## Reference
 
 | Variable | Effect |
 |---|---|
-| `PORT` | Override the default port (default: `5173`) |
+| `PORT` | Override the default port (default: `5173` or `server.port` in config) |
+| `BACKPACK_VIEWER_HOST` | Override the bind host (default: `127.0.0.1` or `server.host` in config) |
 | `XDG_CONFIG_HOME` | Override config location (default: `~/.config`) |
 | `XDG_DATA_HOME` | Override data location (default: `~/.local/share`) |
 | `BACKPACK_DIR` | Override both config and data directories |

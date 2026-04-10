@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.5.0 (2026-04-10)
+
+Pairs with `backpack-ontology@0.5.0` — the backpacks config format
+simplified to a list of paths. This release updates the viewer UI to
+match the simpler model, plus ships a security fix that landed at the
+same time.
+
+### Security (localhost-only binding)
+- **Viewer now binds to `127.0.0.1` (loopback) by default** instead of
+  `0.0.0.0`. The previous default exposed the viewer's read/write API
+  to any machine on the local network, which was unsafe for corporate
+  users. The new default is localhost-only; a startup warning prints
+  if a different host is explicitly configured.
+- New `server.host` and `server.port` fields in
+  `~/.config/backpack/viewer.json` let users override the bind host
+  and port. Environment variables `BACKPACK_VIEWER_HOST` and `PORT`
+  take precedence over the config file. Both the dev server
+  (`npm run dev`) and production server (`npx backpack-viewer`) honor
+  the same settings.
+
+### Simpler "Add Backpack" dialog
+- **Single path field** — no more name field. The display name is
+  derived from the path tail by the backend. Matches the new
+  `backpack_register <path>` signature in ontology 0.5.0.
+- **Native folder picker** where available. On Chromium browsers the
+  Browse button opens the native `showDirectoryPicker` dialog. Since
+  the picker returns a handle rather than a filesystem path, it's
+  only a UX hint — the user still pastes the absolute path below.
+- **Drag-and-drop** a folder from Finder/Explorer onto the path input
+  shows a hint with the folder name. The OS path is still sandboxed
+  out of the drop event (browser security), so the user manually
+  pastes the absolute path.
+- **No hardcoded suggestion chips.** Users can paste any path:
+  local, OneDrive, Dropbox, iCloud, Google Drive, network mount, SMB
+  share, SSHFS mount — anything the filesystem presents as a path.
+- **Activate checkbox** lets the user decide whether to switch to the
+  new backpack immediately (default yes).
+- `/api/suggested-paths` endpoint removed — it was only feeding the
+  hardcoded chips. The registry accepts any path via
+  `POST /api/backpacks`.
+
+### UI polish
+- **Backpack picker pill** now uses `border-radius: 6px` to match the
+  rest of the sidebar UI (inputs, buttons). Was `border-radius: 999px`
+  which looked out of place.
+
+### Dependencies
+- Bumped `backpack-ontology` to `^0.5.0` for the new registry format
+  and simpler tool signatures.
+
 ## 0.4.0 (2026-04-10)
 
 This release adds UI for the new multi-backpack feature introduced in
