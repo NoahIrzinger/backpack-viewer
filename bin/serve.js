@@ -14,11 +14,30 @@ const hasDistBuild = fs.existsSync(path.join(distDir, "index.html"));
 
 if (hasDistBuild) {
   // --- Production: static file server + API (zero native deps) ---
-  const { JsonFileBackend, dataDir, RemoteRegistry } = await import("backpack-ontology");
+  const {
+    JsonFileBackend,
+    dataDir,
+    RemoteRegistry,
+    listBackpacks,
+    getActiveBackpack,
+    setActiveBackpack,
+    registerBackpack,
+    unregisterBackpack,
+  } = await import("backpack-ontology");
   const { loadViewerConfig } = await import("../dist/config.js");
 
-  const storage = new JsonFileBackend();
-  await storage.initialize();
+  // Storage points at the active backpack. Wrapped in a mutable
+  // holder so a `/api/backpacks/switch` POST can swap it out in place
+  // without restarting the whole server.
+  async function makeBackend() {
+    const entry = await getActiveBackpack();
+    const backend = new JsonFileBackend(undefined, {
+      graphsDirOverride: entry.path,
+    });
+    await backend.initialize();
+    return { backend, entry };
+  }
+  let { backend: storage, entry: activeEntry } = await makeBackend();
   const remoteRegistry = new RemoteRegistry();
   await remoteRegistry.initialize();
   const viewerConfig = loadViewerConfig();
@@ -324,6 +343,100 @@ if (hasDistBuild) {
           res.end(JSON.stringify({ error: err.message }));
         }
       });
+      return;
+    }
+
+    // --- Backpacks (meta: list, active, switch) ---
+    if (url === "/api/backpacks" && req.method === "GET") {
+      try {
+        const list = await listBackpacks();
+        const active = await getActiveBackpack();
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify(
+            list.map((b) => ({ ...b, active: b.name === active.name })),
+          ),
+        );
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    if (url === "/api/backpacks/active" && req.method === "GET") {
+      try {
+        const active = await getActiveBackpack();
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(active));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
+
+    if (url === "/api/backpacks/switch" && req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk.toString(); });
+      req.on("end", async () => {
+        try {
+          const { name } = JSON.parse(body);
+          await setActiveBackpack(name);
+          const swapped = await makeBackend();
+          storage = swapped.backend;
+          activeEntry = swapped.entry;
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, active: activeEntry }));
+        } catch (err) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+
+    if (url === "/api/backpacks" && req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk.toString(); });
+      req.on("end", async () => {
+        try {
+          const { name, path: p, activate } = JSON.parse(body);
+          const entry = await registerBackpack(name, p);
+          if (activate) {
+            await setActiveBackpack(name);
+            const swapped = await makeBackend();
+            storage = swapped.backend;
+            activeEntry = swapped.entry;
+          }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, entry }));
+        } catch (err) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+
+    const backpackDeleteMatch = url.match(/^\/api\/backpacks\/(.+)$/);
+    if (backpackDeleteMatch && req.method === "DELETE") {
+      const name = decodeURIComponent(backpackDeleteMatch[1]);
+      try {
+        await unregisterBackpack(name);
+        // If we just removed the active one, the registry switched us;
+        // rebuild the backend to match.
+        if (activeEntry && activeEntry.name === name) {
+          const swapped = await makeBackend();
+          storage = swapped.backend;
+          activeEntry = swapped.entry;
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (err) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message }));
+      }
       return;
     }
 

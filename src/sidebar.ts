@@ -11,6 +11,13 @@ function estimateTokensFromCounts(nodeCount: number, edgeCount: number): number 
   return nodeCount * 50 + edgeCount * 25 + 50; // rough: 50 tok/node, 25 tok/edge, 50 metadata
 }
 
+export interface BackpackSummary {
+  name: string;
+  path: string;
+  color: string;
+  active?: boolean;
+}
+
 export interface SidebarCallbacks {
   onSelect: (name: string) => void;
   onRename?: (oldName: string, newName: string) => void;
@@ -19,6 +26,8 @@ export interface SidebarCallbacks {
   onBranchDelete?: (graphName: string, branchName: string) => void;
   onSnippetLoad?: (graphName: string, snippetId: string) => void;
   onSnippetDelete?: (graphName: string, snippetId: string) => void;
+  onBackpackSwitch?: (name: string) => void;
+  onBackpackRegister?: (name: string, path: string, activate: boolean) => void;
 }
 
 export function initSidebar(
@@ -79,6 +88,130 @@ export function initSidebar(
 
   container.appendChild(headingRow);
 
+  // Backpack picker pill — discrete indicator of the active backpack with
+  // a dropdown to switch between registered ones.
+  const backpackPicker = document.createElement("button");
+  backpackPicker.className = "backpack-picker-pill";
+  backpackPicker.type = "button";
+  backpackPicker.setAttribute("aria-haspopup", "listbox");
+  backpackPicker.setAttribute("aria-expanded", "false");
+
+  const pickerDot = document.createElement("span");
+  pickerDot.className = "backpack-picker-dot";
+  const pickerName = document.createElement("span");
+  pickerName.className = "backpack-picker-name";
+  pickerName.textContent = "...";
+  const pickerCaret = document.createElement("span");
+  pickerCaret.className = "backpack-picker-caret";
+  pickerCaret.textContent = "▾";
+  backpackPicker.appendChild(pickerDot);
+  backpackPicker.appendChild(pickerName);
+  backpackPicker.appendChild(pickerCaret);
+
+  const pickerDropdown = document.createElement("div");
+  pickerDropdown.className = "backpack-picker-dropdown";
+  pickerDropdown.hidden = true;
+  pickerDropdown.setAttribute("role", "listbox");
+
+  const pickerContainer = document.createElement("div");
+  pickerContainer.className = "backpack-picker-container";
+  pickerContainer.appendChild(backpackPicker);
+  pickerContainer.appendChild(pickerDropdown);
+  container.appendChild(pickerContainer);
+
+  let pickerOpen = false;
+  function closePicker() {
+    pickerOpen = false;
+    pickerDropdown.hidden = true;
+    backpackPicker.setAttribute("aria-expanded", "false");
+  }
+  function openPicker() {
+    pickerOpen = true;
+    pickerDropdown.hidden = false;
+    backpackPicker.setAttribute("aria-expanded", "true");
+  }
+  backpackPicker.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (pickerOpen) closePicker();
+    else openPicker();
+  });
+  // Click outside closes the dropdown
+  document.addEventListener("click", (e) => {
+    if (!pickerContainer.contains(e.target as Node)) closePicker();
+  });
+
+  let currentBackpacks: BackpackSummary[] = [];
+  let currentActiveBackpack: BackpackSummary | null = null;
+
+  function renderPickerDropdown() {
+    pickerDropdown.replaceChildren();
+    for (const b of currentBackpacks) {
+      const item = document.createElement("button");
+      item.className = "backpack-picker-item";
+      item.type = "button";
+      item.setAttribute("role", "option");
+      if (b.active) item.classList.add("active");
+
+      const dot = document.createElement("span");
+      dot.className = "backpack-picker-item-dot";
+      dot.style.setProperty("--backpack-color", b.color);
+
+      const name = document.createElement("span");
+      name.className = "backpack-picker-item-name";
+      name.textContent = b.name;
+
+      const path = document.createElement("span");
+      path.className = "backpack-picker-item-path";
+      path.textContent = b.path;
+
+      item.appendChild(dot);
+      item.appendChild(name);
+      item.appendChild(path);
+
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closePicker();
+        if (!b.active && cbs.onBackpackSwitch) {
+          cbs.onBackpackSwitch(b.name);
+        }
+      });
+      pickerDropdown.appendChild(item);
+    }
+
+    // Separator + "Add new backpack..." action
+    const divider = document.createElement("div");
+    divider.className = "backpack-picker-divider";
+    pickerDropdown.appendChild(divider);
+
+    const addItem = document.createElement("button");
+    addItem.className = "backpack-picker-item backpack-picker-add";
+    addItem.type = "button";
+    addItem.textContent = "+ Add new backpack…";
+    addItem.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      closePicker();
+      if (!cbs.onBackpackRegister) return;
+      const name = await showPrompt(
+        "Backpack name",
+        "Short kebab-case name (e.g. work, family, project-alpha)",
+        "",
+      );
+      if (!name) return;
+      const p = await showPrompt(
+        "Backpack path",
+        "Absolute or tilde-expanded path to the graphs directory",
+        "",
+      );
+      if (!p) return;
+      const activate = await showConfirm(
+        "Switch to new backpack?",
+        `Make "${name}" the active backpack immediately?`,
+      );
+      cbs.onBackpackRegister(name, p, activate);
+    });
+    pickerDropdown.appendChild(addItem);
+  }
+
   // Expand button — inserted into the canvas top-left bar when sidebar is collapsed
   const expandBtn = document.createElement("button");
   expandBtn.className = "tools-pane-toggle hidden";
@@ -110,6 +243,36 @@ export function initSidebar(
   });
 
   return {
+    setBackpacks(list: BackpackSummary[]) {
+      currentBackpacks = list.slice();
+      const active = list.find((b) => b.active) ?? null;
+      currentActiveBackpack = active;
+      if (active) {
+        pickerName.textContent = active.name;
+        pickerDot.style.setProperty("--backpack-color", active.color);
+        container.style.setProperty("--backpack-color", active.color);
+      }
+      renderPickerDropdown();
+    },
+    setActiveBackpack(entry: BackpackSummary) {
+      currentActiveBackpack = entry;
+      // Update the currentBackpacks list to reflect the new active
+      currentBackpacks = currentBackpacks.map((b) => ({
+        ...b,
+        active: b.name === entry.name,
+      }));
+      // If this name wasn't in the list (newly registered), include it
+      if (!currentBackpacks.some((b) => b.name === entry.name)) {
+        currentBackpacks.push({ ...entry, active: true });
+      }
+      pickerName.textContent = entry.name;
+      pickerDot.style.setProperty("--backpack-color", entry.color);
+      container.style.setProperty("--backpack-color", entry.color);
+      renderPickerDropdown();
+    },
+    getActiveBackpack(): BackpackSummary | null {
+      return currentActiveBackpack;
+    },
     setSummaries(summaries: LearningGraphSummary[]) {
       list.innerHTML = "";
       // Fetch all locks in one batch request, then distribute to items

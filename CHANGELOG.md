@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.4.0 (2026-04-10)
+
+This release adds UI for the new multi-backpack feature introduced in
+`backpack-ontology@0.4.0`. Users who stay on one backpack see only a
+subtle indicator in the sidebar; users with multiple backpacks get a
+discrete picker to switch between them.
+
+### Sidebar backpack picker
+- New pill-shaped picker in the sidebar header showing the active
+  backpack with a colored dot matching its deterministic color.
+- Click to open a dropdown of all registered backpacks — click one
+  to switch.
+- Bottom of the dropdown has an "Add new backpack..." action that
+  prompts for a name, path, and whether to activate immediately.
+- Sidebar's left border is colored to match the active backpack —
+  glanceable at all times, never in the way.
+
+### API
+- New endpoints in both `bin/serve.js` (production) and
+  `vite.config.ts` (dev): `GET /api/backpacks`, `GET /api/backpacks/active`,
+  `POST /api/backpacks`, `POST /api/backpacks/switch`,
+  `DELETE /api/backpacks/:name`.
+- The storage backend is now constructed with `graphsDirOverride`
+  pointing at the active backpack's path, and swapped in place when
+  the active backpack changes (no server restart).
+- The file watcher re-registers itself on the new backpack's directory
+  on switch, so live-reload continues to work across backpacks.
+
+### Hot-swap
+- New WebSocket event `active-backpack-change` fired by the vite dev
+  server when the active backpack changes. The viewer listens and
+  refreshes its backpack list + graphs list seamlessly — no full
+  reload required.
+
+### Dependencies
+- Bumped `backpack-ontology` to `^0.4.0` for the new registry API.
+
+### CSS
+- New CSS classes (all CSP-compliant, no inline styles):
+  `backpack-picker-container`, `backpack-picker-pill`,
+  `backpack-picker-dot`, `backpack-picker-name`, `backpack-picker-caret`,
+  `backpack-picker-dropdown`, `backpack-picker-item`,
+  `backpack-picker-item-dot`, `backpack-picker-item-name`,
+  `backpack-picker-item-path`, `backpack-picker-divider`,
+  `backpack-picker-add`.
+- Sidebar's `border-left` now uses a CSS custom property
+  `--backpack-color` set via `element.style.setProperty` (allowed
+  under strict CSP).
+
 ## 0.3.1 (2026-04-10)
 
 ### Docs

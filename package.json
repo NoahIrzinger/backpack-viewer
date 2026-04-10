@@ -1,6 +1,6 @@
 {
   "name": "backpack-viewer",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Web-based graph visualizer for backpack-ontology — Canvas 2D, force-directed layout, live reload",
   "license": "Apache-2.0",
   "author": "Noah Irzinger",
@@ -23,7 +23,7 @@
     "release:major": "npm version major && git push && git push --tags"
   },
   "dependencies": {
-    "backpack-ontology": "^0.3.0"
+    "backpack-ontology": "^0.4.0"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",

@@ -541,8 +541,50 @@ async function main() {
         await deleteSnippet(graphName, snippetId);
         await refreshSnippets(graphName);
       },
+      onBackpackSwitch: async (name) => {
+        await fetch("/api/backpacks/switch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        // The dev WS will fire an active-backpack-change event that
+        // triggers refreshBackpacksAndGraphs(). Production server has no
+        // live-reload channel, so we refresh immediately as fallback.
+        await refreshBackpacksAndGraphs();
+      },
+      onBackpackRegister: async (name, p, activate) => {
+        await fetch("/api/backpacks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, path: p, activate }),
+        });
+        await refreshBackpacksAndGraphs();
+      },
     }
   );
+
+  async function refreshBackpacksAndGraphs() {
+    try {
+      const res = await fetch("/api/backpacks");
+      const list = await res.json();
+      sidebar.setBackpacks(list);
+    } catch {}
+    // Re-fetch ontology list from the (possibly new) active backpack
+    try {
+      const updated = await listOntologies();
+      sidebar.setSummaries(updated);
+      // If the previously-active graph no longer exists, clear it
+      if (activeOntology && !updated.some((g) => g.name === activeOntology)) {
+        activeOntology = "";
+        currentData = null;
+        canvas.loadGraph({
+          metadata: { name: "", description: "", createdAt: "", updatedAt: "" },
+          nodes: [],
+          edges: [],
+        });
+      }
+    } catch {}
+  }
 
   function syncWalkTrail() {
     const trail = canvas.getWalkTrail();
@@ -757,6 +799,15 @@ async function main() {
     }
   }
 
+  // Fetch backpack registry first so the picker shows the right active
+  // backpack from the initial render. Fire-and-forget ontology + remote
+  // list in parallel.
+  try {
+    const res = await fetch("/api/backpacks");
+    const list = await res.json();
+    sidebar.setBackpacks(list);
+  } catch {}
+
   // Load ontology list (local + remote in parallel)
   const [summaries, remotes] = await Promise.all([
     listOntologies(),
@@ -889,6 +940,12 @@ async function main() {
 
   // Live reload — when Claude adds nodes via MCP, re-fetch and re-render
   if (import.meta.hot) {
+    // Hot-swap when the active backpack changes (via /api/backpacks/switch
+    // or the user clicking the picker on another viewer tab)
+    import.meta.hot.on("active-backpack-change", async () => {
+      await refreshBackpacksAndGraphs();
+    });
+
     import.meta.hot.on("ontology-change", async () => {
       const [updated, updatedRemotes] = await Promise.all([
         listOntologies(),

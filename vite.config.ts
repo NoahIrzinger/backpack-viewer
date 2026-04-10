@@ -2,7 +2,16 @@ import { defineConfig, type Plugin } from "vite";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { JsonFileBackend, dataDir, RemoteRegistry } from "backpack-ontology";
+import {
+  JsonFileBackend,
+  dataDir,
+  RemoteRegistry,
+  listBackpacks,
+  getActiveBackpack,
+  setActiveBackpack,
+  registerBackpack,
+  unregisterBackpack,
+} from "backpack-ontology";
 import { loadViewerConfig } from "./src/config.js";
 
 const require = createRequire(import.meta.url);
@@ -10,39 +19,58 @@ const pkg = require("./package.json");
 
 function ontologyApiPlugin(): Plugin {
   let storage: JsonFileBackend;
+  let activeEntry: { name: string; path: string; color: string } | null = null;
   let remoteRegistry: RemoteRegistry;
   // Promise that resolves when both stores are ready. Every middleware
   // request awaits this before touching storage so a fast initial request
   // can't race a slow init.
   let readyPromise: Promise<void>;
+  let currentWatcher: fs.FSWatcher | null = null;
+
+  async function makeBackend() {
+    const entry = await getActiveBackpack();
+    const backend = new JsonFileBackend(undefined, {
+      graphsDirOverride: entry.path,
+    });
+    await backend.initialize();
+    return { backend, entry };
+  }
 
   return {
     name: "ontology-api",
 
     configureServer(server) {
-      storage = new JsonFileBackend();
       remoteRegistry = new RemoteRegistry();
-      readyPromise = Promise.all([
-        storage.initialize(),
-        remoteRegistry.initialize(),
-      ]).then(() => undefined);
+      readyPromise = (async () => {
+        const swapped = await makeBackend();
+        storage = swapped.backend;
+        activeEntry = swapped.entry;
+        await remoteRegistry.initialize();
+      })();
       readyPromise.catch((err) => {
         console.error(`[backpack-viewer] storage init failed: ${err.message}`);
       });
 
-      // Watch the ontologies directory for live updates from Claude/MCP
-      const ontologiesDir = path.join(dataDir(), "graphs");
-      try {
-        fs.watch(ontologiesDir, { recursive: true }, () => {
-          server.ws.send({
-            type: "custom",
-            event: "ontology-change",
-            data: {},
+      // Watch the active backpack's directory for live updates. Re-registers
+      // the watcher any time the active backpack changes.
+      function watchActiveBackpack() {
+        if (currentWatcher) {
+          try { currentWatcher.close(); } catch {}
+        }
+        if (!activeEntry) return;
+        try {
+          currentWatcher = fs.watch(activeEntry.path, { recursive: true }, () => {
+            server.ws.send({
+              type: "custom",
+              event: "ontology-change",
+              data: {},
+            });
           });
-        });
-      } catch {
-        // Directory may not exist yet
+        } catch {
+          // Directory may not exist yet
+        }
       }
+      readyPromise.then(watchActiveBackpack);
 
       server.middlewares.use(async (req, res, next) => {
         // Wait for storage + remote registry to finish initializing before
@@ -362,6 +390,122 @@ function ontologyApiPlugin(): Plugin {
               res.end(JSON.stringify({ error: "Invalid JSON" }));
             }
           });
+          return;
+        }
+
+        // --- Backpacks (meta: list, active, register, switch, unregister) ---
+        if (req.url === "/api/backpacks" && req.method === "GET") {
+          try {
+            const list = await listBackpacks();
+            const active = await getActiveBackpack();
+            res.setHeader("Content-Type", "application/json");
+            res.end(
+              JSON.stringify(
+                list.map((b) => ({ ...b, active: b.name === active.name })),
+              ),
+            );
+          } catch (err: any) {
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: err.message }));
+          }
+          return;
+        }
+
+        if (req.url === "/api/backpacks/active" && req.method === "GET") {
+          try {
+            const active = await getActiveBackpack();
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify(active));
+          } catch (err: any) {
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: err.message }));
+          }
+          return;
+        }
+
+        if (req.url === "/api/backpacks/switch" && req.method === "POST") {
+          let body = "";
+          req.on("data", (chunk) => { body += chunk.toString(); });
+          req.on("end", async () => {
+            try {
+              const { name } = JSON.parse(body);
+              await setActiveBackpack(name);
+              const swapped = await makeBackend();
+              storage = swapped.backend;
+              activeEntry = swapped.entry;
+              watchActiveBackpack();
+              // Notify the browser so sidebar/canvas hot-swap
+              server.ws.send({
+                type: "custom",
+                event: "active-backpack-change",
+                data: { active: activeEntry },
+              });
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ ok: true, active: activeEntry }));
+            } catch (err: any) {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: err.message }));
+            }
+          });
+          return;
+        }
+
+        if (req.url === "/api/backpacks" && req.method === "POST") {
+          let body = "";
+          req.on("data", (chunk) => { body += chunk.toString(); });
+          req.on("end", async () => {
+            try {
+              const { name, path: p, activate } = JSON.parse(body);
+              const entry = await registerBackpack(name, p);
+              if (activate) {
+                await setActiveBackpack(name);
+                const swapped = await makeBackend();
+                storage = swapped.backend;
+                activeEntry = swapped.entry;
+                watchActiveBackpack();
+                server.ws.send({
+                  type: "custom",
+                  event: "active-backpack-change",
+                  data: { active: activeEntry },
+                });
+              }
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ ok: true, entry }));
+            } catch (err: any) {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: err.message }));
+            }
+          });
+          return;
+        }
+
+        const backpackDeleteMatch = req.url?.match(/^\/api\/backpacks\/(.+)$/);
+        if (backpackDeleteMatch && req.method === "DELETE") {
+          const name = decodeURIComponent(backpackDeleteMatch[1]);
+          try {
+            await unregisterBackpack(name);
+            if (activeEntry && activeEntry.name === name) {
+              const swapped = await makeBackend();
+              storage = swapped.backend;
+              activeEntry = swapped.entry;
+              watchActiveBackpack();
+              server.ws.send({
+                type: "custom",
+                event: "active-backpack-change",
+                data: { active: activeEntry },
+              });
+            }
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ ok: true }));
+          } catch (err: any) {
+            res.statusCode = 400;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: err.message }));
+          }
           return;
         }
 
