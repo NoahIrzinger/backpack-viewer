@@ -18,23 +18,44 @@ npx backpack-viewer
 
 Opens http://localhost:5173. Click any learning graph in the sidebar to visualize it.
 
+**Using Claude Code?** The [backpack-ontology-plugin](https://github.com/NoahIrzinger/backpack-ontology-plugin) bundles the MCP server with usage skills (`backpack-guide`, `backpack-mine`) and is the recommended install path. The viewer works against whatever backpack data the plugin or standalone MCP writes, no extra wiring needed.
+
 ## Features
 
-- **Live reload**: add knowledge via Claude and watch it appear in real time
-- **Pan and zoom**: click-drag to pan, scroll to zoom
-- **Inspect**: click any item to see its properties, connections, and metadata
-- **Edit**: rename graphs, edit node types and properties, add or remove items inline
-- **Search**: filter by name in the sidebar, filter by type with chips
+### Exploration
+- **Live reload** — add knowledge via Claude and watch it appear in real time
+- **Pan and zoom** — click-drag to pan, scroll to zoom
+- **Focus mode** — select nodes and isolate their N-hop subgraph
+- **Walk mode** — traverse the graph node-by-node with a highlighted trail
+- **Path finding** — select two nodes, shortest path highlighted
+- **Search** — filter by name in the sidebar, filter by type with chips
+- **Node history** — back/forward navigation through inspected nodes
+- **Graph snippets** — save walk trails as named, reusable subgraphs
+
+### Editing
+- **Inspect** — click any item to see properties, connections, and metadata
+- **Inline edit** — rename graphs, change node types and properties, add/remove items
+- **Star nodes** — mark important nodes with a gold star indicator
+
+### Collaboration awareness (0.3.0+)
+- **Lock heartbeat badge** — each graph in the sidebar shows `editing: <author>` when another writer is actively editing (within the last 5 minutes). Backed by a batched `/api/locks` endpoint.
+- **Remote graphs section** — subscribe to learning graphs hosted at HTTPS URLs and view them read-only alongside your local graphs.
+
+### Versioning
+- **Branches and snapshots** — the underlying storage is event-sourced; the viewer exposes branch switching and snapshot/rollback UI via the MCP tools.
 
 ## How it works
 
-The viewer reads learning graph data from the same local files that the MCP server writes to. Changes appear automatically, no refresh needed.
+The viewer reads learning graph data from the same local event log that the MCP server writes to. Changes appear automatically, no refresh needed.
 
 ```
-backpack-ontology (MCP) ──writes──> ~/.local/share/backpack/ontologies/
-                                         │
+backpack-ontology (MCP) ──writes──> ~/.local/share/backpack/graphs/<name>/
+                                         │  branches/<branch>/events.jsonl
+                                         │  branches/<branch>/snapshot.json
 backpack-viewer ──reads──────────────────┘
 ```
+
+Old-format graphs (pre-0.3.0) are migrated automatically on MCP startup — the viewer reads the new format on first launch after upgrade, no manual step.
 
 ## Configuration
 

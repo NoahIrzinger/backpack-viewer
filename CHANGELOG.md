@@ -1,6 +1,20 @@
 # Changelog
 
-## 0.3.0 (unreleased)
+## 0.3.1 (2026-04-10)
+
+### Docs
+- **README cross-references the Claude Code plugin** as the recommended
+  install path for Claude Code users. The viewer works with standalone
+  MCP too, but the plugin bundles the MCP server with usage skills and
+  is strictly better for that audience.
+- Fixed stale storage path in the "How it works" diagram
+  (`~/.local/share/backpack/ontologies/` → current event-sourced layout).
+- Features list expanded with walk mode, focus mode, path finding,
+  snippets, node history, star nodes, lock heartbeat badge, remote
+  graphs, branches and snapshots — all of which shipped in or before
+  0.3.0 but were missing from the README.
+
+## 0.3.0 (2026-04-10)
 
 This release pairs with `backpack-ontology@0.3.0` and inherits its event-sourced
 storage, optimistic concurrency, and lock heartbeat. Existing graphs from older
