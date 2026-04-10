@@ -88,6 +88,15 @@ export function initSidebar(
 
   container.appendChild(headingRow);
 
+  // Stale-version banner — hidden by default. setStaleVersionBanner()
+  // populates and reveals it when the startup check detects that the
+  // running viewer is older than the latest published npm version
+  // (classic npx cache trap).
+  const staleBanner = document.createElement("div");
+  staleBanner.className = "sidebar-stale-banner";
+  staleBanner.hidden = true;
+  container.appendChild(staleBanner);
+
   // Backpack picker pill — discrete indicator of the active backpack with
   // a dropdown to switch between registered ones.
   const backpackPicker = document.createElement("button");
@@ -229,6 +238,25 @@ export function initSidebar(
   });
 
   return {
+    setStaleVersionBanner(current: string, latest: string) {
+      staleBanner.replaceChildren();
+      const title = document.createElement("div");
+      title.className = "sidebar-stale-banner-title";
+      title.textContent = `Viewer ${current} is out of date`;
+
+      const subtitle = document.createElement("div");
+      subtitle.className = "sidebar-stale-banner-subtitle";
+      subtitle.textContent = `Latest is ${latest}. Your version is stuck because of an npx cache.`;
+
+      const hint = document.createElement("pre");
+      hint.className = "sidebar-stale-banner-hint";
+      hint.textContent = "npm cache clean --force\nnpx backpack-viewer@latest";
+
+      staleBanner.appendChild(title);
+      staleBanner.appendChild(subtitle);
+      staleBanner.appendChild(hint);
+      staleBanner.hidden = false;
+    },
     setBackpacks(list: BackpackSummary[]) {
       currentBackpacks = list.slice();
       const active = list.find((b) => b.active) ?? null;

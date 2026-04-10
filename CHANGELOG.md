@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.5.1 (2026-04-10)
+
+### Stale-version detection (unsticks users from the npx cache trap)
+- **Viewer now checks `https://registry.npmjs.org/backpack-viewer/latest`
+  on startup** and compares the result to its own version. If out of
+  date, prints a loud terminal warning:
+  ```
+  ⚠ Backpack Viewer 0.5.0 is out of date — latest is 0.5.2
+  To update:
+    npm cache clean --force
+    npx backpack-viewer@latest
+  ```
+- **Sidebar banner** in the viewer UI (above the backpack picker) when
+  stale: shows the current vs latest version and the exact commands
+  to run. Users stuck on old versions because their npx cache reused
+  an old install now see the stale state in-app instead of silently
+  running outdated code.
+- New server endpoint `GET /api/version-check` returns
+  `{ current, latest, stale }`. Backed by a 1-hour in-memory cache so
+  we don't hammer the npm registry.
+- Offline-friendly: if the registry is unreachable (network error,
+  timeout, non-200), the check silently skips and no warning shows.
+  Users offline don't get spurious "out of date" messages.
+- Version number now printed in the startup log line
+  (`Backpack Viewer vX.Y.Z running at http://...`).
+
 ## 0.5.0 (2026-04-10)
 
 Pairs with `backpack-ontology@0.5.0` — the backpacks config format

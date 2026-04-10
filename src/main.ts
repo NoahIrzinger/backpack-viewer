@@ -808,6 +808,18 @@ async function main() {
     sidebar.setBackpacks(list);
   } catch {}
 
+  // Fire-and-forget stale-version check. If we're running an out-of-date
+  // viewer (classic npx cache trap), show a banner in the sidebar with
+  // the exact command to unblock.
+  fetch("/api/version-check")
+    .then((r) => r.json())
+    .then((info: { current: string; latest: string | null; stale: boolean }) => {
+      if (info.stale && info.latest) {
+        sidebar.setStaleVersionBanner(info.current, info.latest);
+      }
+    })
+    .catch(() => {});
+
   // Load ontology list (local + remote in parallel)
   const [summaries, remotes] = await Promise.all([
     listOntologies(),

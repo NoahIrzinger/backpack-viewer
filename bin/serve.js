@@ -4,12 +4,82 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
+import https from "node:https";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 const distDir = path.resolve(root, "dist/app");
 
 const hasDistBuild = fs.existsSync(path.join(distDir, "index.html"));
+
+/**
+ * Fetch the `latest` tag for a package from the npm registry. Returns
+ * the version string on success, null on any failure (offline,
+ * timeout, parse error, etc). Never throws — caller uses a falsy
+ * check to skip the stale warning if the registry is unreachable.
+ */
+function fetchLatestVersion(pkgName) {
+  return new Promise((resolve) => {
+    const req = https.get(
+      `https://registry.npmjs.org/${pkgName}/latest`,
+      { timeout: 5000, headers: { Accept: "application/json" } },
+      (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          resolve(null);
+          return;
+        }
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          try {
+            const parsed = JSON.parse(data);
+            resolve(typeof parsed.version === "string" ? parsed.version : null);
+          } catch {
+            resolve(null);
+          }
+        });
+      },
+    );
+    req.on("error", () => resolve(null));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(null);
+    });
+  });
+}
+
+// --- Version check cache (1 hour TTL) ---
+// Used by the /api/version-check endpoint so the sidebar can render
+// a stale-version banner without hammering the npm registry on every
+// request.
+const versionCheckCache = { ts: 0, latest: null, current: null };
+const VERSION_CACHE_TTL_MS = 60 * 60 * 1000;
+
+async function getCachedVersionCheck(currentVersion) {
+  const now = Date.now();
+  if (
+    versionCheckCache.latest !== null &&
+    now - versionCheckCache.ts < VERSION_CACHE_TTL_MS
+  ) {
+    return {
+      current: versionCheckCache.current,
+      latest: versionCheckCache.latest,
+      stale: versionCheckCache.latest !== versionCheckCache.current,
+    };
+  }
+  const latest = await fetchLatestVersion("backpack-viewer");
+  if (latest) {
+    versionCheckCache.ts = now;
+    versionCheckCache.latest = latest;
+    versionCheckCache.current = currentVersion;
+  }
+  return {
+    current: currentVersion,
+    latest,
+    stale: latest !== null && latest !== currentVersion,
+  };
+}
 
 if (hasDistBuild) {
   // --- Production: static file server + API (zero native deps) ---
@@ -24,6 +94,12 @@ if (hasDistBuild) {
     unregisterBackpack,
   } = await import("backpack-ontology");
   const { loadViewerConfig } = await import("../dist/config.js");
+
+  // Load our own version from package.json for the stale-version check
+  const pkgJson = JSON.parse(
+    fs.readFileSync(path.join(root, "package.json"), "utf8"),
+  );
+  const currentVersion = pkgJson.version;
 
   // Resolve host + port from the viewer config, with env vars taking
   // precedence for quick overrides. Default is 127.0.0.1 loopback —
@@ -86,6 +162,20 @@ if (hasDistBuild) {
     if (url === "/api/config") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(viewerConfig));
+      return;
+    }
+
+    if (url === "/api/version-check" && req.method === "GET") {
+      try {
+        const result = await getCachedVersionCheck(currentVersion);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({ current: currentVersion, latest: null, stale: false }),
+        );
+      }
       return;
     }
 
@@ -547,7 +637,7 @@ if (hasDistBuild) {
   // BACKPACK_VIEWER_HOST env var, and will see a loud warning.
   server.listen(port, bindHost, () => {
     const displayHost = bindHost === "0.0.0.0" || bindHost === "::" ? "localhost" : bindHost;
-    console.log(`  Backpack Viewer running at http://${displayHost}:${port}/`);
+    console.log(`  Backpack Viewer v${currentVersion} running at http://${displayHost}:${port}/`);
     const isLoopback =
       bindHost === "127.0.0.1" ||
       bindHost === "localhost" ||
@@ -557,6 +647,20 @@ if (hasDistBuild) {
         `  WARNING: viewer is bound to ${bindHost}, not loopback. The API exposes read/write access to your learning graphs — anyone on your network can reach it. Set server.host to "127.0.0.1" in ~/.config/backpack/viewer.json to restrict to localhost.`,
       );
     }
+
+    // Fire-and-forget stale-version check. If the registry responds
+    // and our version is older than `latest`, print a loud warning
+    // telling the user exactly how to unblock themselves.
+    fetchLatestVersion("backpack-viewer").then((latest) => {
+      if (latest && latest !== currentVersion) {
+        console.warn("");
+        console.warn(`  ⚠ Backpack Viewer ${currentVersion} is out of date — latest is ${latest}`);
+        console.warn(`  To update:`);
+        console.warn(`    npm cache clean --force`);
+        console.warn(`    npx backpack-viewer@latest`);
+        console.warn("");
+      }
+    });
   });
 } else {
   // --- Development: use Vite for HMR + TypeScript compilation ---

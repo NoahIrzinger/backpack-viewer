@@ -393,6 +393,19 @@ function ontologyApiPlugin(): Plugin {
           return;
         }
 
+        // --- Version check (dev mode: always reports not-stale) ---
+        if (req.url === "/api/version-check" && req.method === "GET") {
+          res.setHeader("Content-Type", "application/json");
+          res.end(
+            JSON.stringify({
+              current: pkg.version,
+              latest: pkg.version,
+              stale: false,
+            }),
+          );
+          return;
+        }
+
         // --- Backpacks (meta: list, active, register, switch, unregister) ---
         if (req.url === "/api/backpacks" && req.method === "GET") {
           try {

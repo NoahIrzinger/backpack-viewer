@@ -318,6 +318,40 @@ body {
   opacity: 1;
 }
 
+/* --- Stale viewer version banner --- */
+
+.sidebar-stale-banner {
+  background: #fff3cd;
+  color: #5c3a00;
+  border: 1px solid #e6c263;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  font-size: 11px;
+}
+
+.sidebar-stale-banner-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.sidebar-stale-banner-subtitle {
+  opacity: 0.85;
+  margin-bottom: 6px;
+}
+
+.sidebar-stale-banner-hint {
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.4;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 /* --- Backpack picker (active backpack indicator + switcher) --- */
 
 .backpack-picker-container {
