@@ -7,8 +7,11 @@
  * Protocol:
  *   Main → Worker:
  *     { type: 'start', nodes, edges, params }  — begin simulation
- *     { type: 'stop' }                          — halt simulation
+ *     { type: 'stop' }                          — halt simulation (pauses)
+ *     { type: 'resume', alpha? }                — resume after a stop
  *     { type: 'params', params }                — update layout params + reheat
+ *     { type: 'pin', updates: [{id, x, y}] }    — mark node(s) as pinned at given pos
+ *     { type: 'unpin', ids: string[] | 'all' }  — release pins; 'all' clears every pin
  *
  *   Worker → Main:
  *     { type: 'tick', positions: Float64Array, alpha }  — position update per tick
@@ -79,6 +82,53 @@ self.onmessage = (e: MessageEvent) => {
 
   if (msg.type === "stop") {
     running = false;
+  }
+
+  if (msg.type === "resume") {
+    if (!running && state) {
+      alpha = Math.max(alpha, typeof msg.alpha === "number" ? msg.alpha : 0.5);
+      running = true;
+      runLoop();
+    }
+  }
+
+  if (msg.type === "pin" && state) {
+    // updates: [{ id, x, y }] — apply to the worker's state copy. Pinned
+    // nodes are treated as fixed points by tick() in layout.ts.
+    const updates = msg.updates as Array<{ id: string; x: number; y: number }>;
+    for (const u of updates) {
+      const node = state.nodeMap.get(u.id);
+      if (node) {
+        node.x = u.x;
+        node.y = u.y;
+        node.vx = 0;
+        node.vy = 0;
+        node.pinned = true;
+      }
+    }
+    // Nudge simulation so neighbors react to the new pin location
+    alpha = Math.max(alpha, 0.3);
+    if (!running) {
+      running = true;
+      runLoop();
+    }
+  }
+
+  if (msg.type === "unpin" && state) {
+    const ids = msg.ids;
+    if (ids === "all") {
+      for (const node of state.nodes) node.pinned = false;
+    } else if (Array.isArray(ids)) {
+      for (const id of ids) {
+        const node = state.nodeMap.get(id);
+        if (node) node.pinned = false;
+      }
+    }
+    alpha = Math.max(alpha, 0.5);
+    if (!running) {
+      running = true;
+      runLoop();
+    }
   }
 
   if (msg.type === "params") {

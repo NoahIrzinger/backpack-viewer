@@ -1,5 +1,75 @@
 # Changelog
 
+## 0.6.0 (2026-04-10)
+
+### Drag-to-pin nodes (temporary layout tweaks)
+- **Drag any node with the cursor** to move it out of the way or into
+  a specific position. The node stays pinned where you drop it — the
+  force simulation reflows neighbors around the new position instead
+  of dragging it back.
+- **Multi-selection with Shift-click** or Shift-drag rubber-band on
+  empty canvas. Selection is visible as an accent-colored outline.
+- **Multi-drag**: dragging any selected node moves the entire selected
+  group as a rigid body, preserving relative offsets. All dragged
+  nodes become pinned on drop.
+- **Pin indicator**: pinned nodes show a subtle dashed outer ring so
+  you can tell which positions are being manually held.
+- **Reset with `r`**: releases every pinned node and lets the force
+  simulation reclaim the layout. Binds to keyboard shortcut `r` by
+  default, customizable in `~/.config/backpack/viewer.json`.
+- **Release triggers — pins are strictly temporary.** Pins release
+  automatically on any of these events, restoring the pure force
+  layout:
+  - Data changes (node/edge add/remove/update via live reload)
+  - Graph switch or backpack switch
+  - Focus mode enter/exit
+  - Walk mode enter/exit
+  - Explicit `r` shortcut press
+- **Toast on auto-release**: when incoming live-reload data resets
+  the user's manual layout, a brief toast appears explaining why
+  ("Manual layout reset — new data arrived"). Pressing `r` shows a
+  different toast ("Manual layout reset — pins released").
+- **Walk mode guard**: drag is disabled while walk mode is active —
+  clicking a node in walk mode advances the path as before, and drag
+  gestures are ignored so they don't fight the animation.
+- **ESC now clears selection first** before falling through to focus
+  exit / help close behaviors.
+
+### Canvas API additions
+- `releaseAllPins(): boolean` — clears every pinned node and returns
+  true if any were released (so callers can decide whether to show a
+  toast).
+- `hasPinnedNodes(): boolean` — cheap pre-check.
+- `clearSelection()` and `getSelectedNodeIds()` — explicit selection
+  control exposed to main.ts.
+
+### Layout API additions
+- `LayoutNode.pinned?: boolean` — new optional field. When true, the
+  force simulation's integration step skips position updates for the
+  node. Pinned nodes still contribute forces to non-pinned neighbors.
+- New worker protocol messages: `pin` (apply pin with position
+  updates), `unpin` (release pins by ID list or `"all"`), `resume`
+  (restart a stopped loop with optional alpha).
+- `simulate()` now resets `animFrame = 0` on early-return, so
+  `if (!animFrame) simulate()` idioms work correctly after the
+  simulation settles. **This is a latent bug fix** — the old code
+  left `animFrame` dangling, which silently broke any later attempt
+  to restart the simulation on the main thread.
+
+### Shortcuts updated
+- New keybinding: `resetPins` → `r` (default).
+- `escape` extended: first clears selection if any, then falls
+  through to focus exit, then help modal close.
+- Help modal's mouse hint table updated: `Drag node` / `Drag selection`
+  / `Shift+drag empty` for rubber-band, `Drag empty` for pan.
+
+### Testing
+- Interactively verified end-to-end with chrome-devtools:
+  single-node drag-to-pin, reset via `r` with toast confirmation,
+  shift-click multi-selection, multi-drag of 3-node group,
+  shift+drag rubber-band selection of 3 Person nodes, plain pan
+  regression check.
+
 ## 0.5.1 (2026-04-10)
 
 ### Stale-version detection (unsticks users from the npx cache trap)

@@ -3,8 +3,11 @@ import { type KeybindingAction, type KeybindingMap, actionDescriptions } from ".
 // Non-keyboard actions shown at the bottom of help
 const MOUSE_ACTIONS = [
   { key: "Click", description: "Select node" },
-  { key: "Ctrl+Click", description: "Multi-select nodes" },
-  { key: "Drag", description: "Pan canvas" },
+  { key: "Shift+Click", description: "Multi-select nodes" },
+  { key: "Drag node", description: "Move & pin node (temporary)" },
+  { key: "Drag selection", description: "Move selected group (temporary)" },
+  { key: "Shift+drag empty", description: "Rubber-band select" },
+  { key: "Drag empty", description: "Pan canvas" },
   { key: "Scroll", description: "Zoom in/out" },
 ];
 
@@ -22,6 +25,7 @@ const ACTION_ORDER: KeybindingAction[] = [
   "toggleSidebar",
   "walkMode",
   "walkIsolate",
+  "resetPins",
   "escape",
 ];
 

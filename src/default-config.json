@@ -31,7 +31,8 @@
     "clusteringIncrease": "}",
     "toggleSidebar": "Tab",
     "walkMode": "w",
-    "walkIsolate": "i"
+    "walkIsolate": "i",
+    "resetPins": "r"
   },
   "server": {
     "host": "127.0.0.1",

@@ -71,6 +71,28 @@ export function initCanvas(
   let showTypeHulls = true;
   let showMinimap = true;
 
+  // --- Drag state (node pinning + multi-drag + rubber-band select) ---
+  // `dragMode` is the discriminator. "pending" means mousedown happened
+  // but we haven't moved enough yet to commit to a gesture — could turn
+  // into "pan", "nodeDrag", "rubberBand", or just a click on mouseup.
+  type DragMode = "idle" | "pending" | "pan" | "nodeDrag" | "rubberBand";
+  let dragMode: DragMode = "idle";
+  // Node(s) being dragged, with their starting world positions so the
+  // mouse delta can translate a whole selection as a rigid body.
+  let dragNodes: Array<{ node: LayoutNode; startX: number; startY: number }> = [];
+  // World coords of the cursor when the drag started — used to compute
+  // how far the dragged group should move each mousemove.
+  let dragStartWorldX = 0;
+  let dragStartWorldY = 0;
+  // Rubber-band rectangle in world coords during shift-drag on empty canvas.
+  let rubberBand: { x1: number; y1: number; x2: number; y2: number } | null = null;
+  // IDs of nodes that currently have `pinned: true`. Tracked here for
+  // rendering the pin indicator without scanning the full nodes array.
+  let pinnedNodeIds: Set<string> = new Set();
+  // Pixels the cursor must move between mousedown and mousemove before
+  // the gesture is promoted from "click" to "drag". Matches pan threshold.
+  const CLICK_DRAG_THRESHOLD = 5;
+
   // Focus mode state
   let lastLoadedData: LearningGraphData | null = null;
   let focusSeedIds: string[] | null = null;
@@ -197,6 +219,31 @@ export function initCanvas(
   // --- Rendering ---
 
   /** Draw only walk pulse effects (edges + node glows) + minimap on top of cached scene. */
+  /**
+   * Draw the rubber-band selection rectangle in world coords, if active.
+   * Intended to be called AFTER the main scene has been drawn and
+   * AFTER the camera transform has been applied (so the rect is in
+   * world space). Idempotent when no rubber-band is active.
+   */
+  function drawRubberBandIfActive() {
+    if (!rubberBand) return;
+    ctx.save();
+    const minX = Math.min(rubberBand.x1, rubberBand.x2);
+    const maxX = Math.max(rubberBand.x1, rubberBand.x2);
+    const minY = Math.min(rubberBand.y1, rubberBand.y2);
+    const maxY = Math.max(rubberBand.y1, rubberBand.y2);
+    ctx.strokeStyle = cssVar("--accent") || "#d4a27f";
+    ctx.fillStyle = cssVar("--accent") || "#d4a27f";
+    ctx.globalAlpha = 0.12;
+    ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
+    ctx.globalAlpha = 0.8;
+    ctx.lineWidth = 1 / Math.max(camera.scale, 0.5);
+    ctx.setLineDash([6 / Math.max(camera.scale, 0.5), 4 / Math.max(camera.scale, 0.5)]);
+    ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
   function renderWalkOverlay() {
     if (!state) return;
     pulsePhase += walkCfg.pulseSpeed;
@@ -256,6 +303,9 @@ export function initCanvas(
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
+
+    // Rubber-band overlay (still inside the world-transform save/restore)
+    drawRubberBandIfActive();
 
     ctx.restore();
 
@@ -551,6 +601,23 @@ export function initCanvas(
       ctx.stroke();
       ctx.globalAlpha = 1;
 
+      // Pin indicator — subtle dashed outer ring on pinned nodes so the
+      // user can see which positions are being manually held. Rendered
+      // after the main circle but before the label so the label stays
+      // on top.
+      if (node.pinned) {
+        ctx.save();
+        ctx.strokeStyle = nodeBorder;
+        ctx.globalAlpha = 0.55;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r + 4, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+
       // Highlighted path glow
       if (highlightedPath && highlightedPath.nodeIds.has(node.id) && !isSelected) {
         ctx.save();
@@ -618,6 +685,17 @@ export function initCanvas(
     // Minimap
     if (showMinimap && state.nodes.length > 1) {
       drawMinimap();
+    }
+
+    // Rubber-band overlay — drawn AFTER the cache snapshot so it never
+    // gets baked into the cached scene. Uses its own camera transform.
+    if (rubberBand) {
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.translate(-camera.x * camera.scale, -camera.y * camera.scale);
+      ctx.scale(camera.scale, camera.scale);
+      drawRubberBandIfActive();
+      ctx.restore();
     }
   }
 
@@ -816,6 +894,11 @@ export function initCanvas(
 
   function simulate() {
     if (!state || alpha < ALPHA_MIN) {
+      // Clear animFrame so callers using the `if (!animFrame) simulate()`
+      // idiom can kick the sim back on after releasing pins or bumping
+      // alpha. Without this reset, animFrame stays truthy from the last
+      // RAF handle and subsequent restart attempts silently no-op.
+      animFrame = 0;
       // Start walk animation loop if simulation stopped but walk mode is active
       if (walkMode && walkTrail.length > 0 && !walkAnimFrame) {
         walkAnimFrame = requestAnimationFrame(walkAnimate);
@@ -828,34 +911,190 @@ export function initCanvas(
     animFrame = requestAnimationFrame(simulate);
   }
 
-  // --- Interaction: Pan + Click ---
+  // --- Interaction: Pan + Click + Node drag + Rubber-band select ---
+  //
+  // Gesture dispatch on mousedown:
+  //   1. mousedown on a node (no modifier) + cursor moves > threshold →
+  //      NODE DRAG. If the node is part of the current selection, drag
+  //      the whole selection as a rigid body. Otherwise drag just this
+  //      node. On drop, pin all dragged nodes.
+  //   2. mousedown on a node (no movement) → CLICK (existing selection
+  //      and walk-mode behavior).
+  //   3. mousedown on empty canvas with Shift → RUBBER-BAND select.
+  //   4. mousedown on empty canvas without modifier → PAN (existing).
+  //
+  // Node drag is disabled during walk mode — in walk mode, clicking a
+  // node advances the path, and drag gestures would fight the animation.
 
-  let dragging = false;
   let didDrag = false;
   let lastX = 0;
   let lastY = 0;
+  let mouseDownStartX = 0;
+  let mouseDownStartY = 0;
 
   canvas.addEventListener("mousedown", (e) => {
-    dragging = true;
+    dragMode = "pending";
     didDrag = false;
     lastX = e.clientX;
     lastY = e.clientY;
+    mouseDownStartX = e.clientX;
+    mouseDownStartY = e.clientY;
+
+    // Decide the potential gesture now — committed on first movement
+    // past the threshold. We still track "pending" so mouseup without
+    // movement falls through to the click path below.
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const hit = nodeAtScreen(mx, my);
+
+    if (hit && !walkMode) {
+      // Set up the pending node drag. On first movement past the
+      // threshold we commit to "nodeDrag" mode.
+      dragNodes = [];
+      if (selectedNodeIds.has(hit.id) && selectedNodeIds.size > 1) {
+        // Drag the whole selection as a group
+        for (const id of selectedNodeIds) {
+          const n = state?.nodeMap.get(id);
+          if (n) dragNodes.push({ node: n, startX: n.x, startY: n.y });
+        }
+      } else {
+        dragNodes.push({ node: hit, startX: hit.x, startY: hit.y });
+      }
+      const [wx, wy] = screenToWorld(mx, my);
+      dragStartWorldX = wx;
+      dragStartWorldY = wy;
+    } else if (!hit && e.shiftKey) {
+      // Pending rubber-band (commits on first movement)
+      const [wx, wy] = screenToWorld(mx, my);
+      rubberBand = { x1: wx, y1: wy, x2: wx, y2: wy };
+    }
+    // Otherwise (empty canvas, no shift): will become pan on first move
   });
 
   canvas.addEventListener("mousemove", (e) => {
-    if (!dragging) return;
+    if (dragMode === "idle") return;
+
     const dx = e.clientX - lastX;
     const dy = e.clientY - lastY;
-    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) didDrag = true;
-    camera.x -= dx / camera.scale;
-    camera.y -= dy / camera.scale;
+    const totalDx = Math.abs(e.clientX - mouseDownStartX);
+    const totalDy = Math.abs(e.clientY - mouseDownStartY);
+
+    // Commit to a gesture once the cursor crosses the threshold
+    if (
+      dragMode === "pending" &&
+      (totalDx > CLICK_DRAG_THRESHOLD || totalDy > CLICK_DRAG_THRESHOLD)
+    ) {
+      didDrag = true;
+      if (dragNodes.length > 0) {
+        dragMode = "nodeDrag";
+        // Freeze the worker while the user is actively dragging so its
+        // incoming tick messages don't fight our local x/y updates
+        if (useWorker && layoutWorker) {
+          layoutWorker.postMessage({ type: "stop" });
+        }
+      } else if (rubberBand) {
+        dragMode = "rubberBand";
+      } else {
+        dragMode = "pan";
+      }
+    }
+
+    if (dragMode === "nodeDrag") {
+      // Translate the dragged group by the cursor delta in world coords
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const [wx, wy] = screenToWorld(mx, my);
+      const worldDx = wx - dragStartWorldX;
+      const worldDy = wy - dragStartWorldY;
+      for (const d of dragNodes) {
+        d.node.x = d.startX + worldDx;
+        d.node.y = d.startY + worldDy;
+        d.node.vx = 0;
+        d.node.vy = 0;
+        d.node.pinned = true;
+        pinnedNodeIds.add(d.node.id);
+      }
+      nodeHash.rebuild(state?.nodes ?? []);
+      requestRedraw();
+    } else if (dragMode === "rubberBand" && rubberBand) {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const [wx, wy] = screenToWorld(mx, my);
+      rubberBand.x2 = wx;
+      rubberBand.y2 = wy;
+      requestRedraw();
+    } else if (dragMode === "pan") {
+      camera.x -= dx / camera.scale;
+      camera.y -= dy / camera.scale;
+      requestRedraw();
+    }
+
     lastX = e.clientX;
     lastY = e.clientY;
-    requestRedraw();
   });
 
   canvas.addEventListener("mouseup", (e) => {
-    dragging = false;
+    const wasNodeDrag = dragMode === "nodeDrag";
+    const wasRubberBand = dragMode === "rubberBand";
+    const draggedNodeIdsSnapshot = dragNodes.map((d) => d.node.id);
+
+    if (wasNodeDrag) {
+      // Commit pins to the worker's copy so its simulation respects them
+      if (useWorker && layoutWorker && state) {
+        const updates = dragNodes.map((d) => ({
+          id: d.node.id,
+          x: d.node.x,
+          y: d.node.y,
+        }));
+        layoutWorker.postMessage({ type: "pin", updates });
+        layoutWorker.postMessage({ type: "resume", alpha: 0.5 });
+      } else {
+        // Main-thread simulation — just bump alpha so neighbors reflow
+        alpha = Math.max(alpha, 0.5);
+        if (!animFrame) simulate();
+      }
+      dragMode = "idle";
+      dragNodes = [];
+      requestRedraw();
+      return;
+    }
+
+    if (wasRubberBand && rubberBand && state) {
+      // Compute which nodes are inside the rectangle (world coords)
+      const minX = Math.min(rubberBand.x1, rubberBand.x2);
+      const maxX = Math.max(rubberBand.x1, rubberBand.x2);
+      const minY = Math.min(rubberBand.y1, rubberBand.y2);
+      const maxY = Math.max(rubberBand.y1, rubberBand.y2);
+      // Shift extends the existing selection; rubber-band without shift
+      // is currently impossible (we only enter this mode on shift+drag),
+      // but if that changes later we handle both cases here.
+      if (!e.shiftKey) selectedNodeIds.clear();
+      for (const node of state.nodes) {
+        if (node.x >= minX && node.x <= maxX && node.y >= minY && node.y <= maxY) {
+          selectedNodeIds.add(node.id);
+        }
+      }
+      const ids = [...selectedNodeIds];
+      onNodeClick?.(ids.length > 0 ? ids : null);
+      rubberBand = null;
+      dragMode = "idle";
+      requestRedraw();
+      return;
+    }
+
+    // Pan finishing → nothing to do, state cleanup below
+    if (dragMode === "pan") {
+      dragMode = "idle";
+      return;
+    }
+
+    // Fall through: this was a click (pending → no drag). Treat as the
+    // existing click-to-select / walk-mode-path behavior.
+    dragMode = "idle";
+    rubberBand = null;
     if (didDrag) return;
 
     // Click — hit test for node selection
@@ -863,7 +1102,8 @@ export function initCanvas(
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
     const hit = nodeAtScreen(mx, my);
-    const multiSelect = e.ctrlKey || e.metaKey;
+    const multiSelect = e.ctrlKey || e.metaKey || e.shiftKey;
+    void draggedNodeIdsSnapshot;
 
     if (walkMode && focusSeedIds && hit && state) {
       // Walk mode: find path from current position to clicked node
@@ -954,7 +1194,30 @@ export function initCanvas(
   });
 
   canvas.addEventListener("mouseleave", () => {
-    dragging = false;
+    // Cancel any in-progress drag. Node drags keep the pins they already
+    // applied (the dragged nodes stay where the cursor last was). Rubber-
+    // band selects are abandoned without committing the selection.
+    if (dragMode === "nodeDrag") {
+      // Sync the final pin positions to the worker so simulation resumes
+      if (useWorker && layoutWorker && dragNodes.length > 0) {
+        const updates = dragNodes.map((d) => ({
+          id: d.node.id,
+          x: d.node.x,
+          y: d.node.y,
+        }));
+        layoutWorker.postMessage({ type: "pin", updates });
+        layoutWorker.postMessage({ type: "resume", alpha: 0.5 });
+      } else {
+        alpha = Math.max(alpha, 0.5);
+        if (!animFrame) simulate();
+      }
+    }
+    if (dragMode === "rubberBand") {
+      rubberBand = null;
+      requestRedraw();
+    }
+    dragMode = "idle";
+    dragNodes = [];
   });
 
   // --- Interaction: Zoom (wheel + pinch) ---
@@ -1143,7 +1406,8 @@ export function initCanvas(
   let hoverTimeout: ReturnType<typeof setTimeout> | null = null;
 
   canvas.addEventListener("mousemove", (e) => {
-    if (dragging) {
+    // Suppress hover tooltip while any drag gesture is active
+    if (dragMode !== "idle" && dragMode !== "pending") {
       if (tooltip.style.display !== "none") {
         tooltip.style.display = "none";
         hoverNodeId = null;
@@ -1205,6 +1469,11 @@ export function initCanvas(
       alpha = 1;
       selectedNodeIds = new Set();
       filteredNodeIds = null;
+      // Reset any lingering drag/pin state from the previous graph
+      pinnedNodeIds.clear();
+      dragMode = "idle";
+      dragNodes = [];
+      rubberBand = null;
 
       // Center camera on the graph
       camera = { x: 0, y: 0, scale: 1 };
@@ -1238,6 +1507,64 @@ export function initCanvas(
     setFilteredNodeIds(ids: Set<string> | null) {
       filteredNodeIds = ids;
       requestRedraw();
+    },
+
+    /**
+     * Release every manually-pinned node so the force simulation
+     * reclaims them. Called by main.ts when a data event (node/edge
+     * add/remove, graph switch, backpack switch, focus/walk mode
+     * enter/exit, live reload) invalidates the user's temporary
+     * layout tweaks.
+     *
+     * Returns `true` if any pins were released, so the caller can
+     * show a toast only when the user actually loses work.
+     */
+    releaseAllPins(): boolean {
+      if (!state) return false;
+      let hadPins = false;
+      for (const node of state.nodes) {
+        if (node.pinned) {
+          hadPins = true;
+          node.pinned = false;
+        }
+      }
+      pinnedNodeIds.clear();
+      // Clear any in-progress drag state too — a data change mid-drag
+      // should abort the drag cleanly
+      dragMode = "idle";
+      dragNodes = [];
+      rubberBand = null;
+      if (hadPins) {
+        // Nudge the simulation so the freed nodes start moving
+        if (useWorker && layoutWorker) {
+          layoutWorker.postMessage({ type: "unpin", ids: "all" });
+        } else {
+          alpha = Math.max(alpha, 0.5);
+          if (!animFrame) simulate();
+        }
+        requestRedraw();
+      }
+      return hadPins;
+    },
+
+    hasPinnedNodes(): boolean {
+      if (!state) return false;
+      for (const node of state.nodes) {
+        if (node.pinned) return true;
+      }
+      return false;
+    },
+
+    /** Clear the multi-selection (used by ESC keyboard shortcut). */
+    clearSelection() {
+      if (selectedNodeIds.size === 0) return;
+      selectedNodeIds.clear();
+      onNodeClick?.(null);
+      requestRedraw();
+    },
+
+    getSelectedNodeIds(): string[] {
+      return [...selectedNodeIds];
     },
 
     panToNode(nodeId: string) {
@@ -1375,6 +1702,13 @@ export function initCanvas(
 
     enterFocus(seedNodeIds: string[], hops: number) {
       if (!lastLoadedData || !state) return;
+      // Release any user-pinned nodes — focus has its own layout and
+      // shouldn't inherit manual tweaks from the full-graph view.
+      for (const n of state.nodes) n.pinned = false;
+      pinnedNodeIds.clear();
+      dragMode = "idle";
+      dragNodes = [];
+      rubberBand = null;
       // Save current full-graph state
       if (!focusSeedIds) {
         savedFullState = state;
@@ -1420,6 +1754,14 @@ export function initCanvas(
       cancelAnimationFrame(animFrame);
       if (layoutWorker) layoutWorker.postMessage({ type: "stop" });
       state = savedFullState;
+      // The saved full-graph state may have stale pinned flags from
+      // before the focus transition; scrub them so the user starts
+      // fresh on exit (pins are temporary view tweaks, not persistent).
+      for (const n of state.nodes) n.pinned = false;
+      pinnedNodeIds.clear();
+      dragMode = "idle";
+      dragNodes = [];
+      rubberBand = null;
       nodeHash.rebuild(state.nodes);
       camera = savedFullCamera ?? { x: 0, y: 0, scale: 1 };
       focusSeedIds = null;
@@ -1490,6 +1832,10 @@ export function initCanvas(
 
     setWalkMode(enabled: boolean) {
       walkMode = enabled;
+      // Walk mode has its own layout choreography and must not fight
+      // with user-pinned positions. Releasing pins on mode transitions
+      // (either direction) keeps the two subsystems independent.
+      this.releaseAllPins();
       if (enabled) {
         walkTrail = focusSeedIds ? [...focusSeedIds] : [...selectedNodeIds];
         if (!walkAnimFrame) walkAnimFrame = requestAnimationFrame(walkAnimate);

@@ -15,6 +15,7 @@ import { initToolsPane } from "./tools-pane";
 import { setLayoutParams, getLayoutParams, autoLayoutParams } from "./layout";
 import { initShortcuts } from "./shortcuts";
 import { initEmptyState } from "./empty-state";
+import { showToast } from "./dialog";
 import { createHistory } from "./history";
 import { matchKey, type KeybindingMap } from "./keybindings";
 import { initContextMenu } from "./context-menu";
@@ -893,6 +894,10 @@ async function main() {
     clusteringIncrease() { const p = getLayoutParams(); setLayoutParams({ clusterStrength: Math.min(1, p.clusterStrength + 0.03) }); canvas.reheat(); },
     help() { shortcuts.toggle(); },
     toggleSidebar() { sidebar.toggle(); },
+    resetPins() {
+      const released = canvas.releaseAllPins();
+      if (released) showToast("Manual layout reset — pins released");
+    },
     walkIsolate() {
       if (!currentData) return;
       const trail = canvas.getWalkTrail();
@@ -910,7 +915,16 @@ async function main() {
       if (walkBtn) walkBtn.classList.toggle("active", canvas.getWalkMode());
       syncWalkTrail();
     },
-    escape() { if (canvas.isFocused()) { toolsPane.clearFocusSet(); } else { shortcuts.hide(); } },
+    escape() {
+      // Priority: 1. clear selection, 2. exit focus, 3. hide help modal
+      if (canvas.getSelectedNodeIds().length > 0) {
+        canvas.clearSelection();
+      } else if (canvas.isFocused()) {
+        toolsPane.clearFocusSet();
+      } else {
+        shortcuts.hide();
+      }
+    },
   };
 
   document.addEventListener("keydown", (e) => {
@@ -959,6 +973,13 @@ async function main() {
     });
 
     import.meta.hot.on("ontology-change", async () => {
+      // If the user had manually pinned nodes, the incoming data change
+      // is going to reset their layout tweaks. Warn them so they know
+      // the change wasn't their fault — this is the one involuntary
+      // pin-release case (graph switches and focus toggles are all
+      // user-initiated and don't need a toast).
+      const hadPins = canvas.hasPinnedNodes();
+
       const [updated, updatedRemotes] = await Promise.all([
         listOntologies(),
         listRemotes().catch(() => [] as RemoteSummary[]),
@@ -988,6 +1009,10 @@ async function main() {
         canvas.loadGraph(currentData);
         search.setLearningGraphData(currentData);
         toolsPane.setData(currentData);
+      }
+
+      if (hadPins) {
+        showToast("Manual layout reset — new data arrived");
       }
     });
   }

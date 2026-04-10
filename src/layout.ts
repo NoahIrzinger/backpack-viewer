@@ -9,6 +9,14 @@ export interface LayoutNode {
   vy: number;
   label: string;
   type: string;
+  /**
+   * When true, the simulation treats this node as a fixed point:
+   * it still contributes forces to neighbors (its x/y is read for
+   * repulsion and attraction calculations) but its own position is
+   * not updated by the integration step. Set by the viewer's drag
+   * handler to temporarily pin a node at a user-chosen location.
+   */
+  pinned?: boolean;
 }
 
 export interface LayoutEdge {
@@ -281,8 +289,15 @@ export function tick(state: LayoutState, alpha: number): number {
     node.vy += (c.y - node.y) * params.clusterStrength * alpha;
   }
 
-  // Integrate — update positions, apply damping, clamp velocity
+  // Integrate — update positions, apply damping, clamp velocity.
+  // Pinned nodes keep their x/y and have velocity zeroed so they
+  // don't drift when released later with pending momentum.
   for (const node of nodes) {
+    if (node.pinned) {
+      node.vx = 0;
+      node.vy = 0;
+      continue;
+    }
     node.vx *= DAMPING;
     node.vy *= DAMPING;
 
