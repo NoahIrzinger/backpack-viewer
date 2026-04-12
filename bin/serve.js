@@ -175,7 +175,7 @@ if (hasDistBuild) {
   // Strict CSP — style-src 'self' means no inline styles allowed.
   // Keep it that way; see CLAUDE.md for the rule.
   //
-  // connect-src allows 'self' + backpack-app for the Share extension's
+  // connect-src allows 'self' + the share relay for the Share extension's
   // OAuth flow and relay uploads.
   const CSP = [
     "default-src 'self'",
