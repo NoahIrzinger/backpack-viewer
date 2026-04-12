@@ -394,7 +394,7 @@ const DEV_CSP = [
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'", // required by Vite HMR
   "img-src 'self' data:",
-  "connect-src 'self' ws: wss:",
+  "connect-src 'self' ws: wss: https://app.backpackontology.com",
   "object-src 'none'",
   "base-uri 'self'",
   "frame-ancestors 'none'",

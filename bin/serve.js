@@ -175,15 +175,14 @@ if (hasDistBuild) {
   // Strict CSP — style-src 'self' means no inline styles allowed.
   // Keep it that way; see CLAUDE.md for the rule.
   //
-  // connect-src stays at 'self' — extensions never talk to external
-  // origins directly. They go through the per-extension proxy below
-  // which forwards server-side using env-var-injected secrets.
+  // connect-src allows 'self' + backpack-app for the Share extension's
+  // OAuth flow and relay uploads.
   const CSP = [
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self'",
     "img-src 'self' data:",
-    "connect-src 'self'",
+    "connect-src 'self' https://app.backpackontology.com",
     "object-src 'none'",
     "base-uri 'self'",
     "frame-ancestors 'none'",
