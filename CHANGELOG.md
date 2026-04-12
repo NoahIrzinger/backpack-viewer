@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.8 (2026-04-12)
+
+### Sync & Share rewrite
+- **Encrypted by default** — no encryption toggle on the happy path. First sync always encrypts with age-v1.
+- **Account status check** — fetches existing graphs to detect already-synced state.
+- **Two-step flow** — uses `PUT /api/graphs/{name}/sync` + `POST /api/graphs/{name}/share` (replaces single `POST /v1/share`).
+- **Already synced state** — shows last sync time, encrypted badge, "Update & Share" button.
+- **Quota exceeded fallback** — upgrade prompt + "Share as public graph" with explicit confirmation checkbox.
+- **BPAK envelope stats** — includes `node_count`, `edge_count`, `node_types` in envelope header for dashboard display.
+- **Fragment key warning** — explains recipients need the complete link including `#k=` part.
+- **Configurable relay URL** — set `relay_url` in extension settings to target a custom relay.
+- **OAuth hardening** — try/catch on token exchange, access_token validation, clipboard error handling.
+
 ## 0.7.1 (2026-04-12)
 
 ### Share extension (first-party)
