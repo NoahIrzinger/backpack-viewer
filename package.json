@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "age-encryption": "^0.3.0",
-    "backpack-ontology": "^0.5.0"
+    "backpack-ontology": "^0.7.0"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
