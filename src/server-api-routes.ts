@@ -496,6 +496,25 @@ export async function handleApiRequest(
       }
     }
 
+    // --- /oauth/callback (for Share extension OAuth popup) ---
+    if (url.startsWith("/oauth/callback") && method === "GET") {
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end(`<!DOCTYPE html><html><body><script>
+        var params = new URLSearchParams(window.location.search);
+        var code = params.get("code");
+        var state = params.get("state");
+        if (window.opener && code) {
+          window.opener.postMessage({
+            type: "backpack-oauth-callback",
+            code: code,
+            returnedState: state
+          }, "*");
+        }
+        window.close();
+      </script></body></html>`);
+      return true;
+    }
+
     return false;
   } catch (err) {
     if (!res.headersSent) {

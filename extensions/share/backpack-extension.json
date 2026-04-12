@@ -1,0 +1,20 @@
+{
+  "name": "share",
+  "version": "0.1.0",
+  "viewerApi": "1",
+  "displayName": "Share",
+  "description": "Share encrypted backpacks via a link. Recipients decrypt in-browser — the server never sees your data.",
+  "entry": "src/index.js",
+  "stylesheet": "style.css",
+  "permissions": {
+    "graph": ["read"],
+    "viewer": [],
+    "settings": true,
+    "network": [
+      {
+        "origin": "https://app.backpackontology.com",
+        "description": "Share relay for uploading encrypted backpacks"
+      }
+    ]
+  }
+}

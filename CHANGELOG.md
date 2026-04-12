@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.1 (2026-04-12)
+
+### Share extension (first-party)
+- **Share button** in the viewer toolbar — encrypt and share any graph with a link.
+- **OAuth popup flow** — sign in to Backpack App via the viewer to upload encrypted graphs. Token cached in localStorage for future shares.
+- **API token fallback** — paste an API token from Backpack App settings for manual auth.
+- **Encrypt toggle** (default: on) + optional passphrase protection.
+- **Link display** with one-click copy after sharing.
+- **Upsell CTA** — "Create a free Backpack account to share encrypted graphs" when not authenticated.
+- `/oauth/callback` route for the popup redirect.
+
 ## 0.7.0 (2026-04-12)
 
 ### Encrypted share links

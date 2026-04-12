@@ -1,0 +1,151 @@
+.share-panel-body {
+  padding: 16px;
+  font-size: 13px;
+  color: var(--text);
+  min-width: 300px;
+}
+
+.share-upsell h4 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.share-upsell p {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.share-cta-btn {
+  display: block;
+  width: 100%;
+  padding: 10px 16px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+
+.share-cta-btn:hover {
+  opacity: 0.9;
+}
+
+.share-token-link {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 0;
+  text-decoration: underline;
+}
+
+.share-trust {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 12px;
+  line-height: 1.4;
+}
+
+.share-input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.share-btn-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.share-btn-primary {
+  padding: 8px 16px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.share-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.share-btn-secondary {
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.share-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+
+.share-pass-row {
+  margin-bottom: 12px;
+}
+
+.share-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.share-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+.share-error {
+  color: var(--danger, #e53e3e);
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.share-success h4 {
+  margin: 0 0 12px;
+  color: var(--text);
+}
+
+.share-link-row {
+  display: flex;
+  gap: 8px;
+}
+
+.share-link-input {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  font-size: 12px;
+  font-family: monospace;
+  box-sizing: border-box;
+}
+
+.share-token-input p {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+}
