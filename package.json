@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "dev": "vite",
-    "build": "rm -rf dist && tsc && tsc -p tsconfig.extensions.json && cp src/style.css dist/ && node scripts/build-extensions.js && vite build",
+    "build": "rm -rf dist && tsc && tsc -p tsconfig.extensions.json && cp src/style.css dist/ && node scripts/build-extensions.js && node scripts/bundle-extensions.js && vite build",
     "preview": "vite preview",
     "serve": "node bin/serve.js",
     "prepare": "npm run build",

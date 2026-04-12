@@ -1,17 +1,18 @@
 import type { ViewerExtensionAPI, MountedPanel } from "./viewer-api";
 
 const RELAY_URL = "https://app.backpackontology.com";
-
-// OAuth metadata endpoint on the relay
 const OAUTH_METADATA_URL = `${RELAY_URL}/.well-known/oauth-authorization-server`;
+
+// BPAK envelope magic bytes
+const BPAK_MAGIC = new Uint8Array([0x42, 0x50, 0x41, 0x4b]);
+const BPAK_VERSION = 0x01;
 
 let panel: MountedPanel | null = null;
 
 export function activate(viewer: ViewerExtensionAPI): void {
-  // Register the Share button in the top-right toolbar
   viewer.registerTaskbarIcon({
     label: "Share",
-    iconText: "\u2197", // ↗
+    iconText: "\u2197",
     position: "top-right",
     onClick: () => toggleSharePanel(viewer),
   });
@@ -22,13 +23,10 @@ function toggleSharePanel(viewer: ViewerExtensionAPI): void {
     panel.setVisible(false);
     return;
   }
-
   const graphName = viewer.getGraphName();
   if (!graphName) return;
-
   const body = document.createElement("div");
   body.className = "share-panel-body";
-
   if (panel) {
     panel.element.replaceChildren();
     panel.element.appendChild(body);
@@ -44,80 +42,58 @@ function toggleSharePanel(viewer: ViewerExtensionAPI): void {
       onClose: () => { panel = null; },
     });
   }
-
   renderShareForm(viewer, body);
 }
 
-async function renderShareForm(
-  viewer: ViewerExtensionAPI,
-  container: HTMLElement,
-): Promise<void> {
+async function renderShareForm(viewer: ViewerExtensionAPI, container: HTMLElement): Promise<void> {
   const token = await viewer.settings.get<string>("relay_token");
-
   container.replaceChildren();
-
   if (!token) {
     renderUpsell(viewer, container);
-    return;
+  } else {
+    renderForm(viewer, container, token);
   }
-
-  renderForm(viewer, container, token);
 }
 
 function renderUpsell(viewer: ViewerExtensionAPI, container: HTMLElement): void {
-  const wrapper = document.createElement("div");
-  wrapper.className = "share-upsell";
-
-  const heading = document.createElement("h4");
-  heading.textContent = "Share this graph with anyone";
-  wrapper.appendChild(heading);
-
-  const desc = document.createElement("p");
-  desc.textContent =
-    "Encrypt your graph and get a shareable link. Recipients open it in their browser — no install needed. Your data stays encrypted on our servers.";
-  wrapper.appendChild(desc);
-
+  const w = document.createElement("div");
+  w.className = "share-upsell";
+  w.innerHTML = `
+    <h4>Share this graph with anyone</h4>
+    <p>Encrypt your graph and get a shareable link. Recipients open it in their browser — no install needed. Your data stays encrypted on our servers.</p>
+  `;
   const cta = document.createElement("button");
   cta.className = "share-cta-btn";
   cta.textContent = "Sign in to share";
   cta.addEventListener("click", () => startOAuthFlow(viewer, container));
-  wrapper.appendChild(cta);
+  w.appendChild(cta);
 
   const tokenLink = document.createElement("button");
   tokenLink.className = "share-token-link";
   tokenLink.textContent = "Or paste an API token";
   tokenLink.addEventListener("click", () => renderTokenInput(viewer, container));
-  wrapper.appendChild(tokenLink);
+  w.appendChild(tokenLink);
 
   const trust = document.createElement("p");
   trust.className = "share-trust";
-  trust.textContent =
-    "Free account. Your graph is encrypted before upload — we can't read it.";
-  wrapper.appendChild(trust);
-
-  container.replaceChildren(wrapper);
+  trust.textContent = "Free account. Your graph is encrypted before upload — we can't read it.";
+  w.appendChild(trust);
+  container.replaceChildren(w);
 }
 
-function renderTokenInput(
-  viewer: ViewerExtensionAPI,
-  container: HTMLElement,
-): void {
-  const wrapper = document.createElement("div");
-  wrapper.className = "share-token-input";
-
+function renderTokenInput(viewer: ViewerExtensionAPI, container: HTMLElement): void {
+  const w = document.createElement("div");
+  w.className = "share-token-input";
   const label = document.createElement("p");
   label.textContent = "Paste your API token from Backpack App settings:";
-  wrapper.appendChild(label);
-
+  w.appendChild(label);
   const input = document.createElement("input");
   input.type = "password";
   input.placeholder = "Token";
   input.className = "share-input";
-  wrapper.appendChild(input);
-
+  w.appendChild(input);
   const row = document.createElement("div");
   row.className = "share-btn-row";
-
   const saveBtn = document.createElement("button");
   saveBtn.className = "share-btn-primary";
   saveBtn.textContent = "Save";
@@ -128,45 +104,26 @@ function renderTokenInput(
     renderShareForm(viewer, container);
   });
   row.appendChild(saveBtn);
-
   const backBtn = document.createElement("button");
   backBtn.className = "share-btn-secondary";
   backBtn.textContent = "Back";
   backBtn.addEventListener("click", () => renderShareForm(viewer, container));
   row.appendChild(backBtn);
-
-  wrapper.appendChild(row);
-  container.replaceChildren(wrapper);
+  w.appendChild(row);
+  container.replaceChildren(w);
 }
 
-async function startOAuthFlow(
-  viewer: ViewerExtensionAPI,
-  container: HTMLElement,
-): Promise<void> {
+async function startOAuthFlow(viewer: ViewerExtensionAPI, container: HTMLElement): Promise<void> {
   try {
-    // Fetch OAuth metadata
     const metaRes = await viewer.fetch(OAUTH_METADATA_URL);
-    const meta = (await metaRes.json()) as {
-      authorization_endpoint: string;
-      token_endpoint: string;
-      registration_endpoint: string;
-    };
-
-    // Register as a dynamic client
-    const regRes = await viewer.fetch(meta.registration_endpoint, {
-      method: "POST",
-    });
+    const meta = (await metaRes.json()) as { authorization_endpoint: string; token_endpoint: string; registration_endpoint: string };
+    const regRes = await viewer.fetch(meta.registration_endpoint, { method: "POST" });
     const client = (await regRes.json()) as { client_id: string };
-
-    // Generate PKCE challenge
     const codeVerifier = generateCodeVerifier();
     const codeChallenge = await generateCodeChallenge(codeVerifier);
-
-    // Build authorization URL
     const redirectUri = window.location.origin + "/oauth/callback";
     const state = crypto.randomUUID();
     const authUrl = new URL(meta.authorization_endpoint);
-    // authorization_endpoint may already have query params (e.g., scope=...)
     authUrl.searchParams.set("client_id", client.client_id);
     authUrl.searchParams.set("redirect_uri", redirectUri);
     authUrl.searchParams.set("response_type", "code");
@@ -176,50 +133,23 @@ async function startOAuthFlow(
     if (!authUrl.searchParams.has("scope")) {
       authUrl.searchParams.set("scope", "openid email profile offline_access");
     }
-
-    // Store state for the callback
     sessionStorage.setItem("share_oauth_state", state);
-    sessionStorage.setItem("share_oauth_verifier", codeVerifier);
-    sessionStorage.setItem("share_oauth_token_endpoint", meta.token_endpoint);
-    sessionStorage.setItem("share_oauth_client_id", client.client_id);
-    sessionStorage.setItem("share_oauth_redirect_uri", redirectUri);
-
-    // Open popup
-    const popup = window.open(
-      authUrl.toString(),
-      "backpack-share-auth",
-      "width=500,height=700",
-    );
-
-    // Listen for the callback
+    const popup = window.open(authUrl.toString(), "backpack-share-auth", "width=500,height=700");
     const handler = async (event: MessageEvent) => {
       if (event.data?.type !== "backpack-oauth-callback") return;
       window.removeEventListener("message", handler);
-
       const { code, returnedState } = event.data;
       if (returnedState !== state) return;
-
-      // Exchange code for token
       const tokenRes = await viewer.fetch(meta.token_endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          code,
-          redirect_uri: redirectUri,
-          client_id: client.client_id,
-          code_verifier: codeVerifier,
-        }).toString(),
+        body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirectUri, client_id: client.client_id, code_verifier: codeVerifier }).toString(),
       });
-
       const tokenData = (await tokenRes.json()) as { access_token: string };
       await viewer.settings.set("relay_token", tokenData.access_token);
       renderShareForm(viewer, container);
     };
-
     window.addEventListener("message", handler);
-
-    // Fallback: if popup is blocked, show a link
     if (!popup || popup.closed) {
       const msg = document.createElement("p");
       msg.className = "share-error";
@@ -239,27 +169,19 @@ async function startOAuthFlow(
   }
 }
 
-function renderForm(
-  viewer: ViewerExtensionAPI,
-  container: HTMLElement,
-  token: string,
-): void {
-  const wrapper = document.createElement("div");
-  wrapper.className = "share-form";
-
-  // Encrypt toggle
+function renderForm(viewer: ViewerExtensionAPI, container: HTMLElement, token: string): void {
+  const w = document.createElement("div");
+  w.className = "share-form";
   const encryptRow = document.createElement("label");
   encryptRow.className = "share-toggle-row";
-  const encryptCheckbox = document.createElement("input");
-  encryptCheckbox.type = "checkbox";
-  encryptCheckbox.checked = true;
-  encryptRow.appendChild(encryptCheckbox);
-  const encryptLabel = document.createElement("span");
-  encryptLabel.textContent = "Encrypt (recommended)";
-  encryptRow.appendChild(encryptLabel);
-  wrapper.appendChild(encryptRow);
-
-  // Passphrase
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.checked = true;
+  encryptRow.appendChild(cb);
+  const lbl = document.createElement("span");
+  lbl.textContent = "Encrypt (recommended)";
+  encryptRow.appendChild(lbl);
+  w.appendChild(encryptRow);
   const passRow = document.createElement("div");
   passRow.className = "share-pass-row";
   const passInput = document.createElement("input");
@@ -267,9 +189,7 @@ function renderForm(
   passInput.placeholder = "Passphrase (optional)";
   passInput.className = "share-input";
   passRow.appendChild(passInput);
-  wrapper.appendChild(passRow);
-
-  // Share button
+  w.appendChild(passRow);
   const shareBtn = document.createElement("button");
   shareBtn.className = "share-btn-primary";
   shareBtn.textContent = "Share";
@@ -277,24 +197,21 @@ function renderForm(
     shareBtn.disabled = true;
     shareBtn.textContent = "Encrypting...";
     try {
-      await doShare(viewer, container, token, encryptCheckbox.checked, passInput.value.trim());
+      await doShare(viewer, container, token, cb.checked, passInput.value.trim());
     } catch (err) {
       shareBtn.disabled = false;
       shareBtn.textContent = "Share";
       const errMsg = document.createElement("p");
       errMsg.className = "share-error";
       errMsg.textContent = (err as Error).message;
-      wrapper.appendChild(errMsg);
+      w.appendChild(errMsg);
     }
   });
-  wrapper.appendChild(shareBtn);
-
+  w.appendChild(shareBtn);
   const note = document.createElement("p");
   note.className = "share-note";
   note.textContent = "Recipients open the link in their browser. No install needed.";
-  wrapper.appendChild(note);
-
-  // Logout link
+  w.appendChild(note);
   const logoutBtn = document.createElement("button");
   logoutBtn.className = "share-token-link";
   logoutBtn.textContent = "Sign out";
@@ -302,51 +219,46 @@ function renderForm(
     await viewer.settings.remove("relay_token");
     renderShareForm(viewer, container);
   });
-  wrapper.appendChild(logoutBtn);
-
-  container.replaceChildren(wrapper);
+  w.appendChild(logoutBtn);
+  container.replaceChildren(w);
 }
 
 async function doShare(
-  viewer: ViewerExtensionAPI,
-  container: HTMLElement,
-  token: string,
-  encrypted: boolean,
-  passphrase: string,
+  viewer: ViewerExtensionAPI, container: HTMLElement,
+  token: string, encrypted: boolean, passphrase: string,
 ): Promise<void> {
   const graph = viewer.getGraph();
   const graphName = viewer.getGraphName();
   if (!graph || !graphName) throw new Error("No graph loaded");
 
   const plaintext = new TextEncoder().encode(JSON.stringify(graph));
-
   let payload: Uint8Array;
   let format: "plaintext" | "age-v1";
   let fragmentKey = "";
 
   if (encrypted) {
-    const { generateKeyPair, encrypt, encodeKeyForFragment } = await import("backpack-ontology");
-    const keyPair = await generateKeyPair();
-    payload = await encrypt(plaintext, keyPair.publicKey);
+    // Dynamic import age-encryption (browser-compatible, no Node deps)
+    const age = await import("age-encryption");
+    const secretKey = await age.generateX25519Identity();
+    const publicKey = await age.identityToRecipient(secretKey);
+    const e = new age.Encrypter();
+    e.addRecipient(publicKey);
+    payload = await e.encrypt(plaintext);
     format = "age-v1";
-    fragmentKey = encodeKeyForFragment(keyPair.secretKey);
+    fragmentKey = btoa(secretKey).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   } else {
     payload = plaintext;
     format = "plaintext";
   }
 
-  // Build BPAK envelope
-  const { createEnvelope } = await import("backpack-ontology");
-  const envelope = await createEnvelope(graphName, payload, format, 1);
+  // Build BPAK envelope inline (no backpack-ontology import needed)
+  const envelope = await buildEnvelope(graphName, payload, format);
 
-  // Upload to relay
   const headers: Record<string, string> = {
     "Content-Type": "application/octet-stream",
-    Authorization: `Bearer ${token}`,
+    "Authorization": `Bearer ${token}`,
   };
-  if (passphrase) {
-    headers["X-Passphrase"] = passphrase;
-  }
+  if (passphrase) headers["X-Passphrase"] = passphrase;
 
   const res = await viewer.fetch(`${RELAY_URL}/v1/share`, {
     method: "POST",
@@ -357,7 +269,6 @@ async function doShare(
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     if (res.status === 401) {
-      // Token expired — clear and show upsell
       await viewer.settings.remove("relay_token");
       renderShareForm(viewer, container);
       throw new Error("Session expired. Please sign in again.");
@@ -366,37 +277,55 @@ async function doShare(
   }
 
   const result = (await res.json()) as { token: string; url: string; expires_at?: string };
-
-  const shareLink = fragmentKey
-    ? `${result.url}#k=${fragmentKey}`
-    : result.url;
-
+  const shareLink = fragmentKey ? `${result.url}#k=${fragmentKey}` : result.url;
   renderSuccess(container, shareLink, encrypted, result.expires_at);
 }
 
-function renderSuccess(
-  container: HTMLElement,
-  shareLink: string,
-  encrypted: boolean,
-  expiresAt?: string,
-): void {
-  const wrapper = document.createElement("div");
-  wrapper.className = "share-success";
+// --- Inline BPAK envelope builder (browser-safe, no Node deps) ---
 
-  const heading = document.createElement("h4");
-  heading.textContent = "Shared!";
-  wrapper.appendChild(heading);
+async function buildEnvelope(
+  name: string, payload: Uint8Array, format: string,
+): Promise<Uint8Array> {
+  const checksumBuf = new ArrayBuffer(payload.byteLength);
+  new Uint8Array(checksumBuf).set(payload);
+  const hash = await crypto.subtle.digest("SHA-256", checksumBuf);
+  const checksum = "sha256:" + Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
 
-  const linkRow = document.createElement("div");
-  linkRow.className = "share-link-row";
+  const header = JSON.stringify({
+    format,
+    created_at: new Date().toISOString(),
+    backpack_name: name,
+    graph_count: 1,
+    checksum,
+  });
+  const headerBytes = new TextEncoder().encode(header);
+  const headerLenBuf = new ArrayBuffer(4);
+  new DataView(headerLenBuf).setUint32(0, headerBytes.length, false);
 
-  const linkInput = document.createElement("input");
-  linkInput.type = "text";
-  linkInput.readOnly = true;
-  linkInput.value = shareLink;
-  linkInput.className = "share-link-input";
-  linkRow.appendChild(linkInput);
+  const result = new Uint8Array(4 + 1 + 4 + headerBytes.length + payload.length);
+  let off = 0;
+  result.set(BPAK_MAGIC, off); off += 4;
+  result[off] = BPAK_VERSION; off += 1;
+  result.set(new Uint8Array(headerLenBuf), off); off += 4;
+  result.set(headerBytes, off); off += headerBytes.length;
+  result.set(payload, off);
+  return result;
+}
 
+function renderSuccess(container: HTMLElement, shareLink: string, encrypted: boolean, expiresAt?: string): void {
+  const w = document.createElement("div");
+  w.className = "share-success";
+  const h = document.createElement("h4");
+  h.textContent = "Shared!";
+  w.appendChild(h);
+  const row = document.createElement("div");
+  row.className = "share-link-row";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.readOnly = true;
+  input.value = shareLink;
+  input.className = "share-link-input";
+  row.appendChild(input);
   const copyBtn = document.createElement("button");
   copyBtn.className = "share-btn-primary";
   copyBtn.textContent = "Copy";
@@ -405,25 +334,21 @@ function renderSuccess(
     copyBtn.textContent = "Copied!";
     setTimeout(() => { copyBtn.textContent = "Copy"; }, 2000);
   });
-  linkRow.appendChild(copyBtn);
-  wrapper.appendChild(linkRow);
-
+  row.appendChild(copyBtn);
+  w.appendChild(row);
   if (encrypted) {
     const note = document.createElement("p");
     note.className = "share-note";
-    note.textContent =
-      "The decryption key is in the link. Anyone with the full link can view this graph. The server cannot read your data.";
-    wrapper.appendChild(note);
+    note.textContent = "The decryption key is in the link. Anyone with the full link can view. The server cannot read your data.";
+    w.appendChild(note);
   }
-
   if (expiresAt) {
     const exp = document.createElement("p");
     exp.className = "share-note";
     exp.textContent = `Expires: ${new Date(expiresAt).toLocaleDateString()}`;
-    wrapper.appendChild(exp);
+    w.appendChild(exp);
   }
-
-  container.replaceChildren(wrapper);
+  container.replaceChildren(w);
 }
 
 // --- PKCE helpers ---
@@ -431,10 +356,7 @@ function renderSuccess(
 function generateCodeVerifier(): string {
   const arr = new Uint8Array(32);
   crypto.getRandomValues(arr);
-  return btoa(String.fromCharCode(...arr))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  return btoa(String.fromCharCode(...arr)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/,"");
 }
 
 async function generateCodeChallenge(verifier: string): Promise<string> {
@@ -442,8 +364,5 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
   const buf = new ArrayBuffer(data.byteLength);
   new Uint8Array(buf).set(data);
   const digest = await crypto.subtle.digest("SHA-256", buf);
-  return btoa(String.fromCharCode(...new Uint8Array(digest)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
