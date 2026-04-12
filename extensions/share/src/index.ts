@@ -13,7 +13,7 @@ export function activate(viewer: ViewerExtensionAPI): void {
   viewer.registerTaskbarIcon({
     label: "Share",
     iconText: "\u2197",
-    position: "top-right",
+    position: "bottom-right",
     onClick: () => toggleSharePanel(viewer),
   });
 }
@@ -115,9 +115,9 @@ function renderTokenInput(viewer: ViewerExtensionAPI, container: HTMLElement): v
 
 async function startOAuthFlow(viewer: ViewerExtensionAPI, container: HTMLElement): Promise<void> {
   try {
-    const metaRes = await viewer.fetch(OAUTH_METADATA_URL);
+    const metaRes = await fetch(OAUTH_METADATA_URL);
     const meta = (await metaRes.json()) as { authorization_endpoint: string; token_endpoint: string; registration_endpoint: string };
-    const regRes = await viewer.fetch(meta.registration_endpoint, { method: "POST" });
+    const regRes = await fetch(meta.registration_endpoint, { method: "POST" });
     const client = (await regRes.json()) as { client_id: string };
     const codeVerifier = generateCodeVerifier();
     const codeChallenge = await generateCodeChallenge(codeVerifier);
@@ -140,7 +140,7 @@ async function startOAuthFlow(viewer: ViewerExtensionAPI, container: HTMLElement
       window.removeEventListener("message", handler);
       const { code, returnedState } = event.data;
       if (returnedState !== state) return;
-      const tokenRes = await viewer.fetch(meta.token_endpoint, {
+      const tokenRes = await fetch(meta.token_endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirectUri, client_id: client.client_id, code_verifier: codeVerifier }).toString(),
@@ -260,7 +260,7 @@ async function doShare(
   };
   if (passphrase) headers["X-Passphrase"] = passphrase;
 
-  const res = await viewer.fetch(`${RELAY_URL}/v1/share`, {
+  const res = await fetch(`${RELAY_URL}/v1/share`, {
     method: "POST",
     headers,
     body: envelope as unknown as BodyInit,
