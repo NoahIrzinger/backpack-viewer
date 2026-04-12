@@ -83,7 +83,7 @@ export function initSearch(container: HTMLElement, config?: SearchConfig) {
   }
 
   function updateResults() {
-    results.innerHTML = "";
+    results.replaceChildren();
     activeIndex = -1;
     const query = input.value.trim();
 

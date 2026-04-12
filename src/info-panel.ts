@@ -1,5 +1,7 @@
 import type { Node, Edge, LearningGraphData } from "backpack-ontology";
 import { getColor } from "./colors";
+import type { MountedPanel, PanelHeaderButton } from "./extensions/types";
+import type { PanelMount } from "./extensions/panel-mount";
 
 /** Extract a display label from a node — first string property, fallback to id. */
 function nodeLabel(node: Node): string {
@@ -21,17 +23,22 @@ const EDIT_ICON = '\u270E'; // pencil
 
 export function initInfoPanel(
   container: HTMLElement,
+  panelMount: PanelMount,
   callbacks?: EditCallbacks,
   onNavigateToNode?: (nodeId: string) => void,
   onFocus?: (nodeIds: string[]) => void
 ) {
-  const panel = document.createElement("div");
-  panel.id = "info-panel";
-  panel.className = "info-panel hidden";
-  container.appendChild(panel);
+  // The body element is owned by info-panel and refilled on every
+  // show. Panel-mount wraps it with the standard chrome (title +
+  // header buttons + fullscreen + close). info-panel never destroys
+  // the panel — it uses setVisible(true/false) instead.
+  const bodyEl = document.createElement("div");
+  bodyEl.className = "info-panel-content";
+  container; // unused — kept in signature for backwards compat
+  // (the canvas container is no longer the direct parent; panel-mount
+  // handles DOM placement.)
 
   // --- State ---
-  let maximized = false;
   let history: string[] = [];
   let historyIndex = -1;
   let navigatingHistory = false;
@@ -41,11 +48,24 @@ export function initInfoPanel(
   let connectionNodeIds: string[] = []; // other-end node IDs for each connection
   let activeConnectionIndex = -1;
 
+  // Mount the panel once with placeholder chrome. show*() updates the
+  // title + header buttons each time a node is selected.
+  const handle: MountedPanel = panelMount.mount("info", bodyEl, {
+    title: "Node info",
+    persistKey: "info-panel",
+    hideOnClose: true,
+    onClose: () => {
+      // Reset history when the user explicitly closes — re-opening on
+      // a fresh node selection should start a new history chain.
+      history = [];
+      historyIndex = -1;
+    },
+  });
+  // Start hidden — info-panel only appears when a node is selected.
+  handle.setVisible(false);
+
   function hide() {
-    panel.classList.add("hidden");
-    panel.classList.remove("info-panel-maximized");
-    panel.innerHTML = "";
-    maximized = false;
+    handle.setVisible(false);
     history = [];
     historyIndex = -1;
   }
@@ -84,64 +104,37 @@ export function initInfoPanel(
     navigatingHistory = false;
   }
 
-  function createToolbar(): HTMLElement {
-    const toolbar = document.createElement("div");
-    toolbar.className = "info-panel-toolbar";
-
-    // Back
-    const backBtn = document.createElement("button");
-    backBtn.className = "info-toolbar-btn";
-    backBtn.textContent = "\u2190";
-    backBtn.title = "Back";
-    backBtn.disabled = historyIndex <= 0;
-    backBtn.addEventListener("click", goBack);
-    toolbar.appendChild(backBtn);
-
-    // Forward
-    const fwdBtn = document.createElement("button");
-    fwdBtn.className = "info-toolbar-btn";
-    fwdBtn.textContent = "\u2192";
-    fwdBtn.title = "Forward";
-    fwdBtn.disabled = historyIndex >= history.length - 1;
-    fwdBtn.addEventListener("click", goForward);
-    toolbar.appendChild(fwdBtn);
-
-    // Focus
+  /**
+   * Build the header-button list reflecting current state. Called
+   * after every show() so the back/forward/focus enabled state stays
+   * in sync.
+   */
+  function refreshHeaderButtons() {
+    const buttons: PanelHeaderButton[] = [
+      {
+        label: "Back",
+        iconText: "\u2190",
+        onClick: goBack,
+        disabled: historyIndex <= 0,
+      },
+      {
+        label: "Forward",
+        iconText: "\u2192",
+        onClick: goForward,
+        disabled: historyIndex >= history.length - 1,
+      },
+    ];
     if (onFocus && currentNodeIds.length > 0) {
-      const focusBtn = document.createElement("button");
-      focusBtn.className = "info-toolbar-btn info-focus-btn";
-      focusBtn.textContent = "\u25CE"; // bullseye
-      focusBtn.title = "Focus on neighborhood (F)";
-      focusBtn.disabled = focusDisabled;
-      if (focusDisabled) focusBtn.style.opacity = "0.3";
-      focusBtn.addEventListener("click", () => {
-        if (!focusDisabled) onFocus(currentNodeIds);
+      buttons.push({
+        label: "Focus",
+        iconText: "\u25CE",
+        onClick: () => {
+          if (!focusDisabled) onFocus(currentNodeIds);
+        },
+        disabled: focusDisabled,
       });
-      toolbar.appendChild(focusBtn);
     }
-
-    // Maximize/restore
-    const maxBtn = document.createElement("button");
-    maxBtn.className = "info-toolbar-btn";
-    maxBtn.textContent = maximized ? "\u2398" : "\u26F6";
-    maxBtn.title = maximized ? "Restore" : "Maximize";
-    maxBtn.addEventListener("click", () => {
-      maximized = !maximized;
-      panel.classList.toggle("info-panel-maximized", maximized);
-      maxBtn.textContent = maximized ? "\u2398" : "\u26F6";
-      maxBtn.title = maximized ? "Restore" : "Maximize";
-    });
-    toolbar.appendChild(maxBtn);
-
-    // Close
-    const closeBtn = document.createElement("button");
-    closeBtn.className = "info-toolbar-btn info-close-btn";
-    closeBtn.textContent = "\u00d7";
-    closeBtn.title = "Close";
-    closeBtn.addEventListener("click", hide);
-    toolbar.appendChild(closeBtn);
-
-    return toolbar;
+    handle.setHeaderButtons(buttons);
   }
 
   function showSingle(nodeId: string, data: LearningGraphData) {
@@ -158,16 +151,17 @@ export function initInfoPanel(
     );
     activeConnectionIndex = -1;
 
-    panel.innerHTML = "";
-    panel.classList.remove("hidden");
-    if (maximized) panel.classList.add("info-panel-maximized");
+    bodyEl.replaceChildren();
 
-    // Pinned header area (toolbar + node identity)
+    // Update chrome with the node label as title + refresh header buttons
+    handle.setTitle(nodeLabel(node));
+    refreshHeaderButtons();
+    handle.setVisible(true);
+
+    // Pinned header area (type badge + node identity); the toolbar
+    // moved out of here into the panel chrome.
     const pinnedHeader = document.createElement("div");
     pinnedHeader.className = "info-panel-header";
-
-    // Toolbar (back, forward, maximize, close)
-    pinnedHeader.appendChild(createToolbar());
 
     // Header: type badge + label
     const header = document.createElement("div");
@@ -223,7 +217,7 @@ export function initInfoPanel(
     header.appendChild(label);
     header.appendChild(nodeIdEl);
     pinnedHeader.appendChild(header);
-    panel.appendChild(pinnedHeader);
+    bodyEl.appendChild(pinnedHeader);
 
     // Scrollable body for properties, connections, timestamps
     const body = document.createElement("div");
@@ -453,7 +447,7 @@ export function initInfoPanel(
       body.appendChild(deleteSection);
     }
 
-    panel.appendChild(body);
+    bodyEl.appendChild(body);
   }
 
   function showMulti(nodeIds: string[], data: LearningGraphData) {
@@ -465,12 +459,12 @@ export function initInfoPanel(
       (e) => selectedSet.has(e.sourceId) && selectedSet.has(e.targetId)
     );
 
-    panel.innerHTML = "";
-    panel.classList.remove("hidden");
-    if (maximized) panel.classList.add("info-panel-maximized");
+    bodyEl.replaceChildren();
 
-    // Toolbar
-    panel.appendChild(createToolbar());
+    // Update chrome with multi-selection title + refresh header buttons
+    handle.setTitle(`${nodes.length} nodes selected`);
+    refreshHeaderButtons();
+    handle.setVisible(true);
 
     const header = document.createElement("div");
     header.className = "info-header";
@@ -495,7 +489,7 @@ export function initInfoPanel(
       badgeRow.appendChild(badge);
     }
     header.appendChild(badgeRow);
-    panel.appendChild(header);
+    bodyEl.appendChild(header);
 
     const nodesSection = createSection("Selected Nodes");
     const nodesList = document.createElement("ul");
@@ -532,7 +526,7 @@ export function initInfoPanel(
     }
 
     nodesSection.appendChild(nodesList);
-    panel.appendChild(nodesSection);
+    bodyEl.appendChild(nodesSection);
 
     const connSection = createSection(
       sharedEdges.length > 0
@@ -621,7 +615,7 @@ export function initInfoPanel(
       connSection.appendChild(list);
     }
 
-    panel.appendChild(connSection);
+    bodyEl.appendChild(connSection);
   }
 
   return {
@@ -663,8 +657,8 @@ export function initInfoPanel(
         if (activeConnectionIndex >= connectionNodeIds.length) activeConnectionIndex = 0;
         if (activeConnectionIndex < 0) activeConnectionIndex = connectionNodeIds.length - 1;
       }
-      // Highlight active row in the panel
-      const items = panel.querySelectorAll(".info-connection");
+      // Highlight active row in the panel body
+      const items = bodyEl.querySelectorAll(".info-connection");
       items.forEach((el, i) => {
         (el as HTMLElement).classList.toggle("info-connection-active", i === activeConnectionIndex);
       });
@@ -676,15 +670,13 @@ export function initInfoPanel(
 
     setFocusDisabled(disabled: boolean) {
       focusDisabled = disabled;
-      const btn = panel.querySelector(".info-focus-btn") as HTMLButtonElement | null;
-      if (btn) {
-        btn.disabled = disabled;
-        btn.style.opacity = disabled ? "0.3" : "";
-      }
+      // Refresh the chrome's header buttons to pick up the new
+      // disabled state on the focus button (if currently shown).
+      refreshHeaderButtons();
     },
 
     get visible() {
-      return !panel.classList.contains("hidden");
+      return handle.isVisible();
     },
   };
 }

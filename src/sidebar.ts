@@ -1,6 +1,7 @@
 import type { LearningGraphSummary } from "backpack-ontology";
 import type { RemoteSummary } from "./api.js";
 import { showConfirm, showPrompt, showBackpackAddDialog } from "./dialog";
+import { makeSvgIcon } from "./dom-utils";
 
 function formatTokenCount(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k tokens`;
@@ -62,16 +63,26 @@ export function initSidebar(
 
   const footer = document.createElement("div");
   footer.className = "sidebar-footer";
-  footer.innerHTML =
-    '<a href="mailto:support@backpackontology.com">support@backpackontology.com</a>' +
-    "<span>Feedback & support</span>" +
-    `<span class="sidebar-version">v${__VIEWER_VERSION__}</span>`;
+  const footerLink = document.createElement("a");
+  footerLink.href = "mailto:support@backpackontology.com";
+  footerLink.textContent = "support@backpackontology.com";
+  const footerCaption = document.createElement("span");
+  footerCaption.textContent = "Feedback & support";
+  const footerVersion = document.createElement("span");
+  footerVersion.className = "sidebar-version";
+  footerVersion.textContent = `v${__VIEWER_VERSION__}`;
+  footer.append(footerLink, footerCaption, footerVersion);
 
   // Collapse toggle button
   const collapseBtn = document.createElement("button");
   collapseBtn.className = "sidebar-collapse-btn";
   collapseBtn.title = "Toggle sidebar (Tab)";
-  collapseBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>';
+  collapseBtn.appendChild(
+    makeSvgIcon({ size: 14 }, [
+      { tag: "polyline", attrs: { points: "11 17 6 12 11 7" } },
+      { tag: "polyline", attrs: { points: "18 17 13 12 18 7" } },
+    ]),
+  );
 
   let collapsed = false;
   function toggleSidebar() {
@@ -211,7 +222,12 @@ export function initSidebar(
   const expandBtn = document.createElement("button");
   expandBtn.className = "tools-pane-toggle hidden";
   expandBtn.title = "Show sidebar (Tab)";
-  expandBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="13 7 18 12 13 17"/><polyline points="6 7 11 12 6 17"/></svg>';
+  expandBtn.appendChild(
+    makeSvgIcon({ size: 14 }, [
+      { tag: "polyline", attrs: { points: "13 7 18 12 13 17" } },
+      { tag: "polyline", attrs: { points: "6 7 11 12 6 17" } },
+    ]),
+  );
   expandBtn.addEventListener("click", toggleSidebar);
   container.appendChild(input);
   container.appendChild(list);
@@ -288,7 +304,7 @@ export function initSidebar(
       return currentActiveBackpack;
     },
     setSummaries(summaries: LearningGraphSummary[]) {
-      list.innerHTML = "";
+      list.replaceChildren();
       // Fetch all locks in one batch request, then distribute to items
       // as they render. One HTTP roundtrip per sidebar refresh, not N.
       const lockBatchPromise = fetch("/api/locks")

@@ -1,6 +1,7 @@
 import type { LearningGraphData, Node } from "backpack-ontology";
 import { showPrompt, showConfirm } from "./dialog";
 import { getColor } from "./colors";
+import { makeSvgIcon, snapshotChildren, restoreChildren } from "./dom-utils";
 
 interface ToolsPaneCallbacks {
   onFilterByType: (type: string | null) => void;
@@ -91,8 +92,16 @@ export function initToolsPane(
   const toggle = document.createElement("button");
   toggle.className = "tools-pane-toggle hidden";
   toggle.title = "Graph Inspector";
-  toggle.innerHTML =
-    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h10"/></svg>';
+  toggle.appendChild(
+    makeSvgIcon(
+      { size: 16, strokeLinecap: "round", strokeLinejoin: "round" },
+      [
+        { tag: "path", attrs: { d: "M4 7h16" } },
+        { tag: "path", attrs: { d: "M4 12h16" } },
+        { tag: "path", attrs: { d: "M4 17h10" } },
+      ],
+    ),
+  );
 
   const content = document.createElement("div");
   content.className = "tools-pane-content hidden";
@@ -110,16 +119,25 @@ export function initToolsPane(
   // --- Render ---
 
   function render() {
-    content.innerHTML = "";
+    content.replaceChildren();
     if (!stats) return;
 
     // Graph stats summary (always visible)
     const summary = document.createElement("div");
     summary.className = "tools-pane-summary";
-    summary.innerHTML =
-      `<span>${stats.nodeCount} nodes</span><span class="tools-pane-sep">&middot;</span>` +
-      `<span>${stats.edgeCount} edges</span><span class="tools-pane-sep">&middot;</span>` +
-      `<span>${stats.types.length} types</span>`;
+    const nodesEl = document.createElement("span");
+    nodesEl.textContent = `${stats.nodeCount} nodes`;
+    const sep1 = document.createElement("span");
+    sep1.className = "tools-pane-sep";
+    sep1.textContent = "\u00b7";
+    const edgesEl = document.createElement("span");
+    edgesEl.textContent = `${stats.edgeCount} edges`;
+    const sep2 = document.createElement("span");
+    sep2.className = "tools-pane-sep";
+    sep2.textContent = "\u00b7";
+    const typesEl = document.createElement("span");
+    typesEl.textContent = `${stats.types.length} types`;
+    summary.append(nodesEl, sep1, edgesEl, sep2, typesEl);
     content.appendChild(summary);
 
     // Token efficiency card
@@ -220,7 +238,7 @@ export function initToolsPane(
   function renderTabContent() {
     const tabContainer = content.querySelector(".tools-pane-tab-content");
     if (!tabContainer) return;
-    tabContainer.innerHTML = "";
+    tabContainer.replaceChildren();
 
     if (activeTab === "types") {
       renderTypesTab(tabContainer as HTMLElement);
@@ -1082,13 +1100,18 @@ export function initToolsPane(
     input.value = currentValue;
     input.type = "text";
 
-    // Replace row content with input
-    const original = row.innerHTML;
-    row.innerHTML = "";
+    // Snapshot the row's children so we can restore them on cancel
+    // without re-parsing HTML. Cloning is safe — the snapshotted markup
+    // is static (text + spans), no event handlers to lose.
+    const originalChildren = snapshotChildren(row);
+    row.replaceChildren(input);
     row.classList.add("tools-pane-editing");
-    row.appendChild(input);
     input.focus();
     input.select();
+
+    function restore() {
+      restoreChildren(row, originalChildren);
+    }
 
     function commit() {
       const newValue = input.value.trim();
@@ -1096,13 +1119,13 @@ export function initToolsPane(
       if (newValue && newValue !== currentValue) {
         onCommit(newValue);
       } else {
-        row.innerHTML = original;
+        restore();
       }
     }
 
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") { e.preventDefault(); commit(); }
-      if (e.key === "Escape") { row.innerHTML = original; row.classList.remove("tools-pane-editing"); }
+      if (e.key === "Escape") { restore(); row.classList.remove("tools-pane-editing"); }
     });
     input.addEventListener("blur", commit);
   }

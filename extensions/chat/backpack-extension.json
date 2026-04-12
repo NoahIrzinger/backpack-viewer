@@ -1,0 +1,23 @@
+{
+  "name": "chat",
+  "version": "0.1.0",
+  "viewerApi": "1",
+  "displayName": "Chat",
+  "description": "Chat with Claude (or another LLM provider) about your graph. The model can read nodes, follow edges, and add/edit/remove graph data with your approval.",
+  "entry": "src/index.js",
+  "stylesheet": "style.css",
+  "permissions": {
+    "graph": ["read", "write"],
+    "viewer": ["focus", "pan"],
+    "settings": true,
+    "network": [
+      {
+        "origin": "https://api.anthropic.com",
+        "injectHeaders": {
+          "x-api-key": { "fromEnv": "ANTHROPIC_API_KEY" },
+          "anthropic-version": { "literal": "2023-06-01" }
+        }
+      }
+    ]
+  }
+}

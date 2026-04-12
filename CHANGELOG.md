@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.0 (2026-04-12)
+
+### Encrypted share links
+- **In-browser decrypt** — when the viewer opens a `?share=TOKEN` URL, it fetches the BPAK envelope from the relay, parses the binary header, and decrypts the payload client-side using the `#k=` fragment key. The decryption key never leaves the browser.
+- **age-encryption** dynamically imported and code-split (~128KB) — only loaded when an encrypted share link is opened. Zero overhead for normal usage.
+- Inline BPAK envelope parsing avoids pulling Node.js dependencies into the browser bundle.
+
+### Extension system
+- **Panel mount API** for extensions to render custom UI panels alongside the graph.
+- **Event bus** for viewer↔extension communication (graph-changed, selection, focus events).
+- **Extension loader** with manifest-based discovery and lazy loading.
+- **Chat extension** (bundled) — AI chat panel with Anthropic provider integration.
+- **Build script** for compiling extensions into distributable bundles.
+
+### Viewer improvements
+- **Copy prompt button** — copy graph context as a formatted prompt.
+- **Viewer state bridge** — exposes current selection/focus to MCP resources.
+- **Server-side extension loading** and viewer state API routes.
+- Various sidebar, search, info panel, empty state, and tools pane improvements.
+
 ## 0.6.0 (2026-04-10)
 
 ### Drag-to-pin nodes (temporary layout tweaks)

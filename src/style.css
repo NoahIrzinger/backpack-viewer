@@ -30,6 +30,21 @@
 
   --shadow: rgba(0, 0, 0, 0.6);
   --shadow-strong: rgba(0, 0, 0, 0.5);
+
+  /* Z-tier registry — named layers for everything that overlaps.
+     Six tiers, each spaced wide enough that click-to-front shuffling
+     within a tier (panels) stays inside its band. New code uses these
+     instead of magic numbers; existing rules will be migrated as
+     touched. */
+  --z-canvas-overlay: 20;     /* path bar, focus indicator within canvas */
+  --z-panel: 30;              /* info-panel + extension panels (click-to-front shuffles 30-39) */
+  --z-floating: 40;           /* zoom, theme, copy-prompt, sidebar-expand, taskbar slots — hidden when a panel is fullscreen */
+  --z-panel-fullscreen: 45;   /* a maximized panel covers the secondary floating tier */
+  --z-floating-primary: 50;   /* search bar — always visible, stays above fullscreen panels so users can keep searching */
+  --z-popup: 55;              /* context menu, search dropdown */
+  --z-modal: 60;              /* dialog overlay */
+  --z-toast: 70;              /* transient notifications */
+
   /* Canvas colors */
   --canvas-edge: rgba(255, 255, 255, 0.08);
   --canvas-edge-highlight: rgba(212, 162, 127, 0.5);
@@ -629,16 +644,33 @@ body {
   top: 16px;
   left: 16px;
   right: 16px;
-  z-index: 30;
+  /* No z-index here on purpose — that would create a stacking context
+     and trap the children's z-indexes. Each child sets its own. */
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   pointer-events: none;
 }
 
+/* Children get their own stacking contexts via position:relative + z.
+   Top-left and top-right hold "secondary" controls (zoom, theme,
+   copy-prompt, sidebar-expand, taskbar slots) and live at the
+   floating tier — these get hidden when a panel is fullscreen.
+   Top-center holds the search bar at floating-primary so it stays
+   visible even when a panel is fullscreen. */
 .canvas-top-left,
-.canvas-top-center,
 .canvas-top-right {
+  position: relative;
+  z-index: var(--z-floating);
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.canvas-top-center {
+  position: relative;
+  z-index: var(--z-floating-primary);
   pointer-events: auto;
   display: flex;
   align-items: center;
@@ -1020,30 +1052,20 @@ body {
 }
 
 /* --- Info Panel --- */
+/* The outer panel chrome (positioning, border, shadow, drag, fullscreen,
+   close, header buttons) is owned by panel-mount via .extension-panel.
+   Only the body-internal styles live here now. */
 
-.info-panel {
-  position: absolute;
-  top: 56px;
-  right: 16px;
-  bottom: 16px;
-  width: 360px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
+.info-panel-content {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 0;
-  z-index: 10;
-  box-shadow: 0 8px 32px var(--shadow);
-  transition: top 0.25s ease, right 0.25s ease, bottom 0.25s ease,
-    left 0.25s ease, width 0.25s ease, max-height 0.25s ease,
-    border-radius 0.25s ease;
+  min-height: 0;
 }
 
 .info-panel-header {
   flex-shrink: 0;
-  padding: 20px 20px 12px;
+  padding: 16px 20px 12px;
   position: relative;
 }
 
@@ -1052,60 +1074,6 @@ body {
   overflow-y: auto;
   min-height: 0;
   padding: 0 20px 20px;
-}
-
-.info-panel.hidden {
-  display: none;
-}
-
-.info-panel.info-panel-maximized {
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  width: auto;
-  max-height: none;
-  border-radius: 0;
-  z-index: 40;
-}
-
-/* --- Toolbar (back, forward, maximize, close) --- */
-
-.info-panel-toolbar {
-  position: absolute;
-  top: 12px;
-  right: 14px;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  z-index: 1;
-}
-
-.info-toolbar-btn {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 16px;
-  cursor: pointer;
-  padding: 4px 6px;
-  line-height: 1;
-  border-radius: 4px;
-  transition: color 0.15s, background 0.15s;
-}
-
-.info-toolbar-btn:hover:not(:disabled) {
-  color: var(--text);
-  background: var(--bg-hover);
-}
-
-.info-toolbar-btn:disabled {
-  color: var(--text-dim);
-  cursor: default;
-  opacity: 0.3;
-}
-
-.info-close-btn {
-  font-size: 20px;
 }
 
 /* --- Clickable connections --- */
@@ -2338,7 +2306,7 @@ body {
   bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 25;
+  z-index: var(--z-canvas-overlay);
   display: flex;
   align-items: center;
   gap: 4px;
@@ -2420,3 +2388,317 @@ body {
   0%, 100% { opacity: 0.6; border-color: rgba(212, 162, 127, 0.3); }
   50% { opacity: 1; border-color: rgba(212, 162, 127, 0.8); }
 }
+
+/* --- Copy Prompt Button --- */
+
+.copy-prompt-btn {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 6px 10px;
+  line-height: 1;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  box-shadow: 0 2px 8px var(--shadow);
+}
+
+.copy-prompt-btn:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+  background: var(--bg-hover);
+}
+
+/* --- Extension taskbar slots --- */
+
+/* Top slots flank the search bar inside .canvas-top-center. They live
+   alongside the search overlay so extensions can flank it on either
+   side without polluting the viewer's own top-left/top-right controls
+   (zoom, theme, copy-prompt, tools toggle). Hidden when empty so they
+   contribute no width and the search bar stays centered. */
+.ext-slot-top-left,
+.ext-slot-top-right {
+  display: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.ext-slot-top-left.has-icons,
+.ext-slot-top-right.has-icons {
+  display: inline-flex;
+}
+
+/* Bottom slots float in the canvas corners. Hidden until populated so
+   empty corners don't take any space. The bottom-center area is left
+   clear for the path bar — see .path-bar above. */
+.ext-slot-bottom-left,
+.ext-slot-bottom-right {
+  position: absolute;
+  bottom: 16px;
+  z-index: var(--z-floating);
+  display: none;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 4px 16px var(--shadow);
+  pointer-events: auto;
+}
+
+.ext-slot-bottom-left {
+  left: 16px;
+}
+
+.ext-slot-bottom-right {
+  right: 16px;
+}
+
+.ext-slot-bottom-left.has-icons,
+.ext-slot-bottom-right.has-icons {
+  display: flex;
+}
+
+/* Icon button — same look in every slot. In top slots it sits
+   alongside the viewer's own buttons (zoom, theme, copy-prompt) and
+   matches their visual weight. In bottom slots it lives inside the
+   floating pill container styled above. */
+.extension-taskbar-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 6px 10px;
+  line-height: 1;
+  box-shadow: 0 2px 8px var(--shadow);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+/* Inside the bottom floating pill, drop the per-icon shadow and
+   border so the pill container's chrome wraps the group cleanly. */
+.ext-slot-bottom-left .extension-taskbar-icon,
+.ext-slot-bottom-right .extension-taskbar-icon {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.extension-taskbar-icon:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+  background: var(--bg-hover);
+}
+
+.ext-slot-bottom-left .extension-taskbar-icon:hover,
+.ext-slot-bottom-right .extension-taskbar-icon:hover {
+  border-color: var(--border);
+}
+
+.extension-taskbar-icon-symbol {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.extension-taskbar-icon-label {
+  font-size: 12px;
+}
+
+/* --- Extension Panel Layer + Panels --- */
+
+/* Extension panel layer is the parent container that holds all
+   panels (info-panel + extension panels). It deliberately does NOT
+   set a z-index — that would create a stacking context and trap
+   the panels' inline z-indexes inside it, preventing fullscreen
+   panels from rising above the top bar. Each panel sets its own
+   z-index via JS (panel tier base + click-to-front offset, or
+   --z-panel-fullscreen when maximized). The layer's only job is
+   to be a positioned container with pointer-events:none so empty
+   regions don't block the canvas. */
+.extension-panel-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Each panel is positioned via inline left/top from JS so it can be
+   dragged. The class only handles the look, not the position — the
+   default coordinates are computed at mount time. */
+.extension-panel {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px var(--shadow);
+  overflow: hidden;
+  pointer-events: auto;
+  width: 380px;
+  max-height: calc(100vh - 120px);
+  /* Panels start in the panel tier; click-to-front bumps individual
+     panels by setting style.zIndex inline (always >= --z-panel). */
+}
+
+/* Fullscreen takes over the canvas area entirely, suspending the
+   inline left/top until exited. The inline z-index is bumped to
+   --z-panel-fullscreen by JS so the panel covers the top bar. */
+.extension-panel.is-fullscreen {
+  top: 0 !important;
+  left: 0 !important;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  max-height: none;
+  border-radius: 0;
+}
+
+/* setVisible(false) toggles this — display:none keeps the panel
+   instance alive (for hideOnClose / persistent panels). */
+.extension-panel.is-hidden {
+  display: none;
+}
+
+/* When any panel is fullscreen, the panel-mount adds this class to
+   #canvas-container. We hide secondary controls (zoom, theme,
+   copy-prompt, sidebar-expand, taskbar slots) so they don't visually
+   conflict with the panel's own chrome buttons. The search bar in
+   .canvas-top-center is intentionally NOT hidden — users can keep
+   searching and selecting nodes while a panel is fullscreen. */
+#canvas-container.has-fullscreen-panel .canvas-top-left,
+#canvas-container.has-fullscreen-panel .canvas-top-right,
+#canvas-container.has-fullscreen-panel .ext-slot-bottom-left,
+#canvas-container.has-fullscreen-panel .ext-slot-bottom-right,
+#canvas-container.has-fullscreen-panel .ext-slot-top-left,
+#canvas-container.has-fullscreen-panel .ext-slot-top-right {
+  display: none;
+}
+
+/* In fullscreen, the panel takes over the WHOLE canvas (top: 0 to
+   bottom: 0). The search bar slides to the top of the canvas and
+   visually meshes into the panel's surface — its parent containers
+   (.canvas-top-bar / .canvas-top-center / .search-overlay) have no
+   background, so the panel's --bg-surface extends up underneath the
+   search input and reads as one continuous slab.
+
+   The panel's chrome header gets padding-top equal to the search bar
+   height so the title + buttons appear below where the search bar
+   sits. In normal (non-fullscreen) mode the top bar keeps its
+   existing top: 16px so widgets align horizontally as before. */
+#canvas-container.has-fullscreen-panel .canvas-top-bar {
+  top: 0;
+}
+
+#canvas-container.has-fullscreen-panel .extension-panel.is-fullscreen .extension-panel-header {
+  padding-top: 56px;
+}
+
+/* Drop the panel's chrome (border, rounded corners, shadow) when
+   fullscreen so it visually sits flush against the canvas edges
+   instead of looking like a window with a frame. */
+.extension-panel.is-fullscreen {
+  border: none;
+  box-shadow: none;
+}
+
+/* Header doubles as the drag handle. Cursor hint + grab-state, but
+   buttons inside it stop propagation so clicking close/fullscreen
+   doesn't start a drag. */
+.extension-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  flex-shrink: 0;
+  cursor: grab;
+  user-select: none;
+}
+
+.extension-panel-header:active {
+  cursor: grabbing;
+}
+
+.extension-panel.is-fullscreen .extension-panel-header {
+  cursor: default;
+}
+
+.extension-panel-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Custom-button container — small flex group for extension-supplied
+   header buttons. Sits between the title and the built-in fullscreen +
+   close controls. */
+.extension-panel-custom-btns {
+  display: flex;
+  gap: 4px;
+}
+
+/* Header buttons (custom + fullscreen + close) all share one look so
+   the chrome reads as a single row of controls. Matches the visual
+   weight of info-panel's toolbar buttons. */
+.extension-panel-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 3px 8px;
+  line-height: 1;
+  min-height: 22px;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.extension-panel-btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+}
+
+.extension-panel-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.extension-panel-btn-fullscreen {
+  padding: 2px 6px;
+}
+
+.extension-panel-btn-fullscreen svg {
+  display: block;
+}
+
+.extension-panel-btn-close {
+  font-size: 16px;
+  padding: 0 7px;
+}
+
+.extension-panel-body {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+

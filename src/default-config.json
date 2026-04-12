@@ -72,5 +72,9 @@
     "maxQualityItems": 5,
     "maxMostConnected": 5,
     "searchDebounceMs": 150
+  },
+  "extensions": {
+    "disabled": [],
+    "external": []
   }
 }

@@ -32,6 +32,16 @@ export function loadViewerConfig(): ViewerConfig {
       lod: { ...defaultConfig.lod, ...(user.lod ?? {}) },
       walk: { ...defaultConfig.walk, ...(user.walk ?? {}) },
       limits: { ...defaultConfig.limits, ...(user.limits ?? {}) },
+      extensions: {
+        ...defaultConfig.extensions,
+        ...(user.extensions ?? {}),
+        disabled: Array.isArray(user.extensions?.disabled)
+          ? user.extensions.disabled
+          : defaultConfig.extensions.disabled,
+        external: Array.isArray(user.extensions?.external)
+          ? user.extensions.external
+          : defaultConfig.extensions.external,
+      },
     };
   } catch {
     return defaultConfig;

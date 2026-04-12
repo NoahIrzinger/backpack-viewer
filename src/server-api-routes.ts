@@ -1,0 +1,508 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  type JsonFileBackend,
+  type RemoteRegistry,
+  listBackpacks,
+  getActiveBackpack,
+  setActiveBackpack,
+  registerBackpack,
+  unregisterBackpack,
+} from "backpack-ontology";
+import type { ViewerConfig } from "./config.js";
+
+/**
+ * Shared API route handler. Both `bin/serve.js` (production raw http)
+ * and `vite.config.ts`'s middleware plugin (dev) call `handleApiRequest`
+ * with the raw Node IncomingMessage/ServerResponse — they share the
+ * exact same shape. Each entry only owns the static-file serving and
+ * its own startup wiring.
+ *
+ * Before this module existed, every route below had two near-identical
+ * copies (one per entry file) and adding/changing an endpoint required
+ * editing both, with predictable drift bugs. Consolidated here into a
+ * single source of truth.
+ *
+ * Storage handling: the active backpack can be swapped at runtime via
+ * `/api/backpacks/switch`, which atomically replaces the storage
+ * backend. The context holds a mutable wrapper so the swap is visible
+ * to subsequent requests. Vite needs to broadcast a WebSocket event on
+ * the swap; production has no WS channel, so the hook is optional.
+ */
+
+export interface BackpackEntry {
+  name: string;
+  path: string;
+  color: string;
+}
+
+export interface ApiContext {
+  /** Mutable wrapper around the storage backend so backpack-switch can swap it. */
+  storage: { current: JsonFileBackend; activeEntry: BackpackEntry | null };
+  remoteRegistry: RemoteRegistry;
+  viewerConfig: ViewerConfig;
+  /** Recreate the backend pointing at the active backpack. */
+  makeBackend: () => Promise<{ backend: JsonFileBackend; entry: BackpackEntry }>;
+  /** Optional hook called after a successful backpack switch (vite uses this for WS broadcast). */
+  onActiveBackpackChange?: () => void;
+  /** How to answer GET /api/version-check. Differs between dev (always not-stale) and prod (cached npm lookup). */
+  versionCheck: () => Promise<{ current: string; latest: string | null; stale: boolean }>;
+}
+
+// --- Small HTTP helpers (used only inside this module) ---
+
+function readBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+    req.on("end", () => resolve(body));
+    req.on("error", reject);
+  });
+}
+
+function sendJson(res: ServerResponse, status: number, value: unknown): void {
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(value));
+}
+
+function sendErr(res: ServerResponse, status: number, message: string): void {
+  sendJson(res, status, { error: message });
+}
+
+function urlPath(req: IncomingMessage): string {
+  return (req.url ?? "/").replace(/\?.*$/, "");
+}
+
+// --- Main dispatcher ---
+
+/**
+ * Try to match and handle an API request. Returns true if the request
+ * was handled (response written), false if no route matched and the
+ * caller should fall through to its own handlers (e.g., static files).
+ *
+ * Errors that escape route handlers result in a 500 with a JSON body.
+ */
+export async function handleApiRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: ApiContext,
+): Promise<boolean> {
+  const method = req.method ?? "GET";
+  const url = urlPath(req);
+
+  try {
+    // --- /api/config ---
+    if (url === "/api/config" && method === "GET") {
+      sendJson(res, 200, ctx.viewerConfig);
+      return true;
+    }
+
+    // --- /api/version-check ---
+    if (url === "/api/version-check" && method === "GET") {
+      const result = await ctx.versionCheck();
+      sendJson(res, 200, result);
+      return true;
+    }
+
+    // --- /api/remotes (read-only) ---
+    if (url === "/api/remotes" && method === "GET") {
+      const remotes = await ctx.remoteRegistry.list();
+      const summaries = await Promise.all(
+        remotes.map(async (r) => {
+          let nodeCount = 0;
+          let edgeCount = 0;
+          try {
+            const data = await ctx.remoteRegistry.loadCached(r.name);
+            nodeCount = data.nodes.length;
+            edgeCount = data.edges.length;
+          } catch {
+            /* keep counts at 0 */
+          }
+          return {
+            name: r.name,
+            url: r.url,
+            source: r.source,
+            addedAt: r.addedAt,
+            lastFetched: r.lastFetched,
+            pinned: r.pinned,
+            sizeBytes: r.sizeBytes,
+            nodeCount,
+            edgeCount,
+          };
+        }),
+      );
+      sendJson(res, 200, summaries);
+      return true;
+    }
+
+    const remoteItem = url.match(/^\/api\/remotes\/(.+)$/);
+    if (remoteItem && method === "GET") {
+      const name = decodeURIComponent(remoteItem[1]);
+      try {
+        const data = await ctx.remoteRegistry.loadCached(name);
+        sendJson(res, 200, data);
+      } catch (err) {
+        sendErr(res, 404, (err as Error).message);
+      }
+      return true;
+    }
+
+    // --- /api/graphs/<name>/branches/* ---
+    const branchSwitch = url.match(/^\/api\/graphs\/(.+)\/branches\/switch$/);
+    if (branchSwitch && method === "POST") {
+      const graphName = decodeURIComponent(branchSwitch[1]);
+      const body = await readBody(req);
+      try {
+        const { name: branchName } = JSON.parse(body);
+        await ctx.storage.current.switchBranch(graphName, branchName);
+        sendJson(res, 200, { ok: true });
+      } catch (err) {
+        sendErr(res, 400, (err as Error).message);
+      }
+      return true;
+    }
+
+    const deleteBranch = url.match(/^\/api\/graphs\/(.+)\/branches\/(.+)$/);
+    if (deleteBranch && method === "DELETE") {
+      const graphName = decodeURIComponent(deleteBranch[1]);
+      const branchName = decodeURIComponent(deleteBranch[2]);
+      try {
+        await ctx.storage.current.deleteBranch(graphName, branchName);
+        sendJson(res, 200, { ok: true });
+      } catch (err) {
+        sendErr(res, 400, (err as Error).message);
+      }
+      return true;
+    }
+
+    const branches = url.match(/^\/api\/graphs\/(.+)\/branches$/);
+    if (branches && method === "GET") {
+      const graphName = decodeURIComponent(branches[1]);
+      try {
+        const list = await ctx.storage.current.listBranches(graphName);
+        sendJson(res, 200, list);
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    if (branches && method === "POST") {
+      const graphName = decodeURIComponent(branches[1]);
+      const body = await readBody(req);
+      try {
+        const { name: branchName, from } = JSON.parse(body);
+        await ctx.storage.current.createBranch(graphName, branchName, from);
+        sendJson(res, 200, { ok: true });
+      } catch (err) {
+        sendErr(res, 400, (err as Error).message);
+      }
+      return true;
+    }
+
+    // --- /api/graphs/<name>/snapshots ---
+    const snapshots = url.match(/^\/api\/graphs\/(.+)\/snapshots$/);
+    if (snapshots && method === "GET") {
+      const graphName = decodeURIComponent(snapshots[1]);
+      try {
+        const list = await ctx.storage.current.listSnapshots(graphName);
+        sendJson(res, 200, list);
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    if (snapshots && method === "POST") {
+      const graphName = decodeURIComponent(snapshots[1]);
+      const body = await readBody(req);
+      try {
+        const { label } = JSON.parse(body);
+        await ctx.storage.current.createSnapshot(graphName, label);
+        sendJson(res, 200, { ok: true });
+      } catch (err) {
+        sendErr(res, 400, (err as Error).message);
+      }
+      return true;
+    }
+
+    // --- /api/graphs/<name>/rollback ---
+    const rollback = url.match(/^\/api\/graphs\/(.+)\/rollback$/);
+    if (rollback && method === "POST") {
+      const graphName = decodeURIComponent(rollback[1]);
+      const body = await readBody(req);
+      try {
+        const { version } = JSON.parse(body);
+        await ctx.storage.current.rollback(graphName, version);
+        sendJson(res, 200, { ok: true });
+      } catch (err) {
+        sendErr(res, 400, (err as Error).message);
+      }
+      return true;
+    }
+
+    // --- /api/graphs/<name>/diff/<version> ---
+    const diff = url.match(/^\/api\/graphs\/(.+)\/diff\/(\d+)$/);
+    if (diff && method === "GET") {
+      const graphName = decodeURIComponent(diff[1]);
+      const version = parseInt(diff[2], 10);
+      try {
+        const current = await ctx.storage.current.loadOntology(graphName);
+        const snapshot = await ctx.storage.current.loadSnapshot(graphName, version);
+        const currentNodeIds = new Set(current.nodes.map((n: any) => n.id));
+        const snapshotNodeIds = new Set(snapshot.nodes.map((n: any) => n.id));
+        const currentEdgeIds = new Set(current.edges.map((e: any) => e.id));
+        const snapshotEdgeIds = new Set(snapshot.edges.map((e: any) => e.id));
+        sendJson(res, 200, {
+          nodesAdded: current.nodes.filter((n: any) => !snapshotNodeIds.has(n.id)).length,
+          nodesRemoved: snapshot.nodes.filter((n: any) => !currentNodeIds.has(n.id)).length,
+          edgesAdded: current.edges.filter((e: any) => !snapshotEdgeIds.has(e.id)).length,
+          edgesRemoved: snapshot.edges.filter((e: any) => !currentEdgeIds.has(e.id)).length,
+        });
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    // --- /api/graphs/<name>/snippets/<id> ---
+    const snippetItem = url.match(/^\/api\/graphs\/(.+)\/snippets\/(.+)$/);
+    if (snippetItem && method === "GET") {
+      const graphName = decodeURIComponent(snippetItem[1]);
+      const snippetId = decodeURIComponent(snippetItem[2]);
+      try {
+        const snippet = await ctx.storage.current.loadSnippet(graphName, snippetId);
+        sendJson(res, 200, snippet);
+      } catch {
+        sendErr(res, 404, "Snippet not found");
+      }
+      return true;
+    }
+
+    if (snippetItem && method === "DELETE") {
+      const graphName = decodeURIComponent(snippetItem[1]);
+      const snippetId = decodeURIComponent(snippetItem[2]);
+      try {
+        await ctx.storage.current.deleteSnippet(graphName, snippetId);
+        sendJson(res, 200, { ok: true });
+      } catch (err) {
+        sendErr(res, 400, (err as Error).message);
+      }
+      return true;
+    }
+
+    const snippets = url.match(/^\/api\/graphs\/(.+)\/snippets$/);
+    if (snippets && method === "GET") {
+      const graphName = decodeURIComponent(snippets[1]);
+      try {
+        const list = await ctx.storage.current.listSnippets(graphName);
+        sendJson(res, 200, list);
+      } catch {
+        sendJson(res, 200, []);
+      }
+      return true;
+    }
+
+    if (snippets && method === "POST") {
+      const graphName = decodeURIComponent(snippets[1]);
+      const body = await readBody(req);
+      try {
+        const { label, description, nodeIds, edgeIds } = JSON.parse(body);
+        const id = await ctx.storage.current.saveSnippet(graphName, {
+          label,
+          description,
+          nodeIds,
+          edgeIds: edgeIds ?? [],
+        });
+        sendJson(res, 200, { ok: true, id });
+      } catch (err) {
+        sendErr(res, 400, (err as Error).message);
+      }
+      return true;
+    }
+
+    // --- /api/backpacks (meta: list, active, register, switch, unregister) ---
+    if (url === "/api/backpacks" && method === "GET") {
+      try {
+        const list = await listBackpacks();
+        const active = await getActiveBackpack();
+        sendJson(
+          res,
+          200,
+          list.map((b) => ({ ...b, active: b.name === active.name })),
+        );
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    if (url === "/api/backpacks/active" && method === "GET") {
+      try {
+        const active = await getActiveBackpack();
+        sendJson(res, 200, active);
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    if (url === "/api/backpacks/switch" && method === "POST") {
+      const body = await readBody(req);
+      try {
+        const { name } = JSON.parse(body);
+        await setActiveBackpack(name);
+        const swapped = await ctx.makeBackend();
+        ctx.storage.current = swapped.backend;
+        ctx.storage.activeEntry = swapped.entry;
+        ctx.onActiveBackpackChange?.();
+        sendJson(res, 200, { ok: true, active: ctx.storage.activeEntry });
+      } catch (err) {
+        sendErr(res, 400, (err as Error).message);
+      }
+      return true;
+    }
+
+    if (url === "/api/backpacks" && method === "POST") {
+      const body = await readBody(req);
+      try {
+        const { name, path: p, activate } = JSON.parse(body);
+        // registerBackpack only takes a path; the name is derived by
+        // backpack-ontology from the directory. Pre-existing call sites
+        // pass `name` as a hint but it's not used by the function.
+        void name;
+        const entry = await registerBackpack(p);
+        if (activate) {
+          await setActiveBackpack(name);
+          const swapped = await ctx.makeBackend();
+          ctx.storage.current = swapped.backend;
+          ctx.storage.activeEntry = swapped.entry;
+          ctx.onActiveBackpackChange?.();
+        }
+        sendJson(res, 200, { ok: true, entry });
+      } catch (err) {
+        sendErr(res, 400, (err as Error).message);
+      }
+      return true;
+    }
+
+    const backpackDelete = url.match(/^\/api\/backpacks\/(.+)$/);
+    if (backpackDelete && method === "DELETE") {
+      const name = decodeURIComponent(backpackDelete[1]);
+      try {
+        await unregisterBackpack(name);
+        if (ctx.storage.activeEntry && ctx.storage.activeEntry.name === name) {
+          const swapped = await ctx.makeBackend();
+          ctx.storage.current = swapped.backend;
+          ctx.storage.activeEntry = swapped.entry;
+          ctx.onActiveBackpackChange?.();
+        }
+        sendJson(res, 200, { ok: true });
+      } catch (err) {
+        sendErr(res, 400, (err as Error).message);
+      }
+      return true;
+    }
+
+    // --- /api/locks ---
+    if (url === "/api/locks" && method === "GET") {
+      try {
+        const summaries = await ctx.storage.current.listOntologies();
+        const result: Record<string, unknown> = {};
+        const storage = ctx.storage.current as any;
+        if (typeof storage.readLock === "function") {
+          await Promise.all(
+            summaries.map(async (s) => {
+              try {
+                result[s.name] = await storage.readLock(s.name);
+              } catch {
+                result[s.name] = null;
+              }
+            }),
+          );
+        }
+        sendJson(res, 200, result);
+      } catch {
+        sendJson(res, 200, {});
+      }
+      return true;
+    }
+
+    const lock = url.match(/^\/api\/graphs\/(.+)\/lock$/);
+    if (lock && method === "GET") {
+      const graphName = decodeURIComponent(lock[1]);
+      try {
+        const storage = ctx.storage.current as any;
+        const lockInfo =
+          typeof storage.readLock === "function"
+            ? await storage.readLock(graphName)
+            : null;
+        sendJson(res, 200, lockInfo);
+      } catch {
+        sendJson(res, 200, null);
+      }
+      return true;
+    }
+
+    // --- /api/ontologies/* ---
+    if (url === "/api/ontologies" && method === "GET") {
+      try {
+        const summaries = await ctx.storage.current.listOntologies();
+        sendJson(res, 200, summaries);
+      } catch {
+        sendJson(res, 200, []);
+      }
+      return true;
+    }
+
+    // /api/ontologies/<name>/rename — must match before /api/ontologies/<name>
+    const rename = url.match(/^\/api\/ontologies\/(.+)\/rename$/);
+    if (rename && method === "POST") {
+      const oldName = decodeURIComponent(rename[1]);
+      const body = await readBody(req);
+      try {
+        const { name: newName } = JSON.parse(body);
+        await ctx.storage.current.renameOntology(oldName, newName);
+        sendJson(res, 200, { ok: true, name: newName });
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    if (url.startsWith("/api/ontologies/")) {
+      const name = decodeURIComponent(url.replace("/api/ontologies/", ""));
+      if (!name) return false;
+      if (method === "PUT") {
+        const body = await readBody(req);
+        try {
+          const data = JSON.parse(body);
+          await ctx.storage.current.saveOntology(name, data);
+          sendJson(res, 200, { ok: true });
+        } catch (err) {
+          sendErr(res, 500, (err as Error).message);
+        }
+        return true;
+      }
+      if (method === "GET") {
+        try {
+          const data = await ctx.storage.current.loadOntology(name);
+          sendJson(res, 200, data);
+        } catch {
+          sendErr(res, 404, "Ontology not found");
+        }
+        return true;
+      }
+    }
+
+    return false;
+  } catch (err) {
+    if (!res.headersSent) {
+      sendErr(res, 500, (err as Error).message);
+    } else {
+      res.end();
+    }
+    return true;
+  }
+}

@@ -2,30 +2,50 @@ import { defineConfig, type Plugin } from "vite";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
-import {
-  JsonFileBackend,
-  dataDir,
-  RemoteRegistry,
-  listBackpacks,
-  getActiveBackpack,
-  setActiveBackpack,
-  registerBackpack,
-  unregisterBackpack,
-} from "backpack-ontology";
+import { JsonFileBackend, RemoteRegistry, getActiveBackpack } from "backpack-ontology";
 import { loadViewerConfig } from "./src/config.js";
+import { writeViewerState, readViewerState } from "./src/server-viewer-state.js";
+import {
+  loadExtensions as loadServerExtensions,
+  findExtension,
+  publicExtensionInfo,
+  proxyExtensionFetch,
+  readExtensionSettings,
+  writeExtensionSetting,
+  deleteExtensionSetting,
+  resolveExtensionFile,
+  type LoadedExtension,
+} from "./src/server-extensions.js";
+import { handleApiRequest, type ApiContext } from "./src/server-api-routes.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("./package.json");
 
-function ontologyApiPlugin(): Plugin {
-  let storage: JsonFileBackend;
-  let activeEntry: { name: string; path: string; color: string } | null = null;
+/**
+ * Vite middleware plugin that wires the viewer's local API into the dev
+ * server. The actual route logic lives in shared modules
+ * (`src/server-api-routes.ts`, `src/server-extensions.ts`,
+ * `src/server-viewer-state.ts`) so dev and prod (`bin/serve.js`) share
+ * a single implementation.
+ *
+ * The dev-specific responsibilities that stay here:
+ *   - Backpack-aware filesystem watcher that broadcasts WebSocket
+ *     events to the browser when graphs change on disk (live reload)
+ *   - Vite-specific URL rewriting for `.ts` extension files (redirect
+ *     to `/@fs/` so Vite compiles them on the fly)
+ *   - Hooking the `onActiveBackpackChange` callback so a backpack
+ *     switch via the API also fires a WebSocket broadcast
+ */
+function backpackApiPlugin(): Plugin {
+  let storageHolder: { current: JsonFileBackend; activeEntry: { name: string; path: string; color: string } | null } = {
+    current: null as unknown as JsonFileBackend,
+    activeEntry: null,
+  };
   let remoteRegistry: RemoteRegistry;
-  // Promise that resolves when both stores are ready. Every middleware
-  // request awaits this before touching storage so a fast initial request
-  // can't race a slow init.
   let readyPromise: Promise<void>;
   let currentWatcher: fs.FSWatcher | null = null;
+  let loadedExtensions: LoadedExtension[] = [];
+  let apiContext: ApiContext;
 
   async function makeBackend() {
     const entry = await getActiveBackpack();
@@ -37,19 +57,47 @@ function ontologyApiPlugin(): Plugin {
   }
 
   return {
-    name: "ontology-api",
+    name: "backpack-api",
 
     configureServer(server) {
       remoteRegistry = new RemoteRegistry();
       readyPromise = (async () => {
         const swapped = await makeBackend();
-        storage = swapped.backend;
-        activeEntry = swapped.entry;
+        storageHolder.current = swapped.backend;
+        storageHolder.activeEntry = swapped.entry;
         await remoteRegistry.initialize();
       })();
       readyPromise.catch((err) => {
         console.error(`[backpack-viewer] storage init failed: ${err.message}`);
       });
+
+      // Resolve in-tree first-party extensions and any user-config
+      // external extensions. Logged at startup so the user can see
+      // what loaded.
+      const userCfg = loadViewerConfig();
+      const extCfg = userCfg.extensions ?? { disabled: [], external: [] };
+      const userExternalExtensions = Array.isArray(extCfg.external)
+        ? (extCfg.external as Array<{ name: string; path: string }>).filter(
+            (e) => e && typeof e.name === "string" && typeof e.path === "string",
+          )
+        : [];
+      const disabledFirstParty = new Set<string>(
+        Array.isArray(extCfg.disabled) ? (extCfg.disabled as string[]) : [],
+      );
+      // In dev, first-party extensions live at <repo>/extensions/<name>/
+      const firstPartyExtensionsDir = path.resolve(__dirname, "extensions");
+      loadedExtensions = loadServerExtensions(
+        firstPartyExtensionsDir,
+        userExternalExtensions,
+        disabledFirstParty,
+      );
+      if (loadedExtensions.length > 0) {
+        console.log(
+          `[backpack-viewer] ${loadedExtensions.length} extension(s) loaded: ${loadedExtensions.map((e) => e.manifest.name).join(", ")}`,
+        );
+      } else {
+        console.log("[backpack-viewer] No extensions loaded");
+      }
 
       // Watch the active backpack's directory for live updates. Re-registers
       // the watcher any time the active backpack changes.
@@ -57,9 +105,9 @@ function ontologyApiPlugin(): Plugin {
         if (currentWatcher) {
           try { currentWatcher.close(); } catch {}
         }
-        if (!activeEntry) return;
+        if (!storageHolder.activeEntry) return;
         try {
-          currentWatcher = fs.watch(activeEntry.path, { recursive: true }, () => {
+          currentWatcher = fs.watch(storageHolder.activeEntry.path, { recursive: true }, () => {
             server.ws.send({
               type: "custom",
               event: "ontology-change",
@@ -72,391 +120,235 @@ function ontologyApiPlugin(): Plugin {
       }
       readyPromise.then(watchActiveBackpack);
 
+      // Build the API context shared with the route handler. Uses the
+      // mutable storageHolder so backpack switches inside the route
+      // handler are visible to subsequent requests.
+      apiContext = {
+        storage: storageHolder,
+        remoteRegistry,
+        viewerConfig: userCfg,
+        makeBackend,
+        // Vite gets a hook so a backpack switch broadcasts to the
+        // browser via WS — production has no live channel.
+        onActiveBackpackChange: () => {
+          watchActiveBackpack();
+          server.ws.send({
+            type: "custom",
+            event: "active-backpack-change",
+            data: { active: storageHolder.activeEntry },
+          });
+        },
+        // Dev mode skips the npm registry lookup — always reports not-stale.
+        versionCheck: async () => ({
+          current: pkg.version,
+          latest: pkg.version,
+          stale: false,
+        }),
+      };
+
       server.middlewares.use(async (req, res, next) => {
         // Wait for storage + remote registry to finish initializing before
         // touching them. Cheap once init is done (a resolved promise).
         try {
           await readyPromise;
         } catch {
-          // Init failed; let the request fall through to next() so static
-          // files still serve. API routes below will surface errors per-call.
+          /* let route handlers surface errors per-call */
         }
-        // Config endpoint
-        if (req.url === "/api/config" && req.method === "GET") {
-          const config = loadViewerConfig();
-          res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify(config));
+
+        // --- Viewer state bridge ---
+        if (req.url === "/api/viewer-state" && req.method === "PUT") {
+          let body = "";
+          req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+          req.on("end", async () => {
+            try {
+              await writeViewerState(body);
+              res.setHeader("Content-Type", "application/json");
+              res.end('{"ok":true}');
+            } catch (err: any) {
+              res.statusCode = 400;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: err.message }));
+            }
+          });
           return;
         }
 
-        // --- Remote graph routes (read-only) ---
-        if (req.url === "/api/remotes" && req.method === "GET") {
-          remoteRegistry
-            .list()
-            .then(async (remotes) => {
-              const summaries = await Promise.all(
-                remotes.map(async (r) => {
-                  try {
-                    const data = await remoteRegistry.loadCached(r.name);
-                    return {
-                      name: r.name,
-                      url: r.url,
-                      source: r.source,
-                      addedAt: r.addedAt,
-                      lastFetched: r.lastFetched,
-                      pinned: r.pinned,
-                      sizeBytes: r.sizeBytes,
-                      nodeCount: data.nodes.length,
-                      edgeCount: data.edges.length,
-                    };
-                  } catch {
-                    return {
-                      name: r.name,
-                      url: r.url,
-                      source: r.source,
-                      addedAt: r.addedAt,
-                      lastFetched: r.lastFetched,
-                      pinned: r.pinned,
-                      sizeBytes: r.sizeBytes,
-                      nodeCount: 0,
-                      edgeCount: 0,
-                    };
-                  }
-                }),
-              );
+        if (req.url === "/api/viewer-state" && req.method === "GET") {
+          try {
+            const data = await readViewerState();
+            res.setHeader("Content-Type", "application/json");
+            res.end(data);
+          } catch {
+            res.statusCode = 404;
+            res.setHeader("Content-Type", "application/json");
+            res.end('{"error":"no viewer state"}');
+          }
+          return;
+        }
+
+        // --- Extension system ---
+        if (req.url === "/api/extensions" && req.method === "GET") {
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(loadedExtensions.map(publicExtensionInfo)));
+          return;
+        }
+
+        const extFileMatch = req.url?.match(/^\/extensions\/([^/?]+)\/(.+?)(\?.*)?$/);
+        if (extFileMatch && req.method === "GET") {
+          const extName = decodeURIComponent(extFileMatch[1]);
+          const subPath = decodeURIComponent(extFileMatch[2]);
+          const requestedPath = resolveExtensionFile(loadedExtensions, extName, subPath);
+          if (!requestedPath) {
+            res.statusCode = 404;
+            res.setHeader("Content-Type", "application/json");
+            res.end('{"error":"extension file not found"}');
+            return;
+          }
+
+          // In dev we serve from the SOURCE tree, not from dist/ —
+          // there is no `tsc` step in the dev loop. The chat extension's
+          // manifest declares `entry: "src/index.js"` (which is what
+          // production serves from `dist/extensions/chat/src/index.js`),
+          // but in dev only the `.ts` source exists. When the requested
+          // `.js` doesn't exist, fall back to the corresponding `.ts`
+          // and redirect through Vite's `/@fs/` prefix so Vite picks up
+          // the file, transforms it, and serves the compiled JS. Vite's
+          // own resolver swaps `.js` imports to `.ts` files for relative
+          // imports inside the compiled module, so the transitive
+          // imports in the extension also resolve correctly.
+          let filePath = requestedPath;
+          const ext = path.extname(filePath);
+          if (ext === ".js" && !fs.existsSync(filePath)) {
+            const tsCandidate = filePath.slice(0, -3) + ".ts";
+            if (fs.existsSync(tsCandidate)) {
+              filePath = tsCandidate;
+            }
+          }
+
+          // .ts/.tsx files (whether requested directly or via the .js
+          // → .ts fallback above) get redirected through /@fs/ so Vite
+          // compiles them on the fly.
+          const finalExt = path.extname(filePath);
+          if (finalExt === ".ts" || finalExt === ".tsx") {
+            res.statusCode = 302;
+            res.setHeader("Location", "/@fs/" + filePath);
+            res.end();
+            return;
+          }
+
+          try {
+            const data = fs.readFileSync(filePath);
+            const mime =
+              finalExt === ".js"
+                ? "application/javascript"
+                : finalExt === ".css"
+                  ? "text/css"
+                  : finalExt === ".json"
+                    ? "application/json"
+                    : finalExt === ".html"
+                      ? "text/html"
+                      : "application/octet-stream";
+            res.setHeader("Content-Type", mime);
+            res.end(data);
+          } catch {
+            res.statusCode = 404;
+            res.end("Not found");
+          }
+          return;
+        }
+
+        const extFetchMatch = req.url?.match(/^\/api\/extensions\/([^/]+)\/fetch$/);
+        if (extFetchMatch && req.method === "POST") {
+          const extName = decodeURIComponent(extFetchMatch[1]);
+          const ext = findExtension(loadedExtensions, extName);
+          if (!ext) {
+            res.statusCode = 404;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: `unknown extension: ${extName}` }));
+            return;
+          }
+          let body = "";
+          req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+          req.on("end", async () => {
+            try {
+              const result = await proxyExtensionFetch(ext, body);
+              if (result.errorJson || !result.upstreamBody) {
+                res.statusCode = result.status;
+                res.setHeader("Content-Type", "application/json");
+                res.end(result.errorJson ?? JSON.stringify({ error: "proxy failed" }));
+                return;
+              }
+              const upstreamCT =
+                result.upstreamHeaders?.get("content-type") ?? "application/octet-stream";
+              res.statusCode = result.status;
+              res.setHeader("Content-Type", upstreamCT);
+              res.setHeader("Cache-Control", "no-cache");
+              res.setHeader("Connection", "keep-alive");
+              const reader = result.upstreamBody.getReader();
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                res.write(value);
+              }
+              res.end();
+            } catch (err: any) {
+              if (!res.headersSent) {
+                res.statusCode = 500;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ error: err.message }));
+              } else {
+                res.end();
+              }
+            }
+          });
+          return;
+        }
+
+        const extSettingsAllMatch = req.url?.match(/^\/api\/extensions\/([^/]+)\/settings$/);
+        if (extSettingsAllMatch && req.method === "GET") {
+          const extName = decodeURIComponent(extSettingsAllMatch[1]);
+          try {
+            const all = await readExtensionSettings(extName);
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify(all));
+          } catch (err: any) {
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: err.message }));
+          }
+          return;
+        }
+
+        const extSettingsKeyMatch = req.url?.match(/^\/api\/extensions\/([^/]+)\/settings\/([^/]+)$/);
+        if (extSettingsKeyMatch && (req.method === "PUT" || req.method === "DELETE")) {
+          const extName = decodeURIComponent(extSettingsKeyMatch[1]);
+          const key = decodeURIComponent(extSettingsKeyMatch[2]);
+          if (req.method === "DELETE") {
+            try {
+              await deleteExtensionSetting(extName, key);
               res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify(summaries));
-            })
-            .catch((err: Error) => {
+              res.end('{"ok":true}');
+            } catch (err: any) {
               res.statusCode = 500;
               res.setHeader("Content-Type", "application/json");
               res.end(JSON.stringify({ error: err.message }));
-            });
-          return;
-        }
-
-        const remoteItemMatch = req.url?.match(/^\/api\/remotes\/(.+)$/);
-        if (remoteItemMatch && req.method === "GET") {
-          const remoteName = decodeURIComponent(remoteItemMatch[1]);
-          remoteRegistry
-            .loadCached(remoteName)
-            .then((data) => {
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify(data));
-            })
-            .catch((err: Error) => {
-              res.statusCode = 404;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: err.message }));
-            });
-          return;
-        }
-
-        // --- Branch routes ---
-        const branchSwitchMatch = req.url?.match(/^\/api\/graphs\/(.+)\/branches\/switch$/);
-        if (branchSwitchMatch && req.method === "POST") {
-          const graphName = decodeURIComponent(branchSwitchMatch[1]);
-          let body = "";
-          req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-          req.on("end", () => {
-            try {
-              const { name: branchName } = JSON.parse(body);
-              storage.switchBranch(graphName, branchName).then(() => {
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ ok: true }));
-              }).catch((err: Error) => {
-                res.statusCode = 400;
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ error: err.message }));
-              });
-            } catch {
-              res.statusCode = 400;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: "Invalid JSON" }));
             }
-          });
-          return;
-        }
-
-        const deleteBranchMatch = req.url?.match(/^\/api\/graphs\/(.+)\/branches\/(.+)$/);
-        if (deleteBranchMatch && req.method === "DELETE") {
-          const graphName = decodeURIComponent(deleteBranchMatch[1]);
-          const branchName = decodeURIComponent(deleteBranchMatch[2]);
-          storage.deleteBranch(graphName, branchName).then(() => {
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ ok: true }));
-          }).catch((err: Error) => {
-            res.statusCode = 400;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: err.message }));
-          });
-          return;
-        }
-
-        const branchMatch = req.url?.match(/^\/api\/graphs\/(.+)\/branches$/);
-        if (branchMatch && req.method === "GET") {
-          const graphName = decodeURIComponent(branchMatch[1]);
-          storage.listBranches(graphName).then((branches) => {
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify(branches));
-          }).catch((err: Error) => {
-            res.statusCode = 500;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: err.message }));
-          });
-          return;
-        }
-
-        if (branchMatch && req.method === "POST") {
-          const graphName = decodeURIComponent(branchMatch[1]);
-          let body = "";
-          req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-          req.on("end", () => {
-            try {
-              const { name: branchName, from } = JSON.parse(body);
-              storage.createBranch(graphName, branchName, from).then(() => {
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ ok: true }));
-              }).catch((err: Error) => {
-                res.statusCode = 400;
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ error: err.message }));
-              });
-            } catch {
-              res.statusCode = 400;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: "Invalid JSON" }));
-            }
-          });
-          return;
-        }
-
-        // --- Snapshot routes ---
-        const snapshotMatch = req.url?.match(/^\/api\/graphs\/(.+)\/snapshots$/);
-        if (snapshotMatch && req.method === "GET") {
-          const graphName = decodeURIComponent(snapshotMatch[1]);
-          storage.listSnapshots(graphName).then((snapshots) => {
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify(snapshots));
-          }).catch((err: Error) => {
-            res.statusCode = 500;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: err.message }));
-          });
-          return;
-        }
-
-        if (snapshotMatch && req.method === "POST") {
-          const graphName = decodeURIComponent(snapshotMatch[1]);
-          let body = "";
-          req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-          req.on("end", () => {
-            try {
-              const { label } = JSON.parse(body);
-              storage.createSnapshot(graphName, label).then(() => {
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ ok: true }));
-              }).catch((err: Error) => {
-                res.statusCode = 400;
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ error: err.message }));
-              });
-            } catch {
-              res.statusCode = 400;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: "Invalid JSON" }));
-            }
-          });
-          return;
-        }
-
-        // --- Rollback route ---
-        const rollbackMatch = req.url?.match(/^\/api\/graphs\/(.+)\/rollback$/);
-        if (rollbackMatch && req.method === "POST") {
-          const graphName = decodeURIComponent(rollbackMatch[1]);
-          let body = "";
-          req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-          req.on("end", () => {
-            try {
-              const { version } = JSON.parse(body);
-              storage.rollback(graphName, version).then(() => {
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ ok: true }));
-              }).catch((err: Error) => {
-                res.statusCode = 400;
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ error: err.message }));
-              });
-            } catch {
-              res.statusCode = 400;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: "Invalid JSON" }));
-            }
-          });
-          return;
-        }
-
-        // --- Diff route ---
-        const diffMatch = req.url?.match(/^\/api\/graphs\/(.+)\/diff\/(\d+)$/);
-        if (diffMatch && req.method === "GET") {
-          const graphName = decodeURIComponent(diffMatch[1]);
-          const version = parseInt(diffMatch[2], 10);
-          Promise.all([
-            storage.loadOntology(graphName),
-            storage.loadSnapshot(graphName, version),
-          ]).then(([current, snapshot]) => {
-            const currentNodeIds = new Set(current.nodes.map((n: any) => n.id));
-            const snapshotNodeIds = new Set(snapshot.nodes.map((n: any) => n.id));
-            const currentEdgeIds = new Set(current.edges.map((e: any) => e.id));
-            const snapshotEdgeIds = new Set(snapshot.edges.map((e: any) => e.id));
-            const diff = {
-              nodesAdded: current.nodes.filter((n: any) => !snapshotNodeIds.has(n.id)).length,
-              nodesRemoved: snapshot.nodes.filter((n: any) => !currentNodeIds.has(n.id)).length,
-              edgesAdded: current.edges.filter((e: any) => !snapshotEdgeIds.has(e.id)).length,
-              edgesRemoved: snapshot.edges.filter((e: any) => !currentEdgeIds.has(e.id)).length,
-            };
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify(diff));
-          }).catch((err: Error) => {
-            res.statusCode = 500;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: err.message }));
-          });
-          return;
-        }
-
-        // --- Snippet routes ---
-        const snippetItemMatch = req.url?.match(/^\/api\/graphs\/(.+)\/snippets\/(.+)$/);
-        if (snippetItemMatch && req.method === "GET") {
-          const graphName = decodeURIComponent(snippetItemMatch[1]);
-          const snippetId = decodeURIComponent(snippetItemMatch[2]);
-          storage.loadSnippet(graphName, snippetId).then((snippet: any) => {
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify(snippet));
-          }).catch((err: Error) => {
-            res.statusCode = 404;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: err.message }));
-          });
-          return;
-        }
-
-        if (snippetItemMatch && req.method === "DELETE") {
-          const graphName = decodeURIComponent(snippetItemMatch[1]);
-          const snippetId = decodeURIComponent(snippetItemMatch[2]);
-          storage.deleteSnippet(graphName, snippetId).then(() => {
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ ok: true }));
-          }).catch((err: Error) => {
-            res.statusCode = 400;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: err.message }));
-          });
-          return;
-        }
-
-        const snippetMatch = req.url?.match(/^\/api\/graphs\/(.+)\/snippets$/);
-        if (snippetMatch && req.method === "GET") {
-          const graphName = decodeURIComponent(snippetMatch[1]);
-          storage.listSnippets(graphName).then((snippets: any) => {
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify(snippets));
-          }).catch((err: Error) => {
-            res.statusCode = 500;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: err.message }));
-          });
-          return;
-        }
-
-        if (snippetMatch && req.method === "POST") {
-          const graphName = decodeURIComponent(snippetMatch[1]);
-          let body = "";
-          req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-          req.on("end", () => {
-            try {
-              const { label, description, nodeIds, edgeIds } = JSON.parse(body);
-              storage.saveSnippet(graphName, { label, description, nodeIds, edgeIds: edgeIds ?? [] }).then((id: string) => {
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ ok: true, id }));
-              }).catch((err: Error) => {
-                res.statusCode = 400;
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ error: err.message }));
-              });
-            } catch {
-              res.statusCode = 400;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: "Invalid JSON" }));
-            }
-          });
-          return;
-        }
-
-        // --- Version check (dev mode: always reports not-stale) ---
-        if (req.url === "/api/version-check" && req.method === "GET") {
-          res.setHeader("Content-Type", "application/json");
-          res.end(
-            JSON.stringify({
-              current: pkg.version,
-              latest: pkg.version,
-              stale: false,
-            }),
-          );
-          return;
-        }
-
-        // --- Backpacks (meta: list, active, register, switch, unregister) ---
-        if (req.url === "/api/backpacks" && req.method === "GET") {
-          try {
-            const list = await listBackpacks();
-            const active = await getActiveBackpack();
-            res.setHeader("Content-Type", "application/json");
-            res.end(
-              JSON.stringify(
-                list.map((b) => ({ ...b, active: b.name === active.name })),
-              ),
-            );
-          } catch (err: any) {
-            res.statusCode = 500;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: err.message }));
+            return;
           }
-          return;
-        }
-
-        if (req.url === "/api/backpacks/active" && req.method === "GET") {
-          try {
-            const active = await getActiveBackpack();
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify(active));
-          } catch (err: any) {
-            res.statusCode = 500;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: err.message }));
-          }
-          return;
-        }
-
-        if (req.url === "/api/backpacks/switch" && req.method === "POST") {
           let body = "";
-          req.on("data", (chunk) => { body += chunk.toString(); });
+          req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
           req.on("end", async () => {
             try {
-              const { name } = JSON.parse(body);
-              await setActiveBackpack(name);
-              const swapped = await makeBackend();
-              storage = swapped.backend;
-              activeEntry = swapped.entry;
-              watchActiveBackpack();
-              // Notify the browser so sidebar/canvas hot-swap
-              server.ws.send({
-                type: "custom",
-                event: "active-backpack-change",
-                data: { active: activeEntry },
-              });
+              const parsed = JSON.parse(body);
+              if (!("value" in parsed)) {
+                res.statusCode = 400;
+                res.setHeader("Content-Type", "application/json");
+                res.end('{"error":"body must include {value}"}');
+                return;
+              }
+              await writeExtensionSetting(extName, key, parsed.value);
               res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ ok: true, active: activeEntry }));
+              res.end('{"ok":true}');
             } catch (err: any) {
               res.statusCode = 400;
               res.setHeader("Content-Type", "application/json");
@@ -466,193 +358,14 @@ function ontologyApiPlugin(): Plugin {
           return;
         }
 
-        if (req.url === "/api/backpacks" && req.method === "POST") {
-          let body = "";
-          req.on("data", (chunk) => { body += chunk.toString(); });
-          req.on("end", async () => {
-            try {
-              const { name, path: p, activate } = JSON.parse(body);
-              const entry = await registerBackpack(name, p);
-              if (activate) {
-                await setActiveBackpack(name);
-                const swapped = await makeBackend();
-                storage = swapped.backend;
-                activeEntry = swapped.entry;
-                watchActiveBackpack();
-                server.ws.send({
-                  type: "custom",
-                  event: "active-backpack-change",
-                  data: { active: activeEntry },
-                });
-              }
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ ok: true, entry }));
-            } catch (err: any) {
-              res.statusCode = 400;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: err.message }));
-            }
-          });
-          return;
-        }
+        // --- Shared API routes ---
+        // Everything else (config, version-check, ontologies, backpacks,
+        // branches, snapshots, snippets, locks, remotes) lives in
+        // src/server-api-routes.ts.
+        const handled = await handleApiRequest(req as any, res as any, apiContext);
+        if (handled) return;
 
-        const backpackDeleteMatch = req.url?.match(/^\/api\/backpacks\/(.+)$/);
-        if (backpackDeleteMatch && req.method === "DELETE") {
-          const name = decodeURIComponent(backpackDeleteMatch[1]);
-          try {
-            await unregisterBackpack(name);
-            if (activeEntry && activeEntry.name === name) {
-              const swapped = await makeBackend();
-              storage = swapped.backend;
-              activeEntry = swapped.entry;
-              watchActiveBackpack();
-              server.ws.send({
-                type: "custom",
-                event: "active-backpack-change",
-                data: { active: activeEntry },
-              });
-            }
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ ok: true }));
-          } catch (err: any) {
-            res.statusCode = 400;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: err.message }));
-          }
-          return;
-        }
-
-        // GET /api/locks — batch heartbeat for collaboration awareness
-        if (req.url === "/api/locks" && req.method === "GET") {
-          storage
-            .listOntologies()
-            .then(async (summaries) => {
-              const result: Record<string, unknown> = {};
-              if (typeof (storage as any).readLock === "function") {
-                await Promise.all(
-                  summaries.map(async (s) => {
-                    try {
-                      result[s.name] = await (storage as any).readLock(s.name);
-                    } catch {
-                      result[s.name] = null;
-                    }
-                  }),
-                );
-              }
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify(result));
-            })
-            .catch(() => {
-              res.setHeader("Content-Type", "application/json");
-              res.end("{}");
-            });
-          return;
-        }
-
-        // GET /api/graphs/:name/lock — single-graph heartbeat (kept for compat)
-        const lockMatch = req.url?.match(/^\/api\/graphs\/(.+)\/lock$/);
-        if (lockMatch && req.method === "GET") {
-          const graphName = decodeURIComponent(lockMatch[1]);
-          (typeof (storage as any).readLock === "function"
-            ? (storage as any).readLock(graphName)
-            : Promise.resolve(null))
-            .then((lock: unknown) => {
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify(lock));
-            })
-            .catch(() => {
-              res.setHeader("Content-Type", "application/json");
-              res.end("null");
-            });
-          return;
-        }
-
-        if (!req.url?.startsWith("/api/ontologies")) return next();
-
-        const urlPath = req.url.replace(/\?.*$/, "");
-
-        // GET /api/ontologies
-        if (urlPath === "/api/ontologies" && req.method === "GET") {
-          storage
-            .listOntologies()
-            .then((summaries) => {
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify(summaries));
-            })
-            .catch(() => {
-              res.setHeader("Content-Type", "application/json");
-              res.end("[]");
-            });
-          return;
-        }
-
-        // POST /api/ontologies/:name/rename
-        const renameMatch = urlPath.match(/^\/api\/ontologies\/(.+)\/rename$/);
-        if (renameMatch && req.method === "POST") {
-          const oldName = decodeURIComponent(renameMatch[1]);
-          let body = "";
-          req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-          req.on("end", () => {
-            try {
-              const { name: newName } = JSON.parse(body);
-              storage.renameOntology(oldName, newName).then(() => {
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ ok: true, name: newName }));
-              }).catch((err: Error) => {
-                res.statusCode = 500;
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ error: err.message }));
-              });
-            } catch {
-              res.statusCode = 400;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: "Invalid JSON" }));
-            }
-          });
-          return;
-        }
-
-        const name = decodeURIComponent(
-          urlPath.replace("/api/ontologies/", "")
-        );
-        if (!name) return next();
-
-        // PUT /api/ontologies/:name
-        if (req.method === "PUT") {
-          let body = "";
-          req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-          req.on("end", () => {
-            try {
-              const data = JSON.parse(body);
-              storage.saveOntology(name, data).then(() => {
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ ok: true }));
-              }).catch((err: Error) => {
-                res.statusCode = 500;
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ error: err.message }));
-              });
-            } catch {
-              res.statusCode = 400;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: "Invalid JSON" }));
-            }
-          });
-          return;
-        }
-
-        // GET /api/ontologies/:name
-        storage
-          .loadOntology(name)
-          .then((data) => {
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify(data));
-          })
-          .catch(() => {
-            res.statusCode = 404;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: "Ontology not found" }));
-          });
+        return next();
       });
     },
   };
@@ -715,7 +428,7 @@ const devPort = parseInt(
 );
 
 export default defineConfig({
-  plugins: [ontologyApiPlugin()],
+  plugins: [backpackApiPlugin()],
   define: {
     __VIEWER_VERSION__: JSON.stringify(pkg.version),
   },
