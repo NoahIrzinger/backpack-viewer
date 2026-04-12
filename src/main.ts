@@ -10,6 +10,7 @@ import {
 import { initSidebar } from "./sidebar";
 import { initCanvas, type FocusInfo } from "./canvas";
 import { initInfoPanel } from "./info-panel";
+import { createPanelMount } from "./extensions/panel-mount";
 import { initSearch } from "./search";
 import { initToolsPane } from "./tools-pane";
 import { setLayoutParams, getLayoutParams, autoLayoutParams } from "./layout";
@@ -19,6 +20,11 @@ import { showToast } from "./dialog";
 import { createHistory } from "./history";
 import { matchKey, type KeybindingMap } from "./keybindings";
 import { initContextMenu } from "./context-menu";
+import { initCopyPromptButton } from "./copy-prompt";
+import { publishViewerState } from "./bridge";
+import { createEventBus } from "./extensions/event-bus";
+import { loadExtensions } from "./extensions/loader";
+import type { ViewerHost, ViewerFocusSnapshot } from "./extensions/types";
 import defaultConfig from "./default-config.json";
 import "./style.css";
 
@@ -82,6 +88,7 @@ async function main() {
     // Refresh sidebar counts
     const updated = await listOntologies();
     sidebar.setSummaries(updated);
+    eventBus.emit("graph-changed");
   }
 
   /** Snapshot current state, then save. Call this instead of save() for undoable actions. */
@@ -105,7 +112,12 @@ async function main() {
   // that's fine because the callback is only invoked after setup completes.
   let canvas: ReturnType<typeof initCanvas>;
 
-  const infoPanel = initInfoPanel(canvasContainer, {
+  // Create the shared panel-mount up front. Both info-panel and the
+  // extension loader use this single instance so all panels share the
+  // same click-to-front z-stack and the persistent layer DOM element.
+  const panelMount = createPanelMount(canvasContainer);
+
+  const infoPanel = initInfoPanel(canvasContainer, panelMount, {
     onUpdateNode(nodeId, properties) {
       if (!currentData) return;
       undoHistory.push(currentData);
@@ -245,7 +257,7 @@ async function main() {
   canvasContainer.appendChild(pathBar);
 
   function showPathBar(path: { nodeIds: string[]; edgeIds: string[] }) {
-    pathBar.innerHTML = "";
+    pathBar.replaceChildren();
     if (!currentData) return;
 
     for (let i = 0; i < path.nodeIds.length; i++) {
@@ -282,12 +294,29 @@ async function main() {
 
   function hidePathBar() {
     pathBar.classList.add("hidden");
-    pathBar.innerHTML = "";
+    pathBar.replaceChildren();
     canvas.clearHighlightedPath();
+  }
+
+  // Event bus for extensions. Emitted from the same hooks that drive
+  // bridge publishing — selection changes, focus enter/exit, graph
+  // load, save. Subscribers run synchronously; errors in one don't
+  // affect others.
+  const eventBus = createEventBus();
+
+  function publishBridgeState() {
+    if (!activeOntology) return;
+    publishViewerState({
+      graph: activeOntology,
+      selection: currentSelection,
+      focus: canvas?.getFocusInfo() ?? null,
+    });
   }
 
   canvas = initCanvas(canvasContainer, (nodeIds) => {
     currentSelection = nodeIds ?? [];
+    publishBridgeState();
+    eventBus.emit("selection-changed");
     // Don't touch the path bar when walk mode is active — syncWalkTrail manages it
     if (!canvas.getWalkMode()) {
       if (nodeIds && nodeIds.length === 2) {
@@ -325,6 +354,8 @@ async function main() {
       if (activeOntology) updateUrl(activeOntology);
       syncWalkTrail();
     }
+    publishBridgeState();
+    eventBus.emit("focus-changed");
   }, { lod: cfg.lod, navigation: cfg.navigation, walk: (cfg as any).walk });
 
   const search = initSearch(canvasContainer, {
@@ -467,14 +498,51 @@ async function main() {
   const toolsToggle = canvasContainer.querySelector(".tools-pane-toggle");
   if (toolsToggle) topLeft.appendChild(toolsToggle);
 
-  // Move search overlay into center slot
-  const searchOverlay = canvasContainer.querySelector(".search-overlay");
-  if (searchOverlay) topCenter.appendChild(searchOverlay);
-
   // Move zoom controls and theme toggle into right slot
   const zoomControls = canvasContainer.querySelector(".zoom-controls");
   if (zoomControls) topRight.appendChild(zoomControls);
+
   topRight.appendChild(themeBtn);
+
+  // Extension taskbar slots — four hosted containers, one per
+  // supported icon position. The top slots flank the search overlay
+  // INSIDE top-center, alongside the copy-prompt button. The viewer's
+  // own controls in top-left/top-right (zoom, theme, tools toggle)
+  // stay visually separated. Bottom slots float in the canvas
+  // corners. All four start hidden — they're invisible until at
+  // least one extension registers into them, so empty slots take no
+  // space.
+  const extSlotTopLeft = document.createElement("div");
+  extSlotTopLeft.className = "ext-slot ext-slot-top-left";
+  topCenter.appendChild(extSlotTopLeft);
+
+  // Move search overlay into center slot, after the left ext slot so
+  // top-center reads: [ext-left, search, ext-right, copy-prompt].
+  const searchOverlay = canvasContainer.querySelector(".search-overlay");
+  if (searchOverlay) topCenter.appendChild(searchOverlay);
+
+  const extSlotTopRight = document.createElement("div");
+  extSlotTopRight.className = "ext-slot ext-slot-top-right";
+  topCenter.appendChild(extSlotTopRight);
+
+  // Copy-prompt button — viewer-owned, sits at the rightmost end of
+  // the top-center group so any registered ext-right icons (like
+  // chat) appear immediately to its left.
+  const copyPromptBtn = initCopyPromptButton(() => ({
+    graphName: activeOntology,
+    data: currentData,
+    selection: currentSelection,
+    focus: canvas.getFocusInfo(),
+  }));
+  topCenter.appendChild(copyPromptBtn);
+
+  const extSlotBottomLeft = document.createElement("div");
+  extSlotBottomLeft.className = "ext-slot ext-slot-bottom-left";
+  canvasContainer.appendChild(extSlotBottomLeft);
+
+  const extSlotBottomRight = document.createElement("div");
+  extSlotBottomRight.className = "ext-slot ext-slot-bottom-right";
+  canvasContainer.appendChild(extSlotBottomRight);
 
   topBar.appendChild(topLeft);
   topBar.appendChild(topCenter);
@@ -763,6 +831,9 @@ async function main() {
     toolsPane.setData(currentData);
     emptyState.hide();
     updateUrl(name);
+    publishBridgeState();
+    eventBus.emit("graph-switched");
+    eventBus.emit("graph-changed");
 
     // Load branches and snapshots — skipped for remote graphs (read-only,
     // no branch/snapshot/snippet APIs on the remote endpoint)
@@ -821,38 +892,137 @@ async function main() {
     })
     .catch(() => {});
 
-  // Load ontology list (local + remote in parallel)
-  const [summaries, remotes] = await Promise.all([
-    listOntologies(),
-    listRemotes().catch(() => [] as RemoteSummary[]),
-  ]);
-  sidebar.setSummaries(summaries);
-  sidebar.setRemotes(remotes);
-  remoteNames = new Set(remotes.map((r) => r.name));
+  // --- Share link detection ---
+  // If URL has ?share=TOKEN, load from the relay instead of local API.
+  // The #k=KEY fragment (if present) is used for client-side decryption.
+  const shareParams = new URLSearchParams(window.location.search);
+  const shareToken = shareParams.get("share");
 
-  // Auto-load from URL hash, or first graph
-  const initialUrl = parseUrl();
-  const initialName =
-    initialUrl.graph && summaries.some((s) => s.name === initialUrl.graph)
-      ? initialUrl.graph
-      : initialUrl.graph && remoteNames.has(initialUrl.graph)
-        ? initialUrl.graph
-        : summaries.length > 0
-          ? summaries[0].name
-          : remotes.length > 0
-            ? remotes[0].name
-            : null;
+  if (shareToken) {
+    try {
+      const metaRes = await fetch(`/v1/share/${shareToken}/meta`);
+      if (!metaRes.ok) throw new Error("Share link not found or expired");
+      const meta = await metaRes.json();
 
-  if (initialName) {
-    await selectGraph(
-      initialName,
-      initialUrl.nodes.length ? initialUrl.nodes : undefined,
-      initialUrl.focus.length ? initialUrl.focus : undefined,
-      initialUrl.hops
-    );
+      const dataRes = await fetch(`/v1/share/${shareToken}`);
+      if (!dataRes.ok) throw new Error("Failed to download shared backpack");
+
+      // Parse the BPAK envelope (inline — avoids pulling Node.js deps from backpack-ontology)
+      const envelopeBytes = new Uint8Array(await dataRes.arrayBuffer());
+      if (envelopeBytes.length < 9 || envelopeBytes[0] !== 0x42 || envelopeBytes[1] !== 0x50 || envelopeBytes[2] !== 0x41 || envelopeBytes[3] !== 0x4B) {
+        throw new Error("Invalid share data: not a BPAK envelope");
+      }
+      const headerLen = new DataView(envelopeBytes.buffer, envelopeBytes.byteOffset, envelopeBytes.byteLength).getUint32(5, false);
+      if (9 + headerLen > envelopeBytes.length) throw new Error("Invalid envelope: header length exceeds data");
+      const envelopeHeader = JSON.parse(new TextDecoder().decode(envelopeBytes.slice(9, 9 + headerLen)));
+      const envelopePayload = envelopeBytes.slice(9 + headerLen);
+
+      let graphData: LearningGraphData;
+
+      if (envelopeHeader.format !== "plaintext") {
+        // Encrypted — decrypt client-side using fragment key
+        const fragment = window.location.hash.slice(1);
+        const keyParam = new URLSearchParams(fragment).get("k") ?? fragment.split("k=")[1];
+        if (!keyParam) throw new Error("Missing decryption key in URL fragment");
+
+        const { Decrypter } = await import("age-encryption");
+        const secretKey = atob(keyParam.replace(/-/g, "+").replace(/_/g, "/"));
+
+        const d = new Decrypter();
+        d.addIdentity(secretKey);
+        const plaintext = await d.decrypt(envelopePayload);
+        graphData = JSON.parse(new TextDecoder().decode(plaintext));
+      } else {
+        graphData = JSON.parse(new TextDecoder().decode(envelopePayload));
+      }
+
+      // Render in read-only mode
+      activeOntology = meta.backpack_name || "Shared Backpack";
+      currentData = graphData;
+      canvas.loadGraph(graphData);
+      search.setLearningGraphData(graphData);
+      sidebar.setSummaries([{
+        name: activeOntology,
+        description: "",
+        nodeCount: graphData.nodes?.length ?? 0,
+        edgeCount: graphData.edges?.length ?? 0,
+        nodeTypes: [],
+      }]);
+      sidebar.setActive(activeOntology);
+      document.title = `${activeOntology} — Backpack`;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to load shared backpack";
+      showToast(msg, 5000);
+      emptyState.show();
+    }
   } else {
-    emptyState.show();
+    // Normal mode — load from local/cloud API
+    const [summaries, remotes] = await Promise.all([
+      listOntologies(),
+      listRemotes().catch(() => [] as RemoteSummary[]),
+    ]);
+    sidebar.setSummaries(summaries);
+    sidebar.setRemotes(remotes);
+    remoteNames = new Set(remotes.map((r) => r.name));
+
+    // Auto-load from URL hash, or first graph
+    const initialUrl = parseUrl();
+    const initialName =
+      initialUrl.graph && summaries.some((s) => s.name === initialUrl.graph)
+        ? initialUrl.graph
+        : initialUrl.graph && remoteNames.has(initialUrl.graph)
+          ? initialUrl.graph
+          : summaries.length > 0
+            ? summaries[0].name
+            : remotes.length > 0
+              ? remotes[0].name
+              : null;
+
+    if (initialName) {
+      await selectGraph(
+        initialName,
+        initialUrl.nodes.length ? initialUrl.nodes : undefined,
+        initialUrl.focus.length ? initialUrl.focus : undefined,
+        initialUrl.hops
+      );
+    } else {
+      emptyState.show();
+    }
   }
+
+  // --- Extension system ---
+  // Load extensions after the viewer is fully initialized so any
+  // extension that immediately reads the current graph state gets a
+  // populated graph (not a startup race).
+  const host: ViewerHost = {
+    getGraph: () => currentData,
+    getGraphName: () => activeOntology,
+    getSelection: () => [...currentSelection],
+    getFocus: (): ViewerFocusSnapshot | null => canvas.getFocusInfo(),
+    saveCurrentGraph: async () => {
+      await save();
+    },
+    snapshotForUndo: () => {
+      if (currentData) undoHistory.push(currentData);
+    },
+    panToNode: (id) => canvas.panToNode(id),
+    focusNodes: (ids, hops) => canvas.enterFocus(ids, hops),
+    exitFocus: () => {
+      if (canvas.isFocused()) canvas.exitFocus();
+    },
+    taskbarSlots: {
+      topLeft: extSlotTopLeft,
+      topRight: extSlotTopRight,
+      bottomLeft: extSlotBottomLeft,
+      bottomRight: extSlotBottomRight,
+    },
+    subscribe: (event, cb) => eventBus.subscribe(event, cb),
+  };
+
+  // Fire-and-forget — extension loading errors don't block startup
+  loadExtensions(host, panelMount).catch((err) => {
+    console.error("[backpack-viewer] extension loader failed:", err);
+  });
 
   // Keyboard shortcuts — dispatched via configurable bindings
   const actions: Record<string, () => void> = {
