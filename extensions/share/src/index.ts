@@ -37,7 +37,8 @@ function toggleSharePanel(viewer: ViewerExtensionAPI): void {
     body.textContent = "Loading...";
     panel = viewer.mountPanel(body, {
       title: `Share "${graphName}"`,
-      defaultPosition: { left: Math.max(100, (window.innerWidth - 380) / 2), top: Math.max(80, (window.innerHeight - 300) / 2) },
+      defaultPosition: { left: Math.max(100, (window.innerWidth - 380) / 2), top: Math.max(80, (window.innerHeight - 400) / 2) },
+      persistKey: "share-v2",
       showFullscreenButton: false,
       onClose: () => { panel = null; },
     });
