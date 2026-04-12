@@ -251,10 +251,9 @@ async function main() {
     }
   }
 
-  // --- Path bar ---
+  // --- Path bar (appended to bottom-center column later) ---
   const pathBar = document.createElement("div");
   pathBar.className = "path-bar hidden";
-  canvasContainer.appendChild(pathBar);
 
   function showPathBar(path: { nodeIds: string[]; edgeIds: string[] }) {
     pathBar.replaceChildren();
@@ -536,18 +535,42 @@ async function main() {
   }));
   topCenter.appendChild(copyPromptBtn);
 
-  const extSlotBottomLeft = document.createElement("div");
-  extSlotBottomLeft.className = "ext-slot ext-slot-bottom-left";
-  canvasContainer.appendChild(extSlotBottomLeft);
-
-  const extSlotBottomRight = document.createElement("div");
-  extSlotBottomRight.className = "ext-slot ext-slot-bottom-right";
-  canvasContainer.appendChild(extSlotBottomRight);
-
   topBar.appendChild(topLeft);
   topBar.appendChild(topCenter);
   topBar.appendChild(topRight);
   canvasContainer.appendChild(topBar);
+
+  // --- Bottom bar: mirrors top bar structure at the bottom of the canvas ---
+  const bottomBar = document.createElement("div");
+  bottomBar.className = "canvas-bottom-bar";
+
+  const bottomLeft = document.createElement("div");
+  bottomLeft.className = "canvas-bottom-left";
+
+  const bottomCenter = document.createElement("div");
+  bottomCenter.className = "canvas-bottom-center";
+
+  const bottomRight = document.createElement("div");
+  bottomRight.className = "canvas-bottom-right";
+
+  const extSlotBottomLeft = document.createElement("div");
+  extSlotBottomLeft.className = "ext-slot ext-slot-bottom-left";
+  bottomLeft.appendChild(extSlotBottomLeft);
+
+  const extSlotBottomCenter = document.createElement("div");
+  extSlotBottomCenter.className = "ext-slot ext-slot-bottom-center";
+  bottomCenter.appendChild(extSlotBottomCenter);
+
+  bottomCenter.appendChild(pathBar);
+
+  const extSlotBottomRight = document.createElement("div");
+  extSlotBottomRight.className = "ext-slot ext-slot-bottom-right";
+  bottomRight.appendChild(extSlotBottomRight);
+
+  bottomBar.appendChild(bottomLeft);
+  bottomBar.appendChild(bottomCenter);
+  bottomBar.appendChild(bottomRight);
+  canvasContainer.appendChild(bottomBar);
 
   search.onFilterChange((ids) => {
     canvas.setFilteredNodeIds(ids);
@@ -1014,6 +1037,7 @@ async function main() {
       topLeft: extSlotTopLeft,
       topRight: extSlotTopRight,
       bottomLeft: extSlotBottomLeft,
+      bottomCenter: extSlotBottomCenter,
       bottomRight: extSlotBottomRight,
     },
     subscribe: (event, cb) => eventBus.subscribe(event, cb),

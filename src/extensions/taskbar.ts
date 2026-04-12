@@ -1,26 +1,25 @@
 import type { TaskbarIconOptions, TaskbarPosition } from "./types";
 
 /**
- * Extension taskbar — routes registered icons into one of four slot
+ * Extension taskbar — routes registered icons into one of five slot
  * containers based on the icon's `position`. Slots are owned by the
  * host (created in main.ts) so the viewer controls where each slot
  * lives in the DOM:
  *
- *   - top-left, top-right    → nested into the existing top bar
- *                              alongside zoom/theme controls
- *   - bottom-left, bottom-right → floating in the canvas corners
- *
- * No slot lives at bottom-center; that area is reserved for the
- * viewer's path bar so the two never overlap.
+ *   - top-left, top-right           → nested into the existing top bar
+ *                                     alongside zoom/theme controls
+ *   - bottom-left, bottom-center,
+ *     bottom-right                  → inside the bottom bar columns
  *
  * Each slot tracks its own icon count so it can toggle a `.has-icons`
- * class — bottom corner slots use it to stay invisible (and take no
- * space) until at least one extension is active.
+ * class — bottom slots use it to stay invisible (and take no space)
+ * until at least one extension is active.
  */
 export interface TaskbarSlots {
   topLeft: HTMLElement;
   topRight: HTMLElement;
   bottomLeft: HTMLElement;
+  bottomCenter: HTMLElement;
   bottomRight: HTMLElement;
 }
 
@@ -36,6 +35,7 @@ export function createTaskbar(slots: TaskbarSlots): Taskbar {
     "top-left": slots.topLeft,
     "top-right": slots.topRight,
     "bottom-left": slots.bottomLeft,
+    "bottom-center": slots.bottomCenter,
     "bottom-right": slots.bottomRight,
   };
 
@@ -44,6 +44,7 @@ export function createTaskbar(slots: TaskbarSlots): Taskbar {
     "top-left": 0,
     "top-right": 0,
     "bottom-left": 0,
+    "bottom-center": 0,
     "bottom-right": 0,
   };
 
@@ -56,6 +57,7 @@ export function createTaskbar(slots: TaskbarSlots): Taskbar {
   refreshVisibility("top-left");
   refreshVisibility("top-right");
   refreshVisibility("bottom-left");
+  refreshVisibility("bottom-center");
   refreshVisibility("bottom-right");
 
   function register(opts: TaskbarIconOptions): () => void {

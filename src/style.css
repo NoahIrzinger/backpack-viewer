@@ -687,6 +687,36 @@ body {
   justify-content: center;
 }
 
+/* --- Bottom Bar --- */
+
+.canvas-bottom-bar {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  pointer-events: none;
+  gap: 8px;
+}
+
+.canvas-bottom-left,
+.canvas-bottom-center,
+.canvas-bottom-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: auto;
+  position: relative;
+  z-index: var(--z-floating);
+}
+
+.canvas-bottom-center {
+  flex: 1;
+  justify-content: center;
+}
+
 /* --- Focus Indicator --- */
 
 .focus-indicator {
@@ -2071,6 +2101,12 @@ body {
     right: 8px;
   }
 
+  .canvas-bottom-bar {
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
+  }
+
   .tools-pane-content {
     top: 48px;
     left: 8px;
@@ -2302,11 +2338,6 @@ body {
 /* --- Path Bar --- */
 
 .path-bar {
-  position: absolute;
-  bottom: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: var(--z-canvas-overlay);
   display: flex;
   align-items: center;
   gap: 4px;
@@ -2429,14 +2460,11 @@ body {
   display: inline-flex;
 }
 
-/* Bottom slots float in the canvas corners. Hidden until populated so
-   empty corners don't take any space. The bottom-center area is left
-   clear for the path bar — see .path-bar above. */
+/* Bottom slots live inside bottom bar columns. Hidden until populated
+   so empty slots take no space. */
 .ext-slot-bottom-left,
+.ext-slot-bottom-center,
 .ext-slot-bottom-right {
-  position: absolute;
-  bottom: 16px;
-  z-index: var(--z-floating);
   display: none;
   flex-direction: row;
   align-items: center;
@@ -2446,18 +2474,10 @@ body {
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: 0 4px 16px var(--shadow);
-  pointer-events: auto;
-}
-
-.ext-slot-bottom-left {
-  left: 16px;
-}
-
-.ext-slot-bottom-right {
-  right: 16px;
 }
 
 .ext-slot-bottom-left.has-icons,
+.ext-slot-bottom-center.has-icons,
 .ext-slot-bottom-right.has-icons {
   display: flex;
 }
@@ -2487,6 +2507,7 @@ body {
 /* Inside the bottom floating pill, drop the per-icon shadow and
    border so the pill container's chrome wraps the group cleanly. */
 .ext-slot-bottom-left .extension-taskbar-icon,
+.ext-slot-bottom-center .extension-taskbar-icon,
 .ext-slot-bottom-right .extension-taskbar-icon {
   background: transparent;
   border-color: transparent;
@@ -2500,6 +2521,7 @@ body {
 }
 
 .ext-slot-bottom-left .extension-taskbar-icon:hover,
+.ext-slot-bottom-center .extension-taskbar-icon:hover,
 .ext-slot-bottom-right .extension-taskbar-icon:hover {
   border-color: var(--border);
 }
@@ -2576,8 +2598,7 @@ body {
    searching and selecting nodes while a panel is fullscreen. */
 #canvas-container.has-fullscreen-panel .canvas-top-left,
 #canvas-container.has-fullscreen-panel .canvas-top-right,
-#canvas-container.has-fullscreen-panel .ext-slot-bottom-left,
-#canvas-container.has-fullscreen-panel .ext-slot-bottom-right,
+#canvas-container.has-fullscreen-panel .canvas-bottom-bar,
 #canvas-container.has-fullscreen-panel .ext-slot-top-left,
 #canvas-container.has-fullscreen-panel .ext-slot-top-right {
   display: none;
@@ -2701,4 +2722,3 @@ body {
   display: flex;
   flex-direction: column;
 }
-

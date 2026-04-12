@@ -13,7 +13,7 @@ export function activate(viewer: ViewerExtensionAPI): void {
   viewer.registerTaskbarIcon({
     label: "Share",
     iconText: "\u2197",
-    position: "bottom-right",
+    position: "bottom-center",
     onClick: () => toggleSharePanel(viewer),
   });
 }

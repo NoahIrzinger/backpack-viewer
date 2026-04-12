@@ -72,6 +72,7 @@ export type TaskbarPosition =
   | "top-left"
   | "top-right"
   | "bottom-left"
+  | "bottom-center"
   | "bottom-right";
 
 export interface TaskbarIconOptions {
@@ -83,9 +84,6 @@ export interface TaskbarIconOptions {
    * Where to place the icon. Top slots nest into the viewer's existing
    * top bar (alongside zoom/theme controls); bottom slots float in the
    * canvas corners. Default: "bottom-right".
-   *
-   * The bottom-center area is reserved for the viewer's path bar — no
-   * slot lives there to avoid overlap.
    */
   position?: TaskbarPosition;
   /** Click handler — usually toggles a panel */
@@ -208,6 +206,7 @@ export interface ViewerHost {
     topLeft: HTMLElement;
     topRight: HTMLElement;
     bottomLeft: HTMLElement;
+    bottomCenter: HTMLElement;
     bottomRight: HTMLElement;
   };
 

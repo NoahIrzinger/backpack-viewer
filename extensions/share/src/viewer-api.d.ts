@@ -48,6 +48,7 @@ export type TaskbarPosition =
   | "top-left"
   | "top-right"
   | "bottom-left"
+  | "bottom-center"
   | "bottom-right";
 
 export interface TaskbarIconOptions {
