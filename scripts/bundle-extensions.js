@@ -38,7 +38,16 @@ for (const entry of entries) {
     bundled++;
     console.log(`[bundle-extensions] ${entry.name} bundled`);
   } catch (err) {
-    console.error(`[bundle-extensions] ${entry.name} failed:`, err.stderr?.toString() ?? err.message);
+    const msg = err.stderr?.toString() ?? err.message;
+    // Rollup native binaries may not be available when installed as a
+    // dependency on a different platform (e.g., npm prepare in CI).
+    // Skip bundling instead of failing — consumers build their own
+    // private extensions separately via their own build pipeline.
+    if (msg.includes("@rollup/rollup-") || msg.includes("Cannot find module")) {
+      console.warn(`[bundle-extensions] ${entry.name} skipped (Rollup native binary not available)`);
+      continue;
+    }
+    console.error(`[bundle-extensions] ${entry.name} failed:`, msg);
     process.exit(1);
   }
 }
