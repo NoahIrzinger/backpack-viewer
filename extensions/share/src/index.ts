@@ -1,14 +1,20 @@
 import type { ViewerExtensionAPI, MountedPanel, LearningGraphData } from "./viewer-api";
 
-const RELAY_URL = "https://app.backpackontology.com";
-const OAUTH_METADATA_URL = `${RELAY_URL}/.well-known/oauth-authorization-server`;
+const DEFAULT_RELAY_URL = "https://app.backpackontology.com";
+let RELAY_URL = DEFAULT_RELAY_URL;
+let OAUTH_METADATA_URL = `${RELAY_URL}/.well-known/oauth-authorization-server`;
 
 const BPAK_MAGIC = new Uint8Array([0x42, 0x50, 0x41, 0x4b]);
 const BPAK_VERSION = 0x01;
 
 let panel: MountedPanel | null = null;
 
-export function activate(viewer: ViewerExtensionAPI): void {
+export async function activate(viewer: ViewerExtensionAPI): Promise<void> {
+  const customRelay = await viewer.settings.get<string>("relay_url");
+  if (customRelay) {
+    RELAY_URL = customRelay;
+    OAUTH_METADATA_URL = `${RELAY_URL}/.well-known/oauth-authorization-server`;
+  }
   viewer.registerTaskbarIcon({
     label: "Share",
     iconText: "\u2197",
@@ -310,7 +316,7 @@ function renderQuotaExceeded(viewer: ViewerExtensionAPI, container: HTMLElement,
     publicBtn.disabled = true;
     publicBtn.textContent = "Syncing\u2026";
     try {
-      await doSyncAndShare(viewer, container, token, false);
+      await doSyncAndShare(viewer, container, token, false, "public");
     } catch (err) {
       publicBtn.disabled = false;
       publicBtn.textContent = "Share as public graph";
@@ -413,7 +419,7 @@ async function startOAuthFlow(viewer: ViewerExtensionAPI, container: HTMLElement
 
 async function doSyncAndShare(
   viewer: ViewerExtensionAPI, container: HTMLElement,
-  token: string, encrypted: boolean,
+  token: string, encrypted: boolean, visibility: "private" | "public" = "private",
 ): Promise<void> {
   const graph = viewer.getGraph();
   const graphName = viewer.getGraphName();
@@ -442,7 +448,8 @@ async function doSyncAndShare(
   const envelope = await buildEnvelope(graphName, payload, format, graph);
 
   // Step 2: Sync to cloud
-  const syncRes = await relayFetch(token, `${RELAY_URL}/api/graphs/${encodeURIComponent(graphName)}/sync`, {
+  const syncUrl = `${RELAY_URL}/api/graphs/${encodeURIComponent(graphName)}/sync${visibility === "public" ? "?visibility=public" : ""}`;
+  const syncRes = await relayFetch(token, syncUrl, {
     method: "PUT",
     headers: { "Content-Type": "application/octet-stream" },
     body: envelope as unknown as BodyInit,
@@ -557,7 +564,7 @@ function renderSuccess(container: HTMLElement, shareLink: string | null, encrypt
   if (encrypted) {
     const note = document.createElement("p");
     note.className = "share-note";
-    note.textContent = "The decryption key is in the link. Anyone with the full link can view. The server cannot read your data.";
+    note.textContent = "The decryption key is embedded in the link. Share the complete link \u2014 if the #k= part is removed, recipients won\u2019t be able to decrypt. The server cannot read your data.";
     w.appendChild(note);
   } else {
     const note = document.createElement("p");
