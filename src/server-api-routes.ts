@@ -496,21 +496,80 @@ export async function handleApiRequest(
       }
     }
 
-    // --- /oauth/callback (for Share extension OAuth popup) ---
+    // --- /oauth/callback (for Share extension OAuth popup or same-tab redirect) ---
     if (url.startsWith("/oauth/callback") && method === "GET") {
       res.writeHead(200, { "Content-Type": "text/html" });
       res.end(`<!DOCTYPE html><html><body><script>
-        var params = new URLSearchParams(window.location.search);
-        var code = params.get("code");
-        var state = params.get("state");
-        if (window.opener && code) {
-          window.opener.postMessage({
-            type: "backpack-oauth-callback",
-            code: code,
-            returnedState: state
-          }, "*");
-        }
-        window.close();
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  var code = params.get("code");
+  var state = params.get("state");
+
+  // Popup path: post back to opener and close
+  if (window.opener && code) {
+    window.opener.postMessage({
+      type: "backpack-oauth-callback",
+      code: code,
+      returnedState: state
+    }, "*");
+    window.close();
+    return;
+  }
+
+  if (!code) { document.body.textContent = "Missing authorization code."; return; }
+
+  // Same-tab redirect path: exchange token using stored PKCE params
+  var tokenEndpoint = sessionStorage.getItem("share_oauth_token_endpoint");
+  var clientId = sessionStorage.getItem("share_oauth_client_id");
+  var codeVerifier = sessionStorage.getItem("share_oauth_code_verifier");
+  var redirectUri = sessionStorage.getItem("share_oauth_redirect_uri");
+  var savedState = sessionStorage.getItem("share_oauth_state");
+
+  if (!tokenEndpoint || !clientId || !codeVerifier || !redirectUri) {
+    document.body.textContent = "OAuth session expired. Please try again from the viewer.";
+    return;
+  }
+  if (savedState && state !== savedState) {
+    document.body.textContent = "State mismatch. Please try again.";
+    return;
+  }
+
+  document.body.textContent = "Completing sign-in...";
+
+  fetch(tokenEndpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code: code,
+      redirect_uri: redirectUri,
+      client_id: clientId,
+      code_verifier: codeVerifier
+    }).toString()
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (!data.access_token) {
+      document.body.textContent = "Token exchange failed: " + JSON.stringify(data);
+      return;
+    }
+    return fetch("/api/extensions/share/settings/relay_token", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value: data.access_token })
+    }).then(function() {
+      sessionStorage.removeItem("share_oauth_token_endpoint");
+      sessionStorage.removeItem("share_oauth_client_id");
+      sessionStorage.removeItem("share_oauth_code_verifier");
+      sessionStorage.removeItem("share_oauth_redirect_uri");
+      sessionStorage.removeItem("share_oauth_state");
+      window.location.href = "/";
+    });
+  })
+  .catch(function(err) {
+    document.body.textContent = "Sign-in failed: " + err.message;
+  });
+})();
       </script></body></html>`);
       return true;
     }
