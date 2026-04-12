@@ -496,7 +496,7 @@ async function relayFetch(token: string, url: string, init: RequestInit = {}): P
 async function buildEnvelope(
   name: string, payload: Uint8Array, format: string, graph: LearningGraphData,
 ): Promise<Uint8Array> {
-  const hash = await crypto.subtle.digest("SHA-256", payload as ArrayBufferView);
+  const hash = await crypto.subtle.digest("SHA-256", payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength));
   const checksum = "sha256:" + Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
 
   // Collect node type names for dashboard stats
@@ -602,6 +602,6 @@ function generateCodeVerifier(): string {
 
 async function generateCodeChallenge(verifier: string): Promise<string> {
   const data = new TextEncoder().encode(verifier);
-  const digest = await crypto.subtle.digest("SHA-256", data as ArrayBufferView);
+  const digest = await crypto.subtle.digest("SHA-256", data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
   return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
