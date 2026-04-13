@@ -894,26 +894,35 @@ async function main() {
     }
   }
 
-  // Fetch backpack registry first so the picker shows the right active
-  // backpack from the initial render. Fire-and-forget ontology + remote
-  // list in parallel.
-  try {
-    const res = await fetch("/api/backpacks");
-    const list = await res.json();
-    sidebar.setBackpacks(list);
-  } catch {}
+  // Detect share mode early — skip all non-share API calls when viewing
+  // a shared graph (avoids CSP errors from auth-gated endpoints).
+  const isShareMode = new URLSearchParams(window.location.search).has("share");
 
-  // Fire-and-forget stale-version check. If we're running an out-of-date
-  // viewer (classic npx cache trap), show a banner in the sidebar with
-  // the exact command to unblock.
-  fetch("/api/version-check")
-    .then((r) => r.json())
-    .then((info: { current: string; latest: string | null; stale: boolean }) => {
-      if (info.stale && info.latest) {
-        sidebar.setStaleVersionBanner(info.current, info.latest);
-      }
-    })
-    .catch(() => {});
+  if (isShareMode) {
+    // Hide sidebar in share mode — recipients see only the graph
+    const sidebarEl = document.getElementById("sidebar");
+    if (sidebarEl) sidebarEl.style.display = "none";
+  }
+
+  if (!isShareMode) {
+    // Fetch backpack registry first so the picker shows the right active
+    // backpack from the initial render.
+    try {
+      const res = await fetch("/api/backpacks");
+      const list = await res.json();
+      sidebar.setBackpacks(list);
+    } catch {}
+
+    // Fire-and-forget stale-version check.
+    fetch("/api/version-check")
+      .then((r) => r.json())
+      .then((info: { current: string; latest: string | null; stale: boolean }) => {
+        if (info.stale && info.latest) {
+          sidebar.setStaleVersionBanner(info.current, info.latest);
+        }
+      })
+      .catch(() => {});
+  }
 
   // --- Share link detection ---
   // If URL has ?share=TOKEN, load from the relay instead of local API.
@@ -1052,10 +1061,14 @@ async function main() {
     subscribe: (event, cb) => eventBus.subscribe(event, cb),
   };
 
-  // Fire-and-forget — extension loading errors don't block startup
-  loadExtensions(host, panelMount).catch((err) => {
-    console.error("[backpack-viewer] extension loader failed:", err);
-  });
+  // Fire-and-forget — extension loading errors don't block startup.
+  // Skip in share mode — recipients don't need extensions and the
+  // /api/extensions endpoint is auth-gated.
+  if (!isShareMode) {
+    loadExtensions(host, panelMount).catch((err) => {
+      console.error("[backpack-viewer] extension loader failed:", err);
+    });
+  }
 
   // Keyboard shortcuts — dispatched via configurable bindings
   const actions: Record<string, () => void> = {
