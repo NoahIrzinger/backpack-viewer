@@ -166,11 +166,67 @@ async function renderSyncView(viewer: ViewerExtensionAPI, container: HTMLElement
 
   const existing = result.graphs.find(g => g.name === graphName);
 
-  if (existing) {
+  if (existing && existing.source === "cloud") {
+    renderCloudShare(viewer, container, token);
+  } else if (existing) {
     renderAlreadySynced(viewer, container, token, existing);
   } else {
     renderSyncForm(viewer, container, token);
   }
+}
+
+function renderCloudShare(viewer: ViewerExtensionAPI, container: HTMLElement, token: string): void {
+  const w = document.createElement("div");
+  w.className = "share-form";
+
+  const desc = document.createElement("p");
+  desc.className = "share-description";
+  desc.textContent = "Share this graph with a link. No sync needed \u2014 this graph lives in the cloud.";
+  w.appendChild(desc);
+
+  const shareBtn = document.createElement("button");
+  shareBtn.className = "share-cta-btn";
+  shareBtn.textContent = "Get share link";
+  shareBtn.addEventListener("click", async () => {
+    shareBtn.disabled = true;
+    shareBtn.textContent = "Creating link\u2026";
+    try {
+      await doShareOnly(viewer, container, token);
+    } catch (err) {
+      shareBtn.disabled = false;
+      shareBtn.textContent = "Get share link";
+      clearErrors(w);
+      appendError(w, (err as Error).message);
+    }
+  });
+  w.appendChild(shareBtn);
+
+  appendFooter(viewer, container, w);
+}
+
+async function doShareOnly(viewer: ViewerExtensionAPI, container: HTMLElement, token: string): Promise<void> {
+  const graphName = viewer.getGraphName();
+  if (!graphName) throw new Error("No graph loaded");
+
+  const shareRes = await relayFetch(token, `${RELAY_URL}/api/graphs/${encodeURIComponent(graphName)}/share`, {
+    method: "POST",
+  });
+
+  if (!shareRes.ok) {
+    if (shareRes.status === 401) {
+      await viewer.settings.remove("relay_token");
+      throw new Error("Session expired. Please sign in again.");
+    }
+    let errorMsg = `Share failed (${shareRes.status})`;
+    try {
+      const body = await shareRes.json();
+      if (body.error) errorMsg = body.error;
+    } catch { /* ignore */ }
+    throw new Error(errorMsg);
+  }
+
+  const shareData = (await shareRes.json()) as { token: string; url: string; expires_at?: string };
+  renderSuccess(container, shareData.url, false, shareData.expires_at);
 }
 
 function renderAlreadySynced(viewer: ViewerExtensionAPI, container: HTMLElement, token: string, graph: GraphSummary): void {
