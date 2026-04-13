@@ -930,33 +930,42 @@ async function main() {
       const dataRes = await fetch(`/v1/share/${shareToken}`);
       if (!dataRes.ok) throw new Error("Failed to download shared backpack");
 
-      // Parse the BPAK envelope (inline — avoids pulling Node.js deps from backpack-ontology)
-      const envelopeBytes = new Uint8Array(await dataRes.arrayBuffer());
-      if (envelopeBytes.length < 9 || envelopeBytes[0] !== 0x42 || envelopeBytes[1] !== 0x50 || envelopeBytes[2] !== 0x41 || envelopeBytes[3] !== 0x4B) {
-        throw new Error("Invalid share data: not a BPAK envelope");
-      }
-      const headerLen = new DataView(envelopeBytes.buffer, envelopeBytes.byteOffset, envelopeBytes.byteLength).getUint32(5, false);
-      if (9 + headerLen > envelopeBytes.length) throw new Error("Invalid envelope: header length exceeds data");
-      const envelopeHeader = JSON.parse(new TextDecoder().decode(envelopeBytes.slice(9, 9 + headerLen)));
-      const envelopePayload = envelopeBytes.slice(9 + headerLen);
-
+      // The share endpoint returns either:
+      // - Raw JSON (plaintext cloud-native graphs) with Content-Type: application/json
+      // - BPAK envelope (encrypted or synced graphs) with Content-Type: application/octet-stream
+      const contentType = dataRes.headers.get("Content-Type") || "";
       let graphData: LearningGraphData;
 
-      if (envelopeHeader.format !== "plaintext") {
-        // Encrypted — decrypt client-side using fragment key
-        const fragment = window.location.hash.slice(1);
-        const keyParam = new URLSearchParams(fragment).get("k") ?? fragment.split("k=")[1];
-        if (!keyParam) throw new Error("Missing decryption key in URL fragment");
-
-        const { Decrypter } = await import("age-encryption");
-        const secretKey = atob(keyParam.replace(/-/g, "+").replace(/_/g, "/"));
-
-        const d = new Decrypter();
-        d.addIdentity(secretKey);
-        const plaintext = await d.decrypt(envelopePayload);
-        graphData = JSON.parse(new TextDecoder().decode(plaintext));
+      if (contentType.includes("application/json")) {
+        // Raw JSON — plaintext graph data, no envelope wrapping
+        graphData = await dataRes.json() as LearningGraphData;
       } else {
-        graphData = JSON.parse(new TextDecoder().decode(envelopePayload));
+        // BPAK envelope — parse magic bytes, header, payload
+        const envelopeBytes = new Uint8Array(await dataRes.arrayBuffer());
+        if (envelopeBytes.length < 9 || envelopeBytes[0] !== 0x42 || envelopeBytes[1] !== 0x50 || envelopeBytes[2] !== 0x41 || envelopeBytes[3] !== 0x4B) {
+          throw new Error("Invalid share data");
+        }
+        const headerLen = new DataView(envelopeBytes.buffer, envelopeBytes.byteOffset, envelopeBytes.byteLength).getUint32(5, false);
+        if (9 + headerLen > envelopeBytes.length) throw new Error("Invalid envelope: header length exceeds data");
+        const envelopeHeader = JSON.parse(new TextDecoder().decode(envelopeBytes.slice(9, 9 + headerLen)));
+        const envelopePayload = envelopeBytes.slice(9 + headerLen);
+
+        if (envelopeHeader.format !== "plaintext") {
+          // Encrypted — decrypt client-side using fragment key
+          const fragment = window.location.hash.slice(1);
+          const keyParam = new URLSearchParams(fragment).get("k") ?? fragment.split("k=")[1];
+          if (!keyParam) throw new Error("Missing decryption key in URL fragment");
+
+          const { Decrypter } = await import("age-encryption");
+          const secretKey = atob(keyParam.replace(/-/g, "+").replace(/_/g, "/"));
+
+          const d = new Decrypter();
+          d.addIdentity(secretKey);
+          const plaintext = await d.decrypt(envelopePayload);
+          graphData = JSON.parse(new TextDecoder().decode(plaintext));
+        } else {
+          graphData = JSON.parse(new TextDecoder().decode(envelopePayload));
+        }
       }
 
       // Render in read-only mode
