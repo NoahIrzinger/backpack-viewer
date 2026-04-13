@@ -36,20 +36,26 @@ let activeIsRemote = false;
 async function main() {
   const canvasContainer = document.getElementById("canvas-container")!;
 
+  // --- Share mode detection (early, before any API calls) ---
+  const _shareMode = new URLSearchParams(window.location.search).has("share");
+  (window as unknown as Record<string, boolean>).__bpShareMode = _shareMode;
+
   // --- Load config ---
   const cfg = { ...defaultConfig } as typeof defaultConfig;
-  try {
-    const res = await fetch("/api/config");
-    if (res.ok) {
-      const user = await res.json();
-      Object.assign(cfg.keybindings, user.keybindings ?? {});
-      Object.assign(cfg.display, user.display ?? {});
-      Object.assign(cfg.layout, user.layout ?? {});
-      Object.assign(cfg.navigation, user.navigation ?? {});
-      Object.assign(cfg.lod, user.lod ?? {});
-      Object.assign(cfg.limits, user.limits ?? {});
-    }
-  } catch { /* use defaults */ }
+  if (!_shareMode) {
+    try {
+      const res = await fetch("/api/config");
+      if (res.ok) {
+        const user = await res.json();
+        Object.assign(cfg.keybindings, user.keybindings ?? {});
+        Object.assign(cfg.display, user.display ?? {});
+        Object.assign(cfg.layout, user.layout ?? {});
+        Object.assign(cfg.navigation, user.navigation ?? {});
+        Object.assign(cfg.lod, user.lod ?? {});
+        Object.assign(cfg.limits, user.limits ?? {});
+      }
+    } catch { /* use defaults */ }
+  }
   const bindings = cfg.keybindings as KeybindingMap;
 
   // --- Theme toggle (top-right of canvas) ---
@@ -896,15 +902,7 @@ async function main() {
 
   // Detect share mode early — skip all non-share API calls when viewing
   // a shared graph (avoids CSP errors from auth-gated endpoints).
-  const isShareMode = new URLSearchParams(window.location.search).has("share");
-
-  if (isShareMode) {
-    // Hide sidebar in share mode — recipients see only the graph
-    const sidebarEl = document.getElementById("sidebar");
-    if (sidebarEl) sidebarEl.style.display = "none";
-  }
-
-  if (!isShareMode) {
+  if (!_shareMode) {
     // Fetch backpack registry first so the picker shows the right active
     // backpack from the initial render.
     try {
@@ -1064,7 +1062,7 @@ async function main() {
   // Fire-and-forget — extension loading errors don't block startup.
   // Skip in share mode — recipients don't need extensions and the
   // /api/extensions endpoint is auth-gated.
-  if (!isShareMode) {
+  if (!_shareMode) {
     loadExtensions(host, panelMount).catch((err) => {
       console.error("[backpack-viewer] extension loader failed:", err);
     });

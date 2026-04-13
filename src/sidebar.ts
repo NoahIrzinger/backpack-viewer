@@ -307,14 +307,19 @@ export function initSidebar(
       list.replaceChildren();
       // Fetch all locks in one batch request, then distribute to items
       // as they render. One HTTP roundtrip per sidebar refresh, not N.
-      const lockBatchPromise = fetch("/api/locks")
-        .then((r) => r.json())
-        .catch(() => ({} as Record<string, { author?: string; lastActivity?: string } | null>));
+      const inShareMode = (window as unknown as Record<string, boolean>).__bpShareMode;
+      const lockBatchPromise = inShareMode
+        ? Promise.resolve({} as Record<string, { author?: string; lastActivity?: string } | null>)
+        : fetch("/api/locks")
+            .then((r) => r.json())
+            .catch(() => ({} as Record<string, { author?: string; lastActivity?: string } | null>));
 
-      const syncStatusPromise = fetch("/api/sync-status")
-        .then((r) => r.json())
-        .then((d: { synced: string[] }) => new Set(d.synced))
-        .catch(() => new Set<string>());
+      const syncStatusPromise = inShareMode
+        ? Promise.resolve(new Set<string>())
+        : fetch("/api/sync-status")
+            .then((r) => r.json())
+            .then((d: { synced: string[] }) => new Set(d.synced))
+            .catch(() => new Set<string>());
 
       items = summaries.map((s) => {
         const li = document.createElement("li");
