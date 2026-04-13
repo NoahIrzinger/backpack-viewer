@@ -506,6 +506,22 @@ body {
   color: #c08c00;
 }
 
+.sidebar-sync-badge {
+  font-size: 10px;
+  color: #5a9fd4;
+  display: none;
+  margin-top: 2px;
+}
+
+.sidebar-sync-badge.active {
+  display: block;
+}
+
+.sidebar-sync-badge.active::before {
+  content: "☁ ";
+  color: #5a9fd4;
+}
+
 .branch-picker {
   background: var(--bg-surface);
   border: 1px solid var(--border);

@@ -311,6 +311,11 @@ export function initSidebar(
         .then((r) => r.json())
         .catch(() => ({} as Record<string, { author?: string; lastActivity?: string } | null>));
 
+      const syncStatusPromise = fetch("/api/sync-status")
+        .then((r) => r.json())
+        .then((d: { synced: string[] }) => new Set(d.synced))
+        .catch(() => new Set<string>());
+
       items = summaries.map((s) => {
         const li = document.createElement("li");
         li.className = "ontology-item";
@@ -334,8 +339,6 @@ export function initSidebar(
         lockBadge.className = "sidebar-lock-badge";
         lockBadge.dataset.graph = s.name;
         lockBatchPromise.then((locks) => {
-          // Bail if this badge has been detached from the DOM (sidebar
-          // re-rendered before the batch resolved)
           if (!lockBadge.isConnected) return;
           const lock = locks[s.name];
           if (lock && typeof lock === "object" && lock.author) {
@@ -345,9 +348,23 @@ export function initSidebar(
           }
         });
 
+        // Sync badge — shows a cloud icon for graphs that have been synced
+        const syncBadge = document.createElement("span");
+        syncBadge.className = "sidebar-sync-badge";
+        syncBadge.dataset.graph = s.name;
+        syncStatusPromise.then((syncedSet) => {
+          if (!syncBadge.isConnected) return;
+          if (syncedSet.has(s.name)) {
+            syncBadge.textContent = "synced";
+            syncBadge.title = "This graph has been synced";
+            syncBadge.classList.add("active");
+          }
+        });
+
         li.appendChild(nameSpan);
         li.appendChild(statsSpan);
         li.appendChild(lockBadge);
+        li.appendChild(syncBadge);
         li.appendChild(branchSpan);
 
         if (cbs.onRename) {

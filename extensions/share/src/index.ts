@@ -433,7 +433,13 @@ async function doSyncAndShare(
 
   if (encrypted) {
     const age = await import("age-encryption");
-    const secretKey = await age.generateX25519Identity();
+    const keys = await viewer.settings.get<Record<string, string>>("keys") || {};
+    let secretKey = keys[graphName];
+    if (!secretKey) {
+      secretKey = await age.generateX25519Identity();
+      keys[graphName] = secretKey;
+      await viewer.settings.set("keys", keys);
+    }
     const publicKey = await age.identityToRecipient(secretKey);
     const e = new age.Encrypter();
     e.addRecipient(publicKey);
@@ -467,6 +473,13 @@ async function doSyncAndShare(
       if (body.error) errorMsg = body.error;
     } catch { /* ignore */ }
     throw new Error(errorMsg);
+  }
+
+  // Track this graph as synced (for sidebar indicator)
+  const synced = await viewer.settings.get<Record<string, boolean>>("synced") || {};
+  if (!synced[graphName]) {
+    synced[graphName] = true;
+    await viewer.settings.set("synced", synced);
   }
 
   // Step 3: Create share link

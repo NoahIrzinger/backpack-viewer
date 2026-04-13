@@ -9,6 +9,7 @@ import {
   unregisterBackpack,
 } from "backpack-ontology";
 import type { ViewerConfig } from "./config.js";
+import { readExtensionSettings } from "./server-extensions.js";
 
 /**
  * Shared API route handler. Both `bin/serve.js` (production raw http)
@@ -441,6 +442,24 @@ export async function handleApiRequest(
         sendJson(res, 200, lockInfo);
       } catch {
         sendJson(res, 200, null);
+      }
+      return true;
+    }
+
+    // --- /api/sync-status ---
+    if (url === "/api/sync-status" && method === "GET") {
+      try {
+        const settings = await readExtensionSettings("share");
+        const syncedMap = settings.synced;
+        const synced: string[] = [];
+        if (syncedMap && typeof syncedMap === "object" && !Array.isArray(syncedMap)) {
+          for (const name of Object.keys(syncedMap as Record<string, unknown>)) {
+            synced.push(name);
+          }
+        }
+        sendJson(res, 200, { synced });
+      } catch {
+        sendJson(res, 200, { synced: [] });
       }
       return true;
     }
