@@ -741,6 +741,67 @@ export async function handleApiRequest(
       return true;
     }
 
+    // --- /api/cloud-backpacks (proxy to relay for cloud visibility) ---
+    if (url === "/api/cloud-backpacks" && method === "GET") {
+      try {
+        const settings = await readExtensionSettings("share");
+        const token = settings.relay_token;
+        if (!token || typeof token !== "string") {
+          sendJson(res, 200, { authenticated: false, backpacks: [] });
+          return true;
+        }
+        const relayUrl = (settings.relay_url as string) || "https://app.backpackontology.com";
+        const relayRes = await fetch(`${relayUrl}/api/graphs`, {
+          headers: { "Authorization": `Bearer ${token}` },
+        });
+        if (!relayRes.ok) {
+          sendJson(res, 200, { authenticated: false, backpacks: [] });
+          return true;
+        }
+        const data = await relayRes.json();
+        // Decode email from JWT token (base64url decode middle segment)
+        let email: string | undefined;
+        try {
+          const parts = token.split(".");
+          if (parts.length === 3) {
+            const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
+            email = payload.email || payload.preferred_username;
+          }
+        } catch { /* ignore */ }
+        sendJson(res, 200, { authenticated: true, email, backpacks: Array.isArray(data) ? data : [] });
+      } catch {
+        sendJson(res, 200, { authenticated: false, backpacks: [] });
+      }
+      return true;
+    }
+
+    // --- /api/cloud-backpacks/{name} (proxy to load a cloud graph) ---
+    const cloudMatch = url.match(/^\/api\/cloud-backpacks\/(.+)$/);
+    if (cloudMatch && method === "GET") {
+      const name = decodeURIComponent(cloudMatch[1]);
+      try {
+        const settings = await readExtensionSettings("share");
+        const token = settings.relay_token;
+        if (!token || typeof token !== "string") {
+          sendErr(res, 401, "Not authenticated");
+          return true;
+        }
+        const relayUrl = (settings.relay_url as string) || "https://app.backpackontology.com";
+        const relayRes = await fetch(`${relayUrl}/api/graphs/${encodeURIComponent(name)}`, {
+          headers: { "Authorization": `Bearer ${token}` },
+        });
+        if (!relayRes.ok) {
+          sendErr(res, relayRes.status, "Failed to load cloud graph");
+          return true;
+        }
+        const data = await relayRes.json();
+        sendJson(res, 200, data);
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
     return false;
   } catch (err) {
     if (!res.headersSent) {

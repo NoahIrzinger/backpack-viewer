@@ -33,6 +33,7 @@ import "./style.css";
 let activeOntology = "";
 let currentData: LearningGraphData | null = null;
 let remoteNames = new Set<string>();
+let cloudNames = new Set<string>();
 let activeIsRemote = false;
 
 async function main() {
@@ -904,21 +905,27 @@ async function main() {
     focusHops?: number
   ) {
     activeOntology = name;
-    activeIsRemote = remoteNames.has(name);
+    activeIsRemote = remoteNames.has(name) || cloudNames.has(name);
     sidebar.setActive(name);
     infoPanel.hide();
     removeFocusIndicator();
     search.clear();
     undoHistory.clear();
-    currentData = activeIsRemote ? await loadRemote(name) : await loadOntology(name);
-    const autoParams = autoLayoutParams(currentData.nodes.length);
+    if (cloudNames.has(name)) {
+      const r = await fetch(`/api/cloud-backpacks/${encodeURIComponent(name)}`);
+      if (!r.ok) throw new Error(`Failed to load cloud graph: ${name}`);
+      currentData = await r.json() as LearningGraphData;
+    } else {
+      currentData = activeIsRemote ? await loadRemote(name) : await loadOntology(name);
+    }
+    const autoParams = autoLayoutParams(currentData!.nodes.length);
     setLayoutParams({
       spacing: Math.max(cfg.layout.spacing, autoParams.spacing),
       clusterStrength: Math.max(cfg.layout.clustering, autoParams.clusterStrength),
     });
-    canvas.loadGraph(currentData);
-    search.setLearningGraphData(currentData);
-    toolsPane.setData(currentData);
+    canvas.loadGraph(currentData!);
+    search.setLearningGraphData(currentData!);
+    toolsPane.setData(currentData!);
     emptyState.hide();
     updateUrl(name);
     publishBridgeState();
@@ -1070,6 +1077,17 @@ async function main() {
     sidebar.setKBDocuments(kbResult.documents);
     sidebar.setKBMounts(kbMounts);
     remoteNames = new Set(remotes.map((r) => r.name));
+
+    // Fetch cloud backpacks if user is SSO'd (non-blocking)
+    fetch("/api/cloud-backpacks").then(r => r.json()).then((cloud: { authenticated: boolean; email?: string; backpacks: { name: string; encrypted: boolean; nodeCount?: number; edgeCount?: number }[] }) => {
+      if (cloud.authenticated && cloud.backpacks.length > 0) {
+        // Only show cloud graphs that aren't already local
+        const localSet = new Set(summaries.map(s => s.name));
+        const cloudOnly = cloud.backpacks.filter(bp => !localSet.has(bp.name) && !bp.encrypted);
+        cloudNames = new Set(cloudOnly.map(bp => bp.name));
+        sidebar.setCloudBackpacks(cloudOnly, cloud.email);
+      }
+    }).catch(() => {});
 
     // Auto-load from URL hash, or first graph
     const initialUrl = parseUrl();

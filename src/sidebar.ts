@@ -270,6 +270,23 @@ export function initSidebar(
   graphsPane.appendChild(list);
   graphsPane.appendChild(remoteHeading);
   graphsPane.appendChild(remoteList);
+
+  // Cloud backpacks section (visible when SSO'd)
+  const cloudHeading = document.createElement("h3");
+  cloudHeading.className = "sidebar-section-heading";
+  cloudHeading.textContent = "CLOUD";
+  cloudHeading.hidden = true;
+  const cloudEmail = document.createElement("span");
+  cloudEmail.className = "sidebar-cloud-email";
+  cloudHeading.appendChild(cloudEmail);
+
+  const cloudList = document.createElement("ul");
+  cloudList.id = "cloud-list";
+  cloudList.className = "cloud-list";
+  cloudList.hidden = true;
+
+  graphsPane.appendChild(cloudHeading);
+  graphsPane.appendChild(cloudList);
   container.appendChild(graphsPane);
 
   // --- KB tab content ---
@@ -587,6 +604,44 @@ export function initSidebar(
       if (activeName) {
         this.setActive(activeName);
       }
+    },
+
+    setCloudBackpacks(backpacks: { name: string; encrypted: boolean; nodeCount?: number; edgeCount?: number }[], email?: string) {
+      cloudList.replaceChildren();
+      if (email) {
+        cloudEmail.textContent = ` \u2014 ${email}`;
+      }
+      for (const bp of backpacks) {
+        const li = document.createElement("li");
+        li.className = "ontology-item ontology-item-cloud";
+        li.dataset.name = bp.name;
+
+        const nameRow = document.createElement("div");
+        nameRow.className = "remote-name-row";
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "name";
+        nameSpan.textContent = bp.name;
+        const badge = document.createElement("span");
+        badge.className = "remote-badge";
+        badge.textContent = bp.encrypted ? "cloud \u00b7 encrypted" : "cloud";
+        nameRow.appendChild(nameSpan);
+        nameRow.appendChild(badge);
+
+        const statsSpan = document.createElement("span");
+        statsSpan.className = "stats";
+        if (bp.nodeCount != null) {
+          const tokens = estimateTokensFromCounts(bp.nodeCount, bp.edgeCount ?? 0);
+          statsSpan.textContent = `${bp.nodeCount} nodes, ${bp.edgeCount ?? 0} edges \u00b7 ~${formatTokenCount(tokens)}`;
+        }
+
+        li.appendChild(nameRow);
+        li.appendChild(statsSpan);
+        li.addEventListener("click", () => cbs.onSelect(bp.name));
+        cloudList.appendChild(li);
+      }
+      const visible = backpacks.length > 0;
+      cloudHeading.hidden = !visible;
+      cloudList.hidden = !visible;
     },
 
     setKBDocuments(documents: KBDocumentSummary[]) {
