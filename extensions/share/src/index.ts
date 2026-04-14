@@ -510,10 +510,22 @@ async function doSyncAndShare(
   const envelope = await buildEnvelope(graphName, payload, format, graph);
 
   // Step 2: Sync to cloud
+  const syncHeaders: Record<string, string> = { "Content-Type": "application/octet-stream" };
+  try {
+    const deviceRes = await fetch("/api/device-info");
+    if (deviceRes.ok) {
+      const device = (await deviceRes.json()) as { machineId: string; authorName: string; hostname: string; platform: string };
+      syncHeaders["X-Backpack-Device-Id"] = device.machineId;
+      syncHeaders["X-Backpack-Device-Name"] = device.authorName;
+      syncHeaders["X-Backpack-Device-Hostname"] = device.hostname;
+      syncHeaders["X-Backpack-Device-Platform"] = device.platform;
+    }
+  } catch { /* device info unavailable — sync without headers */ }
+
   const syncUrl = `${RELAY_URL}/api/graphs/${encodeURIComponent(graphName)}/sync${visibility === "public" ? "?visibility=public" : ""}`;
   const syncRes = await relayFetch(token, syncUrl, {
     method: "PUT",
-    headers: { "Content-Type": "application/octet-stream" },
+    headers: syncHeaders,
     body: envelope as unknown as BodyInit,
   });
 

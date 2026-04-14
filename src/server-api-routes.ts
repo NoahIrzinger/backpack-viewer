@@ -1,4 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import * as crypto from "node:crypto";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
   type JsonFileBackend,
   type RemoteRegistry,
@@ -7,6 +11,8 @@ import {
   setActiveBackpack,
   registerBackpack,
   unregisterBackpack,
+  configDir,
+  resolveAuthorName,
 } from "backpack-ontology";
 import type { ViewerConfig } from "./config.js";
 import { readExtensionSettings } from "./server-extensions.js";
@@ -103,6 +109,31 @@ export async function handleApiRequest(
     if (url === "/api/version-check" && method === "GET") {
       const result = await ctx.versionCheck();
       sendJson(res, 200, result);
+      return true;
+    }
+
+    // --- /api/device-info ---
+    if (url === "/api/device-info" && method === "GET") {
+      const idPath = path.join(configDir(), "machine-id");
+      let machineId: string;
+      try {
+        machineId = (await fs.readFile(idPath, "utf-8")).trim();
+      } catch {
+        const hash = crypto
+          .createHash("sha256")
+          .update(os.hostname() + os.platform())
+          .digest("hex")
+          .slice(0, 16);
+        await fs.mkdir(configDir(), { recursive: true });
+        await fs.writeFile(idPath, hash, "utf-8");
+        machineId = hash;
+      }
+      sendJson(res, 200, {
+        machineId,
+        authorName: resolveAuthorName(),
+        hostname: os.hostname(),
+        platform: os.platform(),
+      });
       return true;
     }
 
