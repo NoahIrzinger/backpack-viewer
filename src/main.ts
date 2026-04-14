@@ -1030,9 +1030,11 @@ async function main() {
           const d = new Decrypter();
           d.addIdentity(secretKey);
           const plaintext = await d.decrypt(envelopePayload);
-          graphData = JSON.parse(new TextDecoder().decode(plaintext));
+          const parsed = JSON.parse(new TextDecoder().decode(plaintext));
+          graphData = parsed.version === 2 ? parsed.graph : parsed;
         } else {
-          graphData = JSON.parse(new TextDecoder().decode(envelopePayload));
+          const parsed = JSON.parse(new TextDecoder().decode(envelopePayload));
+          graphData = parsed.version === 2 ? parsed.graph : parsed;
         }
       }
 
