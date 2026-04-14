@@ -404,7 +404,7 @@ function appendFooter(viewer: ViewerExtensionAPI, container: HTMLElement, w: HTM
         const graph = viewer.getGraph();
         const graphName = viewer.getGraphName();
         if (!graph || !graphName) throw new Error("No graph loaded");
-        await doSyncOnly(token, graph, graphName, true);
+        await doSyncOnly(token, graph, graphName, true, viewer);
         syncOnlyBtn.textContent = "Synced!";
         setTimeout(() => { syncOnlyBtn.textContent = "Sync without sharing"; syncOnlyBtn.disabled = false; }, 2000);
       } catch (err) {
@@ -438,6 +438,7 @@ function appendFooter(viewer: ViewerExtensionAPI, container: HTMLElement, w: HTM
 
 async function doSyncOnly(
   token: string, graph: LearningGraphData, graphName: string, encrypted: boolean,
+  viewer?: ViewerExtensionAPI,
 ): Promise<void> {
   const graphJSON = new TextEncoder().encode(JSON.stringify(graph));
   let payload: Uint8Array;
@@ -445,7 +446,20 @@ async function doSyncOnly(
 
   if (encrypted) {
     const age = await import("age-encryption");
-    const secretKey = await age.generateX25519Identity();
+    // Reuse existing key or generate and persist a new one
+    let secretKey: string;
+    if (viewer) {
+      const keys = await viewer.settings.get<Record<string, string>>("keys") || {};
+      if (keys[graphName]) {
+        secretKey = keys[graphName];
+      } else {
+        secretKey = await age.generateX25519Identity();
+        keys[graphName] = secretKey;
+        await viewer.settings.set("keys", keys);
+      }
+    } else {
+      secretKey = await age.generateX25519Identity();
+    }
     const publicKey = await age.identityToRecipient(secretKey);
     const e = new age.Encrypter();
     e.addRecipient(publicKey);
