@@ -111,6 +111,7 @@ function renderTokenInput(viewer: ViewerExtensionAPI, container: HTMLElement): v
     const val = input.value.trim();
     if (!val) return;
     await viewer.settings.set("relay_token", val);
+    window.dispatchEvent(new CustomEvent("backpack-auth-changed"));
     renderSharePanel(viewer, container);
   });
   row.appendChild(saveBtn);
@@ -429,6 +430,7 @@ function appendFooter(viewer: ViewerExtensionAPI, container: HTMLElement, w: HTM
   logoutBtn.textContent = "Sign out";
   logoutBtn.addEventListener("click", async () => {
     await viewer.settings.remove("relay_token");
+    window.dispatchEvent(new CustomEvent("backpack-auth-changed"));
     renderSharePanel(viewer, container);
   });
   footer.appendChild(logoutBtn);
@@ -605,6 +607,7 @@ async function startOAuthFlow(viewer: ViewerExtensionAPI, container: HTMLElement
           return;
         }
         await viewer.settings.set("relay_token", bearerToken);
+        window.dispatchEvent(new CustomEvent("backpack-auth-changed"));
         renderSharePanel(viewer, container);
       } catch (err) {
         appendError(container, `Token exchange failed: ${(err as Error).message}`);

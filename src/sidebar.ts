@@ -34,6 +34,9 @@ export interface SidebarCallbacks {
   onKBMountAdd?: (name: string, path: string, writable: boolean) => void;
   onKBMountRemove?: (name: string) => void;
   onKBMountEdit?: (name: string, newPath: string) => void;
+  onSignIn?: () => void;
+  onSignOut?: () => void;
+  onSyncGraph?: (name: string) => void;
 }
 
 export function initSidebar(
@@ -244,6 +247,43 @@ export function initSidebar(
     ]),
   );
   expandBtn.addEventListener("click", toggleSidebar);
+
+  // --- Auth widget (sign-in / email indicator) ---
+  const authWidget = document.createElement("div");
+  authWidget.className = "sidebar-auth-widget";
+  authWidget.hidden = true;
+  const authContent = document.createElement("span");
+  authWidget.appendChild(authContent);
+  container.appendChild(authWidget);
+
+  let isAuthenticated = false;
+
+  function renderAuthWidget(auth: { authenticated: boolean; email?: string }) {
+    isAuthenticated = auth.authenticated;
+    authWidget.hidden = false;
+    authContent.replaceChildren();
+    if (auth.authenticated && auth.email) {
+      const emailSpan = document.createElement("span");
+      emailSpan.className = "sidebar-auth-email";
+      emailSpan.textContent = auth.email;
+      authContent.appendChild(emailSpan);
+      const signOutBtn = document.createElement("button");
+      signOutBtn.className = "sidebar-auth-link";
+      signOutBtn.textContent = "Sign out";
+      signOutBtn.addEventListener("click", () => cbs.onSignOut?.());
+      authContent.appendChild(signOutBtn);
+    } else {
+      const signInBtn = document.createElement("button");
+      signInBtn.className = "sidebar-auth-link sidebar-auth-signin";
+      signInBtn.textContent = "Sign in to sync";
+      signInBtn.addEventListener("click", () => cbs.onSignIn?.());
+      authContent.appendChild(signInBtn);
+    }
+    // Show/hide sync buttons on graph items based on auth state
+    for (const btn of container.querySelectorAll(".sidebar-sync-btn")) {
+      (btn as HTMLElement).hidden = !auth.authenticated;
+    }
+  }
 
   // --- Tab bar: Graphs | Knowledge Base ---
   const tabBar = document.createElement("div");
@@ -491,10 +531,32 @@ export function initSidebar(
           }
         });
 
+        // Sync-to-cloud button (visible when authenticated)
+        const syncBtn = document.createElement("button");
+        syncBtn.className = "sidebar-sync-btn";
+        syncBtn.hidden = !isAuthenticated;
+        syncBtn.title = "Sync to cloud";
+        syncBtn.textContent = "\u2601"; // cloud icon
+        syncBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (syncBtn.classList.contains("syncing")) return;
+          syncBtn.classList.add("syncing");
+          syncBtn.textContent = "\u23F3"; // hourglass
+          cbs.onSyncGraph?.(s.name);
+          // The caller should update sync state via setSyncResult()
+          setTimeout(() => {
+            if (syncBtn.classList.contains("syncing")) {
+              syncBtn.classList.remove("syncing");
+              syncBtn.textContent = "\u2601";
+            }
+          }, 15000); // timeout fallback
+        });
+
         li.appendChild(nameSpan);
         li.appendChild(statsSpan);
         li.appendChild(lockBadge);
         li.appendChild(syncBadge);
+        li.appendChild(syncBtn);
         li.appendChild(branchSpan);
 
         if (cbs.onRename) {
@@ -820,6 +882,19 @@ export function initSidebar(
       }
 
       li.appendChild(snippetList);
+    },
+
+    setAuthStatus(auth: { authenticated: boolean; email?: string }) {
+      renderAuthWidget(auth);
+    },
+
+    setSyncResult(graphName: string, success: boolean) {
+      const btn = list.querySelector(`.ontology-item[data-name="${CSS.escape(graphName)}"] .sidebar-sync-btn`) as HTMLElement | null;
+      if (btn) {
+        btn.classList.remove("syncing");
+        btn.textContent = success ? "\u2714" : "\u2718"; // check or cross
+        setTimeout(() => { btn.textContent = "\u2601"; }, 3000);
+      }
     },
 
     toggle: toggleSidebar,

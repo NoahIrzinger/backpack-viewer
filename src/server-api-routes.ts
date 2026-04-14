@@ -20,7 +20,7 @@ import {
   resolveAuthorName,
 } from "backpack-ontology";
 import type { ViewerConfig } from "./config.js";
-import { readExtensionSettings } from "./server-extensions.js";
+import { readExtensionSettings, writeExtensionSetting } from "./server-extensions.js";
 
 /**
  * Shared API route handler. Both `bin/serve.js` (production raw http)
@@ -796,6 +796,139 @@ export async function handleApiRequest(
         }
         const data = await relayRes.json();
         sendJson(res, 200, data);
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    // --- /api/auth/status (lightweight auth check — JWT decode only, no relay call) ---
+    if (url === "/api/auth/status" && method === "GET") {
+      try {
+        const settings = await readExtensionSettings("share");
+        const token = settings.relay_token;
+        if (!token || typeof token !== "string") {
+          sendJson(res, 200, { authenticated: false });
+          return true;
+        }
+        let email: string | undefined;
+        let valid = true;
+        try {
+          const parts = token.split(".");
+          if (parts.length === 3) {
+            const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString());
+            email = payload.email || payload.preferred_username;
+            if (payload.exp && payload.exp * 1000 < Date.now()) valid = false;
+          } else {
+            valid = false;
+          }
+        } catch { valid = false; }
+        sendJson(res, 200, { authenticated: valid, email: valid ? email : undefined });
+      } catch {
+        sendJson(res, 200, { authenticated: false });
+      }
+      return true;
+    }
+
+    // --- /api/cloud-sync/{name} (server-side sync proxy) ---
+    const syncMatch = url.match(/^\/api\/cloud-sync\/([^?]+)/);
+    if (syncMatch && method === "PUT") {
+      const name = decodeURIComponent(syncMatch[1]);
+      try {
+        const settings = await readExtensionSettings("share");
+        const token = settings.relay_token;
+        if (!token || typeof token !== "string") {
+          sendErr(res, 401, "Not authenticated — sign in first");
+          return true;
+        }
+        const relayUrl = (settings.relay_url as string) || "https://app.backpackontology.com";
+        const body = await readBody(req);
+        const graphJSON = new TextEncoder().encode(body);
+
+        const params = new URLSearchParams(url.split("?")[1] || "");
+        const wantEncrypted = params.get("encrypted") !== "false";
+
+        let payload: Uint8Array;
+        let format: string;
+
+        if (wantEncrypted) {
+          const age = await import("age-encryption");
+          const keys = ((settings.keys as Record<string, string>) || {});
+          let secretKey = keys[name];
+          if (!secretKey) {
+            secretKey = await age.generateX25519Identity();
+            keys[name] = secretKey;
+            await writeExtensionSetting("share", "keys", keys);
+          }
+          const publicKey = await age.identityToRecipient(secretKey);
+          const e = new age.Encrypter();
+          e.addRecipient(publicKey);
+          payload = await e.encrypt(graphJSON);
+          format = "age-v1";
+        } else {
+          payload = graphJSON;
+          format = "plaintext";
+        }
+
+        // Build BPAK envelope
+        const graph = JSON.parse(body);
+        const typeSet = new Set<string>();
+        for (const n of (graph.nodes || [])) typeSet.add(n.type);
+        const checksumBuf = await crypto.subtle.digest("SHA-256", new Uint8Array(payload).buffer as ArrayBuffer);
+        const checksum = "sha256:" + Array.from(new Uint8Array(checksumBuf)).map(b => b.toString(16).padStart(2, "0")).join("");
+        const header = JSON.stringify({
+          format,
+          created_at: new Date().toISOString(),
+          backpack_name: name,
+          graph_count: 1,
+          checksum,
+          node_count: (graph.nodes || []).length,
+          edge_count: (graph.edges || []).length,
+          node_types: Array.from(typeSet),
+        });
+        const headerBytes = new TextEncoder().encode(header);
+        const headerLenBuf = new ArrayBuffer(4);
+        new DataView(headerLenBuf).setUint32(0, headerBytes.length, false);
+        const envelope = new Uint8Array(4 + 1 + 4 + headerBytes.length + payload.length);
+        let off = 0;
+        envelope.set(new Uint8Array([0x42, 0x50, 0x41, 0x4b]), off); off += 4;
+        envelope[off] = 0x01; off += 1;
+        envelope.set(new Uint8Array(headerLenBuf), off); off += 4;
+        envelope.set(headerBytes, off); off += headerBytes.length;
+        envelope.set(payload, off);
+
+        // Proxy to relay
+        const syncHeaders: Record<string, string> = {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/octet-stream",
+        };
+        try {
+          const authorName = await resolveAuthorName();
+          syncHeaders["X-Backpack-Device-Name"] = authorName;
+          syncHeaders["X-Backpack-Device-Hostname"] = os.hostname();
+          syncHeaders["X-Backpack-Device-Platform"] = os.platform();
+        } catch { /* device info unavailable */ }
+
+        const relayRes = await fetch(`${relayUrl}/api/graphs/${encodeURIComponent(name)}/sync`, {
+          method: "PUT",
+          headers: syncHeaders,
+          body: envelope,
+        });
+
+        if (!relayRes.ok) {
+          let msg = `Sync failed (${relayRes.status})`;
+          try { const b = await relayRes.json(); if (b.error) msg = b.error; } catch {}
+          sendErr(res, relayRes.status, msg);
+          return true;
+        }
+
+        // Mark as synced in extension settings
+        const synced = ((settings.synced as Record<string, boolean>) || {});
+        synced[name] = true;
+        await writeExtensionSetting("share", "synced", synced);
+
+        const result = await relayRes.json();
+        sendJson(res, 200, result);
       } catch (err) {
         sendErr(res, 500, (err as Error).message);
       }

@@ -709,6 +709,38 @@ async function main() {
         }
         await refreshKB();
       },
+      onSignIn: () => {
+        const shareBtn = document.querySelector('.extension-taskbar-icon[aria-label="Share"]') as HTMLElement | null;
+        if (shareBtn) {
+          shareBtn.click();
+        } else {
+          showToast("Enable the Share extension to sign in");
+        }
+      },
+      onSignOut: async () => {
+        await fetch("/api/extensions/share/settings/relay_token", { method: "DELETE" });
+        window.dispatchEvent(new CustomEvent("backpack-auth-changed"));
+      },
+      onSyncGraph: async (graphName) => {
+        try {
+          const data = graphName === activeOntology && currentData
+            ? currentData
+            : await loadOntology(graphName);
+          const res = await fetch(`/api/cloud-sync/${encodeURIComponent(graphName)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          });
+          sidebar.setSyncResult(graphName, res.ok);
+          if (!res.ok) {
+            const d = await res.json().catch(() => ({ error: "Sync failed" }));
+            showToast(d.error ?? "Sync failed");
+          }
+        } catch (err) {
+          sidebar.setSyncResult(graphName, false);
+          showToast((err as Error).message);
+        }
+      },
     }
   );
 
@@ -1078,16 +1110,29 @@ async function main() {
     sidebar.setKBMounts(kbMounts);
     remoteNames = new Set(remotes.map((r) => r.name));
 
-    // Fetch cloud backpacks if user is SSO'd (non-blocking)
-    fetch("/api/cloud-backpacks").then(r => r.json()).then((cloud: { authenticated: boolean; email?: string; backpacks: { name: string; encrypted: boolean; nodeCount?: number; edgeCount?: number }[] }) => {
-      if (cloud.authenticated && cloud.backpacks.length > 0) {
-        // Only show cloud graphs that aren't already local
-        const localSet = new Set(summaries.map(s => s.name));
-        const cloudOnly = cloud.backpacks.filter(bp => !localSet.has(bp.name) && !bp.encrypted);
-        cloudNames = new Set(cloudOnly.map(bp => bp.name));
-        sidebar.setCloudBackpacks(cloudOnly, cloud.email);
-      }
-    }).catch(() => {});
+    // Check auth status and fetch cloud backpacks (non-blocking)
+    async function refreshAuthAndCloud() {
+      try {
+        const auth = await fetch("/api/auth/status").then(r => r.json()) as { authenticated: boolean; email?: string };
+        sidebar.setAuthStatus(auth);
+        if (auth.authenticated) {
+          const cloud = await fetch("/api/cloud-backpacks").then(r => r.json()) as { authenticated: boolean; email?: string; backpacks: { name: string; encrypted: boolean; nodeCount?: number; edgeCount?: number }[] };
+          if (cloud.backpacks.length > 0) {
+            const localSet = new Set(summaries.map(s => s.name));
+            const cloudOnly = cloud.backpacks.filter(bp => !localSet.has(bp.name) && !bp.encrypted);
+            cloudNames = new Set(cloudOnly.map(bp => bp.name));
+            sidebar.setCloudBackpacks(cloudOnly, cloud.email);
+          }
+        } else {
+          cloudNames = new Set();
+          sidebar.setCloudBackpacks([]);
+        }
+      } catch { /* auth check unavailable */ }
+    }
+    refreshAuthAndCloud();
+
+    // Re-check auth when the share extension signs in/out
+    window.addEventListener("backpack-auth-changed", () => refreshAuthAndCloud());
 
     // Auto-load from URL hash, or first graph
     const initialUrl = parseUrl();

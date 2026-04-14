@@ -819,6 +819,83 @@ body {
   color: #5a9fd4;
 }
 
+.sidebar-auth-widget {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.sidebar-auth-widget > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.sidebar-auth-email {
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-auth-link {
+  background: none;
+  border: none;
+  color: var(--accent, #c17856);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  white-space: nowrap;
+}
+
+.sidebar-auth-link:hover {
+  text-decoration: underline;
+}
+
+.sidebar-auth-signin {
+  width: 100%;
+  text-align: left;
+}
+
+.sidebar-sync-btn {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.ontology-item {
+  position: relative;
+}
+
+.ontology-item:hover .sidebar-sync-btn {
+  opacity: 1;
+}
+
+.sidebar-sync-btn.syncing {
+  opacity: 1;
+  cursor: wait;
+}
+
+.sidebar-sync-btn:hover {
+  background: var(--bg-hover);
+}
+
 .branch-picker {
   background: var(--bg-surface);
   border: 1px solid var(--border);
