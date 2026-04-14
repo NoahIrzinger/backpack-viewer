@@ -182,7 +182,7 @@ if (hasDistBuild) {
     "script-src 'self'",
     "style-src 'self'",
     "img-src 'self' data:",
-    "connect-src 'self' https://app.backpackontology.com",
+    "connect-src 'self' https://app.backpackontology.com https://*.ciamlogin.com",
     "object-src 'none'",
     "base-uri 'self'",
     "frame-ancestors 'none'",
