@@ -204,7 +204,7 @@ function renderCloudShare(viewer: ViewerExtensionAPI, container: HTMLElement, to
   });
   w.appendChild(shareBtn);
 
-  appendFooter(viewer, container, w);
+  appendFooter(viewer, container, w, token);
 }
 
 async function doShareOnly(viewer: ViewerExtensionAPI, container: HTMLElement, token: string): Promise<void> {
@@ -277,7 +277,7 @@ function renderAlreadySynced(viewer: ViewerExtensionAPI, container: HTMLElement,
   dashLink.textContent = "Open dashboard";
   w.appendChild(dashLink);
 
-  appendFooter(viewer, container, w);
+  appendFooter(viewer, container, w, token);
 }
 
 function renderSyncForm(viewer: ViewerExtensionAPI, container: HTMLElement, token: string): void {
@@ -316,7 +316,7 @@ function renderSyncForm(viewer: ViewerExtensionAPI, container: HTMLElement, toke
   freeNote.textContent = "Your first encrypted graph is free. Data is encrypted before upload\u200a\u2014\u200awe can\u2019t read it.";
   w.appendChild(freeNote);
 
-  appendFooter(viewer, container, w);
+  appendFooter(viewer, container, w, token);
 }
 
 function renderQuotaExceeded(viewer: ViewerExtensionAPI, container: HTMLElement, token: string): void {
@@ -385,12 +385,45 @@ function renderQuotaExceeded(viewer: ViewerExtensionAPI, container: HTMLElement,
   });
   w.appendChild(publicBtn);
 
-  appendFooter(viewer, container, w);
+  appendFooter(viewer, container, w, token);
 }
 
-function appendFooter(viewer: ViewerExtensionAPI, container: HTMLElement, w: HTMLElement): void {
+function appendFooter(viewer: ViewerExtensionAPI, container: HTMLElement, w: HTMLElement, token?: string): void {
   const footer = document.createElement("div");
   footer.className = "share-footer";
+
+  if (token) {
+    // Sync-only button (no share link)
+    const syncOnlyBtn = document.createElement("button");
+    syncOnlyBtn.className = "share-token-link";
+    syncOnlyBtn.textContent = "Sync without sharing";
+    syncOnlyBtn.addEventListener("click", async () => {
+      syncOnlyBtn.disabled = true;
+      syncOnlyBtn.textContent = "Syncing\u2026";
+      try {
+        const graph = viewer.getGraph();
+        const graphName = viewer.getGraphName();
+        if (!graph || !graphName) throw new Error("No graph loaded");
+        await doSyncOnly(token, graph, graphName, true);
+        syncOnlyBtn.textContent = "Synced!";
+        setTimeout(() => { syncOnlyBtn.textContent = "Sync without sharing"; syncOnlyBtn.disabled = false; }, 2000);
+      } catch (err) {
+        syncOnlyBtn.textContent = (err as Error).message;
+        syncOnlyBtn.disabled = false;
+      }
+    });
+    footer.appendChild(syncOnlyBtn);
+
+    // Unencrypted sync (dangerous, gated)
+    const unencBtn = document.createElement("button");
+    unencBtn.className = "share-token-link share-danger-link";
+    unencBtn.textContent = "Sync unencrypted";
+    unencBtn.addEventListener("click", () => {
+      renderUnencryptedConfirm(viewer, container, token);
+    });
+    footer.appendChild(unencBtn);
+  }
+
   const logoutBtn = document.createElement("button");
   logoutBtn.className = "share-token-link";
   logoutBtn.textContent = "Sign out";
@@ -400,6 +433,102 @@ function appendFooter(viewer: ViewerExtensionAPI, container: HTMLElement, w: HTM
   });
   footer.appendChild(logoutBtn);
   w.appendChild(footer);
+  container.replaceChildren(w);
+}
+
+async function doSyncOnly(
+  token: string, graph: LearningGraphData, graphName: string, encrypted: boolean,
+): Promise<void> {
+  const graphJSON = new TextEncoder().encode(JSON.stringify(graph));
+  let payload: Uint8Array;
+  let format: string;
+
+  if (encrypted) {
+    const age = await import("age-encryption");
+    const secretKey = await age.generateX25519Identity();
+    const publicKey = await age.identityToRecipient(secretKey);
+    const e = new age.Encrypter();
+    e.addRecipient(publicKey);
+    payload = await e.encrypt(graphJSON);
+    format = "age-v1";
+  } else {
+    payload = graphJSON;
+    format = "plaintext";
+  }
+
+  const envelope = await buildEnvelope(graphName, payload, format, graph);
+  const syncUrl = `${RELAY_URL}/api/graphs/${encodeURIComponent(graphName)}/sync`;
+  const syncRes = await relayFetch(token, syncUrl, {
+    method: "PUT",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: envelope as unknown as BodyInit,
+  });
+  if (!syncRes.ok) {
+    let msg = `Sync failed (${syncRes.status})`;
+    try { const b = await syncRes.json(); if (b.error) msg = b.error; } catch {}
+    throw new Error(msg);
+  }
+}
+
+function renderUnencryptedConfirm(viewer: ViewerExtensionAPI, container: HTMLElement, token: string): void {
+  const graphName = viewer.getGraphName() || "";
+  const w = document.createElement("div");
+  w.className = "share-form";
+
+  const h = document.createElement("h4");
+  h.textContent = "Sync without encryption";
+  w.appendChild(h);
+
+  const warn = document.createElement("p");
+  warn.className = "share-warning";
+  warn.textContent = "Your graph data will be stored unencrypted on the server. The server and administrators can read it. This makes the graph viewable in the web app.";
+  w.appendChild(warn);
+
+  const label = document.createElement("p");
+  label.className = "share-description";
+  label.textContent = `Type "${graphName}" to confirm:`;
+  w.appendChild(label);
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "share-input";
+  input.placeholder = graphName;
+  w.appendChild(input);
+
+  const row = document.createElement("div");
+  row.className = "share-btn-row";
+  const confirmBtn = document.createElement("button");
+  confirmBtn.className = "share-btn-primary share-btn-danger";
+  confirmBtn.textContent = "Sync unencrypted";
+  confirmBtn.disabled = true;
+  input.addEventListener("input", () => {
+    confirmBtn.disabled = input.value !== graphName;
+  });
+  confirmBtn.addEventListener("click", async () => {
+    const graph = viewer.getGraph();
+    if (!graph || !graphName) return;
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Syncing\u2026";
+    try {
+      await doSyncOnly(token, graph, graphName, false);
+      confirmBtn.textContent = "Done!";
+      setTimeout(() => renderSharePanel(viewer, container), 1500);
+    } catch (err) {
+      confirmBtn.textContent = "Sync unencrypted";
+      confirmBtn.disabled = false;
+      clearErrors(w);
+      appendError(w, (err as Error).message);
+    }
+  });
+  row.appendChild(confirmBtn);
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "share-btn-secondary";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.addEventListener("click", () => renderSharePanel(viewer, container));
+  row.appendChild(cancelBtn);
+  w.appendChild(row);
+
   container.replaceChildren(w);
 }
 

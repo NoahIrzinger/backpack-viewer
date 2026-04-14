@@ -190,6 +190,18 @@
   margin-top: 16px;
   padding-top: 8px;
   border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.share-danger-link {
+  color: #d66 !important;
+}
+
+.share-btn-danger {
+  background: #633 !important;
+  border-color: #844 !important;
 }
 
 .share-divider {
