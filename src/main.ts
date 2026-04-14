@@ -1117,15 +1117,15 @@ async function main() {
         sidebar.setAuthStatus(auth);
         if (auth.authenticated) {
           const cloud = await fetch("/api/cloud-backpacks").then(r => r.json()) as { authenticated: boolean; email?: string; backpacks: { name: string; encrypted: boolean; nodeCount?: number; edgeCount?: number }[] };
-          if (cloud.backpacks.length > 0) {
-            const localSet = new Set(summaries.map(s => s.name));
-            const cloudOnly = cloud.backpacks.filter(bp => !localSet.has(bp.name) && !bp.encrypted);
-            cloudNames = new Set(cloudOnly.map(bp => bp.name));
-            sidebar.setCloudBackpacks(cloudOnly, cloud.email);
-          }
+          const localSet = new Set(summaries.map(s => s.name));
+          const cloudOnly = cloud.backpacks.filter(bp => !localSet.has(bp.name) && !bp.encrypted);
+          cloudNames = new Set(cloudOnly.map(bp => bp.name));
+          sidebar.setCloudBackpacks(cloudOnly, cloud.email);
+          sidebar.setCloudBackpacksInPicker(cloudOnly.map(bp => bp.name));
         } else {
           cloudNames = new Set();
           sidebar.setCloudBackpacks([]);
+          sidebar.setCloudBackpacksInPicker([]);
         }
       } catch { /* auth check unavailable */ }
     }

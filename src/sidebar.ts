@@ -180,6 +180,7 @@ export function initSidebar(
 
   let currentBackpacks: BackpackSummary[] = [];
   let currentActiveBackpack: BackpackSummary | null = null;
+  let cloudPickerNames: string[] = [];
 
   function renderPickerDropdown() {
     pickerDropdown.replaceChildren();
@@ -214,6 +215,41 @@ export function initSidebar(
         }
       });
       pickerDropdown.appendChild(item);
+    }
+
+    // Cloud backpacks section (if authenticated and any exist)
+    if (cloudPickerNames.length > 0) {
+      const cloudDivider = document.createElement("div");
+      cloudDivider.className = "backpack-picker-divider";
+      pickerDropdown.appendChild(cloudDivider);
+
+      const cloudLabel = document.createElement("span");
+      cloudLabel.className = "backpack-picker-section-label";
+      cloudLabel.textContent = "CLOUD";
+      pickerDropdown.appendChild(cloudLabel);
+
+      for (const cloudName of cloudPickerNames) {
+        const cloudItem = document.createElement("button");
+        cloudItem.className = "backpack-picker-item backpack-picker-cloud";
+        cloudItem.type = "button";
+
+        const cloudIcon = document.createElement("span");
+        cloudIcon.className = "backpack-picker-item-dot";
+        cloudIcon.textContent = "\u2601";
+
+        const cloudNameEl = document.createElement("span");
+        cloudNameEl.className = "backpack-picker-item-name";
+        cloudNameEl.textContent = cloudName;
+
+        cloudItem.appendChild(cloudIcon);
+        cloudItem.appendChild(cloudNameEl);
+        cloudItem.addEventListener("click", (e) => {
+          e.stopPropagation();
+          closePicker();
+          cbs.onSelect(cloudName);
+        });
+        pickerDropdown.appendChild(cloudItem);
+      }
     }
 
     // Separator + "Add new backpack..." action
@@ -279,10 +315,84 @@ export function initSidebar(
       signInBtn.addEventListener("click", () => cbs.onSignIn?.());
       authContent.appendChild(signInBtn);
     }
-    // Show/hide sync buttons on graph items based on auth state
-    for (const btn of container.querySelectorAll(".sidebar-sync-btn")) {
-      (btn as HTMLElement).hidden = !auth.authenticated;
+  }
+
+  // --- Shared context menu for graph items ---
+  const itemMenu = document.createElement("div");
+  itemMenu.className = "sidebar-item-menu";
+  itemMenu.hidden = true;
+  let itemMenuTarget = "";
+
+  function showItemMenu(btn: HTMLElement, graphName: string) {
+    itemMenuTarget = graphName;
+    itemMenu.replaceChildren();
+
+    if (cbs.onRename) {
+      const renameItem = document.createElement("button");
+      renameItem.className = "sidebar-item-menu-action";
+      renameItem.textContent = "Rename";
+      renameItem.addEventListener("click", () => {
+        hideItemMenu();
+        // Trigger inline rename on the graph item
+        const nameEl = list.querySelector(`.ontology-item[data-name="${CSS.escape(graphName)}"] .name`) as HTMLElement | null;
+        if (nameEl) triggerInlineRename(graphName, nameEl);
+      });
+      itemMenu.appendChild(renameItem);
     }
+
+    if (isAuthenticated) {
+      const syncItem = document.createElement("button");
+      syncItem.className = "sidebar-item-menu-action";
+      syncItem.textContent = "Sync to cloud";
+      syncItem.addEventListener("click", () => {
+        hideItemMenu();
+        cbs.onSyncGraph?.(graphName);
+      });
+      itemMenu.appendChild(syncItem);
+    }
+
+    const rect = btn.getBoundingClientRect();
+    itemMenu.style.top = rect.bottom + 2 + "px";
+    itemMenu.style.left = rect.left + "px";
+    itemMenu.hidden = false;
+  }
+
+  function hideItemMenu() {
+    itemMenu.hidden = true;
+    itemMenuTarget = "";
+  }
+
+  document.addEventListener("click", (e) => {
+    if (!itemMenu.hidden && !itemMenu.contains(e.target as Node) && !(e.target as HTMLElement).closest(".sidebar-item-menu-btn")) {
+      hideItemMenu();
+    }
+  });
+
+  container.appendChild(itemMenu);
+
+  function triggerInlineRename(graphName: string, nameEl: HTMLElement) {
+    const renameCb = cbs.onRename!;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "sidebar-rename-input";
+    input.value = graphName;
+    nameEl.textContent = "";
+    nameEl.appendChild(input);
+    input.focus();
+    input.select();
+    const finish = () => {
+      const val = input.value.trim();
+      if (val && val !== graphName) {
+        renameCb(graphName, val);
+      } else {
+        nameEl.textContent = graphName;
+      }
+    };
+    input.addEventListener("blur", finish);
+    input.addEventListener("keydown", (ke) => {
+      if (ke.key === "Enter") input.blur();
+      if (ke.key === "Escape") { input.value = graphName; input.blur(); }
+    });
   }
 
   // --- Tab bar: Graphs | Knowledge Base ---
@@ -480,11 +590,17 @@ export function initSidebar(
             .catch(() => ({} as Record<string, { author?: string; lastActivity?: string } | null>));
 
       const syncStatusPromise = inShareMode
-        ? Promise.resolve(new Set<string>())
+        ? Promise.resolve(new Map<string, { encrypted: boolean }>())
         : fetch("/api/sync-status")
             .then((r) => r.json())
-            .then((d: { synced: string[] }) => new Set(d.synced))
-            .catch(() => new Set<string>());
+            .then((d: { synced: Record<string, { encrypted: boolean }> }) => {
+              const m = new Map<string, { encrypted: boolean }>();
+              if (d.synced && typeof d.synced === "object") {
+                for (const [k, v] of Object.entries(d.synced)) m.set(k, v);
+              }
+              return m;
+            })
+            .catch(() => new Map<string, { encrypted: boolean }>());
 
       items = summaries.map((s) => {
         const li = document.createElement("li");
@@ -522,77 +638,36 @@ export function initSidebar(
         const syncBadge = document.createElement("span");
         syncBadge.className = "sidebar-sync-badge";
         syncBadge.dataset.graph = s.name;
-        syncStatusPromise.then((syncedSet) => {
+        syncStatusPromise.then((syncedMap) => {
           if (!syncBadge.isConnected) return;
-          if (syncedSet.has(s.name)) {
-            syncBadge.textContent = "synced";
-            syncBadge.title = "This graph has been synced";
+          const info = syncedMap.get(s.name);
+          if (info) {
+            syncBadge.textContent = info.encrypted ? "\uD83D\uDD12 synced" : "synced";
+            syncBadge.title = info.encrypted ? "Synced (encrypted)" : "Synced (unencrypted)";
             syncBadge.classList.add("active");
           }
         });
 
-        // Sync-to-cloud button (visible when authenticated)
-        const syncBtn = document.createElement("button");
-        syncBtn.className = "sidebar-sync-btn";
-        syncBtn.hidden = !isAuthenticated;
-        syncBtn.title = "Sync to cloud";
-        syncBtn.textContent = "\u2601"; // cloud icon
-        syncBtn.addEventListener("click", (e) => {
+        // Three-dot menu button
+        const menuBtn = document.createElement("button");
+        menuBtn.className = "sidebar-item-menu-btn";
+        menuBtn.textContent = "\u22EE";
+        menuBtn.title = "Actions";
+        menuBtn.addEventListener("click", (e) => {
           e.stopPropagation();
-          if (syncBtn.classList.contains("syncing")) return;
-          syncBtn.classList.add("syncing");
-          syncBtn.textContent = "\u23F3"; // hourglass
-          cbs.onSyncGraph?.(s.name);
-          // The caller should update sync state via setSyncResult()
-          setTimeout(() => {
-            if (syncBtn.classList.contains("syncing")) {
-              syncBtn.classList.remove("syncing");
-              syncBtn.textContent = "\u2601";
-            }
-          }, 15000); // timeout fallback
+          if (!itemMenu.hidden && itemMenuTarget === s.name) {
+            hideItemMenu();
+          } else {
+            showItemMenu(menuBtn, s.name);
+          }
         });
 
         li.appendChild(nameSpan);
         li.appendChild(statsSpan);
         li.appendChild(lockBadge);
         li.appendChild(syncBadge);
-        li.appendChild(syncBtn);
         li.appendChild(branchSpan);
-
-        if (cbs.onRename) {
-          const editBtn = document.createElement("button");
-          editBtn.className = "sidebar-edit-btn";
-          editBtn.textContent = "\u270E";
-          editBtn.title = "Rename";
-          const renameCb = cbs.onRename;
-          editBtn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            const input = document.createElement("input");
-            input.type = "text";
-            input.className = "sidebar-rename-input";
-            input.value = s.name;
-            nameSpan.textContent = "";
-            nameSpan.appendChild(input);
-            editBtn.style.display = "none";
-            input.focus();
-            input.select();
-            const finish = () => {
-              const val = input.value.trim();
-              if (val && val !== s.name) {
-                renameCb(s.name, val);
-              } else {
-                nameSpan.textContent = s.name;
-                editBtn.style.display = "";
-              }
-            };
-            input.addEventListener("blur", finish);
-            input.addEventListener("keydown", (ke) => {
-              if (ke.key === "Enter") input.blur();
-              if (ke.key === "Escape") { input.value = s.name; input.blur(); }
-            });
-          });
-          li.appendChild(editBtn);
-        }
+        li.appendChild(menuBtn);
 
         li.addEventListener("click", () => cbs.onSelect(s.name));
 
@@ -888,12 +963,17 @@ export function initSidebar(
       renderAuthWidget(auth);
     },
 
+    setCloudBackpacksInPicker(names: string[]) {
+      cloudPickerNames = names;
+      renderPickerDropdown();
+    },
+
     setSyncResult(graphName: string, success: boolean) {
-      const btn = list.querySelector(`.ontology-item[data-name="${CSS.escape(graphName)}"] .sidebar-sync-btn`) as HTMLElement | null;
-      if (btn) {
-        btn.classList.remove("syncing");
-        btn.textContent = success ? "\u2714" : "\u2718"; // check or cross
-        setTimeout(() => { btn.textContent = "\u2601"; }, 3000);
+      const badge = list.querySelector(`.ontology-item[data-name="${CSS.escape(graphName)}"] .sidebar-sync-badge`) as HTMLElement | null;
+      if (badge && success) {
+        badge.textContent = "synced";
+        badge.title = "This graph has been synced";
+        badge.classList.add("active");
       }
     },
 

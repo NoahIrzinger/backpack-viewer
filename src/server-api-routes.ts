@@ -487,15 +487,16 @@ export async function handleApiRequest(
       try {
         const settings = await readExtensionSettings("share");
         const syncedMap = settings.synced;
-        const synced: string[] = [];
+        const keys = (settings.keys as Record<string, string>) || {};
+        const synced: Record<string, { encrypted: boolean }> = {};
         if (syncedMap && typeof syncedMap === "object" && !Array.isArray(syncedMap)) {
           for (const name of Object.keys(syncedMap as Record<string, unknown>)) {
-            synced.push(name);
+            synced[name] = { encrypted: !!keys[name] };
           }
         }
         sendJson(res, 200, { synced });
       } catch {
-        sendJson(res, 200, { synced: [] });
+        sendJson(res, 200, { synced: {} });
       }
       return true;
     }
