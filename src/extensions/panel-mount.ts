@@ -324,6 +324,7 @@ export function createPanelMount(parent: HTMLElement): PanelMount {
 
     header.addEventListener("mousedown", (e) => {
       if (fullscreen) return; // can't drag while fullscreen
+      if (window.innerWidth <= 768) return; // no drag on mobile — panels are fullscreen
       // Buttons inside the header stop propagation already, so we know
       // this came from the title area or empty space.
       dragging = true;

@@ -2134,6 +2134,36 @@ body {
   .tools-pane-edit {
     opacity: 0.6;
   }
+
+  /* Search bar: center horizontally, responsive width */
+  .canvas-top-center {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    width: calc(100vw - 16px);
+    max-width: 380px;
+  }
+
+  .canvas-top-left,
+  .canvas-top-right {
+    display: none;
+  }
+
+  .search-input-wrap {
+    width: 100%;
+    max-width: none;
+  }
+
+  /* Extension panels: fullscreen only on mobile, no drag */
+  .extension-panel {
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: auto !important;
+    max-height: none !important;
+    border-radius: 0;
+  }
 }
 
 /* --- Dialog System --- */
