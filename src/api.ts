@@ -1,4 +1,4 @@
-import type { LearningGraphData, LearningGraphSummary } from "backpack-ontology";
+import type { LearningGraphData, LearningGraphSummary, KBDocumentSummary, KBListResult, KBMountInfo, KBDocument } from "backpack-ontology";
 
 export async function listOntologies(): Promise<LearningGraphSummary[]> {
   const res = await fetch("/api/ontologies");
@@ -206,4 +206,52 @@ export async function deleteSnippet(graphName: string, snippetId: string): Promi
     method: "DELETE",
   });
   if (!res.ok) throw new Error("Failed to delete snippet");
+}
+
+// --- Knowledge Base API ---
+
+export async function listKBDocuments(opts?: {
+  collection?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<KBListResult> {
+  const params = new URLSearchParams();
+  if (opts?.collection) params.set("collection", opts.collection);
+  if (opts?.limit != null) params.set("limit", String(opts.limit));
+  if (opts?.offset != null) params.set("offset", String(opts.offset));
+  const qs = params.toString();
+  const res = await fetch(`/api/kb/documents${qs ? `?${qs}` : ""}`);
+  if (!res.ok) return { documents: [], total: 0, hasMore: false };
+  return res.json();
+}
+
+export async function readKBDocument(id: string): Promise<KBDocument> {
+  const res = await fetch(`/api/kb/documents/${encodeURIComponent(id)}`);
+  if (!res.ok) throw new Error(`Document not found: ${id}`);
+  return res.json();
+}
+
+export async function deleteKBDocument(id: string): Promise<void> {
+  const res = await fetch(`/api/kb/documents/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete document");
+}
+
+export async function searchKBDocuments(query: string, opts?: {
+  collection?: string;
+  limit?: number;
+}): Promise<KBListResult> {
+  const params = new URLSearchParams({ q: query });
+  if (opts?.collection) params.set("collection", opts.collection);
+  if (opts?.limit != null) params.set("limit", String(opts.limit));
+  const res = await fetch(`/api/kb/search?${params}`);
+  if (!res.ok) return { documents: [], total: 0, hasMore: false };
+  return res.json();
+}
+
+export async function listKBMounts(): Promise<KBMountInfo[]> {
+  const res = await fetch("/api/kb/mounts");
+  if (!res.ok) return [];
+  return res.json();
 }

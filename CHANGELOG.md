@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Knowledge Base integration
+- **Tabbed sidebar** — Graphs and Knowledge Base are peer tabs in the sidebar, reflecting the two components of a backpack.
+- **KB documents list** — browse documents in the Knowledge Base tab with client-side search filtering.
+- **Document detail panel** — click a document to open a floating panel showing title, metadata, tags, source graphs, and markdown content.
+- **KB search in search overlay** — Ctrl+K / `/` search now includes KB documents alongside graph nodes, with a "KB" badge.
+- **Mount management UI** — add, remove, and edit KB mount paths from the sidebar. Inline path editing, writable toggle, error toasts on failure.
+- **Add mount dialog** — multi-field dialog for connecting local folders (Obsidian vaults, shared drives).
+- **KB API routes** — `/api/kb/documents` (list, get, delete), `/api/kb/search`, `/api/kb/mounts` (list, add/remove/edit).
+- **Live reload** — KB documents refresh alongside graphs on file changes.
+
+### Fixes
+- **OAuth token exchange** — prefer `id_token` over `access_token` for bearer auth, handle direct token exchange flow.
+- **OAuth callback fallback** — prevent Vite SPA fallback from intercepting `/oauth/` routes.
+
 ## 0.7.8 (2026-04-12)
 
 ### Sync & Share rewrite

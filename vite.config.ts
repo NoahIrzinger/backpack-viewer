@@ -360,10 +360,19 @@ function backpackApiPlugin(): Plugin {
 
         // --- Shared API routes ---
         // Everything else (config, version-check, ontologies, backpacks,
-        // branches, snapshots, snippets, locks, remotes) lives in
-        // src/server-api-routes.ts.
+        // branches, snapshots, snippets, locks, remotes, oauth/callback)
+        // lives in src/server-api-routes.ts.
         const handled = await handleApiRequest(req as any, res as any, apiContext);
         if (handled) return;
+
+        // Don't let Vite's SPA fallback serve index.html for unmatched
+        // routes that should have been handled above (e.g., /oauth/callback
+        // if handleApiRequest didn't match due to a bug).
+        if (req.url?.startsWith("/oauth/")) {
+          res.statusCode = 404;
+          res.end("OAuth route not handled");
+          return;
+        }
 
         return next();
       });

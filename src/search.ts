@@ -1,5 +1,6 @@
-import type { LearningGraphData, Node } from "backpack-ontology";
+import type { LearningGraphData, Node, KBDocumentSummary } from "backpack-ontology";
 import { getColor } from "./colors";
+import { searchKBDocuments } from "./api";
 
 /** Extract a display label from a node — first string property value, fallback to id. */
 function nodeLabel(node: Node): string {
@@ -31,6 +32,7 @@ export function initSearch(container: HTMLElement, config?: SearchConfig) {
   let data: LearningGraphData | null = null;
   let filterCallback: ((ids: Set<string> | null) => void) | null = null;
   let selectCallback: ((nodeId: string) => void) | null = null;
+  let kbSelectCallback: ((docId: string) => void) | null = null;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   // --- DOM ---
@@ -136,6 +138,43 @@ export function initSearch(container: HTMLElement, config?: SearchConfig) {
       results.appendChild(li);
     }
 
+    // KB document results (appended after node results)
+    searchKBDocuments(query, { limit: 4 }).then((kbResult) => {
+      if (input.value.trim().toLowerCase() !== query.toLowerCase()) return; // stale
+      if (kbResult.documents.length === 0) return;
+
+      for (const doc of kbResult.documents) {
+        const li = document.createElement("li");
+        li.className = "search-result-item search-result-kb";
+
+        const dot = document.createElement("span");
+        dot.className = "search-result-dot";
+        dot.style.backgroundColor = "var(--accent)";
+
+        const label = document.createElement("span");
+        label.className = "search-result-label";
+        const text = doc.title;
+        label.textContent = text.length > 30 ? text.slice(0, 28) + "..." : text;
+
+        const badge = document.createElement("span");
+        badge.className = "search-result-kb-badge";
+        badge.textContent = "KB";
+
+        li.appendChild(dot);
+        li.appendChild(label);
+        li.appendChild(badge);
+
+        li.addEventListener("click", () => {
+          kbSelectCallback?.(doc.id);
+          input.value = "";
+          results.classList.add("hidden");
+          applyFilter();
+        });
+
+        results.appendChild(li);
+      }
+    }).catch(() => {});
+
     results.classList.remove("hidden");
   }
 
@@ -220,6 +259,10 @@ export function initSearch(container: HTMLElement, config?: SearchConfig) {
 
     onNodeSelect(cb: (nodeId: string) => void) {
       selectCallback = cb;
+    },
+
+    onKBDocSelect(cb: (docId: string) => void) {
+      kbSelectCallback = cb;
     },
 
     clear() {

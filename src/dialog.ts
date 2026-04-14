@@ -250,6 +250,84 @@ export function showDangerConfirm(title: string, message: string): Promise<boole
 }
 
 /** Show a brief toast notification. */
+export interface KBMountAddResult {
+  name: string;
+  path: string;
+  writable: boolean;
+}
+
+export function showKBMountDialog(): Promise<KBMountAddResult | null> {
+  return new Promise((resolve) => {
+    const overlay = createOverlay();
+    const modal = createModal(overlay, "Add KB Mount");
+
+    const description = document.createElement("p");
+    description.className = "bp-dialog-message";
+    description.textContent =
+      "Connect a local folder as a knowledge base source. Use this to add an Obsidian vault, shared drive, or any folder of markdown files.";
+    modal.appendChild(description);
+
+    const nameLabel = document.createElement("label");
+    nameLabel.className = "bp-dialog-label";
+    nameLabel.textContent = "Name";
+    modal.appendChild(nameLabel);
+
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "bp-dialog-input";
+    nameInput.placeholder = "e.g. obsidian, team-docs, shared-drive";
+    modal.appendChild(nameInput);
+
+    const pathLabel = document.createElement("label");
+    pathLabel.className = "bp-dialog-label";
+    pathLabel.textContent = "Path";
+    modal.appendChild(pathLabel);
+
+    const pathInput = document.createElement("input");
+    pathInput.type = "text";
+    pathInput.className = "bp-dialog-input";
+    pathInput.placeholder = "/Users/you/obsidian/vault";
+    modal.appendChild(pathInput);
+
+    const writableRow = document.createElement("div");
+    writableRow.className = "bp-dialog-activate-row";
+    const writableCheckbox = document.createElement("input");
+    writableCheckbox.type = "checkbox";
+    writableCheckbox.id = "bp-dialog-kb-writable";
+    writableCheckbox.checked = true;
+    const writableLabel = document.createElement("label");
+    writableLabel.htmlFor = "bp-dialog-kb-writable";
+    writableLabel.textContent = "Writable (uncheck for read-only access to shared folders)";
+    writableRow.appendChild(writableCheckbox);
+    writableRow.appendChild(writableLabel);
+    modal.appendChild(writableRow);
+
+    const submit = () => {
+      const name = nameInput.value.trim();
+      const p = pathInput.value.trim();
+      if (!name || !p) return;
+      overlay.remove();
+      resolve({ name, path: p, writable: writableCheckbox.checked });
+    };
+
+    nameInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") pathInput.focus();
+      if (e.key === "Escape") { overlay.remove(); resolve(null); }
+    });
+    pathInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submit();
+      if (e.key === "Escape") { overlay.remove(); resolve(null); }
+    });
+
+    addButtons(modal, [
+      { label: "Cancel", onClick: () => { overlay.remove(); resolve(null); } },
+      { label: "Add Mount", accent: true, onClick: submit },
+    ]);
+
+    nameInput.focus();
+  });
+}
+
 export function showToast(message: string, durationMs = 3000): void {
   const existing = document.querySelector(".bp-toast");
   if (existing) existing.remove();

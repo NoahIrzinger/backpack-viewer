@@ -14,6 +14,7 @@ import {
   getKBMounts,
   addKBMount,
   removeKBMount,
+  editKBMount,
   DocumentStore,
   configDir,
   resolveAuthorName,
@@ -573,6 +574,8 @@ export async function handleApiRequest(
           });
         } else if (action === "remove") {
           await removeKBMount(active.path, name);
+        } else if (action === "edit") {
+          await editKBMount(active.path, name, mountPath);
         } else {
           throw new Error(`Unknown action: ${action}`);
         }

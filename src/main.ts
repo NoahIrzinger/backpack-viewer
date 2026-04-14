@@ -5,8 +5,10 @@ import {
   listSnapshots, createSnapshot, rollbackSnapshot,
   listSnippets, saveSnippet, loadSnippet, deleteSnippet,
   listRemotes, loadRemote,
+  listKBDocuments, searchKBDocuments, listKBMounts,
   type RemoteSummary,
 } from "./api";
+import { initKBPanel } from "./kb-panel";
 import { initSidebar } from "./sidebar";
 import { initCanvas, type FocusInfo } from "./canvas";
 import { initInfoPanel } from "./info-panel";
@@ -122,6 +124,8 @@ async function main() {
   // extension loader use this single instance so all panels share the
   // same click-to-front z-stack and the persistent layer DOM element.
   const panelMount = createPanelMount(canvasContainer);
+
+  const kbPanel = initKBPanel(panelMount);
 
   const infoPanel = initInfoPanel(canvasContainer, panelMount, {
     onUpdateNode(nodeId, properties) {
@@ -593,6 +597,10 @@ async function main() {
     }
   });
 
+  search.onKBDocSelect((docId) => {
+    kbPanel.show(docId);
+  });
+
   const sidebar = initSidebar(
     document.getElementById("sidebar")!,
     {
@@ -658,8 +666,61 @@ async function main() {
         });
         await refreshBackpacksAndGraphs();
       },
+      onKBDocSelect: (docId) => {
+        kbPanel.show(docId);
+      },
+      onKBMountAdd: async (name, mountPath, writable) => {
+        const res = await fetch("/api/kb/mounts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "add", name, path: mountPath, writable }),
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({ error: "Failed to add mount" }));
+          showToast(d.error ?? "Failed to add mount");
+          return;
+        }
+        await refreshKB();
+      },
+      onKBMountRemove: async (name) => {
+        const res = await fetch("/api/kb/mounts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "remove", name }),
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({ error: "Failed to remove mount" }));
+          showToast(d.error ?? "Failed to remove mount");
+          return;
+        }
+        await refreshKB();
+      },
+      onKBMountEdit: async (name, newPath) => {
+        const res = await fetch("/api/kb/mounts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "edit", name, path: newPath }),
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({ error: "Failed to update mount" }));
+          showToast(d.error ?? "Failed to update mount");
+          return;
+        }
+        await refreshKB();
+      },
     }
   );
+
+  async function refreshKB() {
+    try {
+      const [kbResult, mounts] = await Promise.all([
+        listKBDocuments({ limit: 50 }),
+        listKBMounts(),
+      ]);
+      sidebar.setKBDocuments(kbResult.documents);
+      sidebar.setKBMounts(mounts);
+    } catch {}
+  }
 
   async function refreshBackpacksAndGraphs() {
     try {
@@ -996,12 +1057,16 @@ async function main() {
     }
   } else {
     // Normal mode — load from local/cloud API
-    const [summaries, remotes] = await Promise.all([
+    const [summaries, remotes, kbResult, kbMounts] = await Promise.all([
       listOntologies(),
       listRemotes().catch(() => [] as RemoteSummary[]),
+      listKBDocuments({ limit: 50 }).catch(() => ({ documents: [], total: 0, hasMore: false })),
+      listKBMounts().catch(() => []),
     ]);
     sidebar.setSummaries(summaries);
     sidebar.setRemotes(remotes);
+    sidebar.setKBDocuments(kbResult.documents);
+    sidebar.setKBMounts(kbMounts);
     remoteNames = new Set(remotes.map((r) => r.name));
 
     // Auto-load from URL hash, or first graph
@@ -1194,12 +1259,14 @@ async function main() {
       // user-initiated and don't need a toast).
       const hadPins = canvas.hasPinnedNodes();
 
-      const [updated, updatedRemotes] = await Promise.all([
+      const [updated, updatedRemotes, updatedKB] = await Promise.all([
         listOntologies(),
         listRemotes().catch(() => [] as RemoteSummary[]),
+        listKBDocuments({ limit: 50 }).catch(() => ({ documents: [], total: 0, hasMore: false })),
       ]);
       sidebar.setSummaries(updated);
       sidebar.setRemotes(updatedRemotes);
+      sidebar.setKBDocuments(updatedKB.documents);
       remoteNames = new Set(updatedRemotes.map((r) => r.name));
 
       if (updated.length > 0 || updatedRemotes.length > 0) emptyState.hide();

@@ -1,7 +1,8 @@
-import type { LearningGraphSummary } from "backpack-ontology";
+import type { LearningGraphSummary, KBDocumentSummary } from "backpack-ontology";
 import type { RemoteSummary } from "./api.js";
-import { showConfirm, showPrompt, showBackpackAddDialog } from "./dialog";
+import { showConfirm, showPrompt, showBackpackAddDialog, showKBMountDialog } from "./dialog";
 import { makeSvgIcon } from "./dom-utils";
+import type { KBMountInfo } from "backpack-ontology";
 
 function formatTokenCount(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k tokens`;
@@ -29,6 +30,10 @@ export interface SidebarCallbacks {
   onSnippetDelete?: (graphName: string, snippetId: string) => void;
   onBackpackSwitch?: (pathOrName: string) => void;
   onBackpackRegister?: (path: string, activate: boolean) => void;
+  onKBDocSelect?: (docId: string) => void;
+  onKBMountAdd?: (name: string, path: string, writable: boolean) => void;
+  onKBMountRemove?: (name: string) => void;
+  onKBMountEdit?: (name: string, newPath: string) => void;
 }
 
 export function initSidebar(
@@ -50,6 +55,16 @@ export function initSidebar(
 
   const list = document.createElement("ul");
   list.id = "ontology-list";
+
+  const kbHeading = document.createElement("h3");
+  kbHeading.className = "sidebar-section-heading";
+  kbHeading.textContent = "KNOWLEDGE BASE";
+  kbHeading.hidden = true;
+
+  const kbList = document.createElement("ul");
+  kbList.id = "kb-list";
+  kbList.className = "kb-list";
+  kbList.hidden = true;
 
   const remoteHeading = document.createElement("h3");
   remoteHeading.className = "sidebar-section-heading";
@@ -229,11 +244,104 @@ export function initSidebar(
     ]),
   );
   expandBtn.addEventListener("click", toggleSidebar);
-  container.appendChild(input);
-  container.appendChild(list);
-  container.appendChild(remoteHeading);
-  container.appendChild(remoteList);
+
+  // --- Tab bar: Graphs | Knowledge Base ---
+  const tabBar = document.createElement("div");
+  tabBar.className = "sidebar-tab-bar";
+
+  const graphsTab = document.createElement("button");
+  graphsTab.className = "sidebar-tab active";
+  graphsTab.type = "button";
+  graphsTab.textContent = "Graphs";
+
+  const kbTab = document.createElement("button");
+  kbTab.className = "sidebar-tab";
+  kbTab.type = "button";
+  kbTab.textContent = "Knowledge Base";
+
+  tabBar.appendChild(graphsTab);
+  tabBar.appendChild(kbTab);
+  container.appendChild(tabBar);
+
+  // --- Graphs tab content ---
+  const graphsPane = document.createElement("div");
+  graphsPane.className = "sidebar-tab-pane";
+  graphsPane.appendChild(input);
+  graphsPane.appendChild(list);
+  graphsPane.appendChild(remoteHeading);
+  graphsPane.appendChild(remoteList);
+  container.appendChild(graphsPane);
+
+  // --- KB tab content ---
+  const kbPane = document.createElement("div");
+  kbPane.className = "sidebar-tab-pane hidden";
+
+  const kbFilter = document.createElement("input");
+  kbFilter.type = "text";
+  kbFilter.placeholder = "Search documents...";
+  kbFilter.className = "sidebar-kb-filter";
+  kbPane.appendChild(kbFilter);
+
+  // Mounts section
+  const mountsSection = document.createElement("div");
+  mountsSection.className = "kb-mounts-section";
+
+  const mountsHeader = document.createElement("div");
+  mountsHeader.className = "kb-mounts-header";
+  const mountsTitle = document.createElement("span");
+  mountsTitle.className = "kb-mounts-title";
+  mountsTitle.textContent = "MOUNTS";
+  const addMountBtn = document.createElement("button");
+  addMountBtn.className = "kb-mounts-add-btn";
+  addMountBtn.type = "button";
+  addMountBtn.textContent = "+";
+  addMountBtn.title = "Add KB mount";
+  addMountBtn.addEventListener("click", async () => {
+    const result = await showKBMountDialog();
+    if (result) {
+      cbs.onKBMountAdd?.(result.name, result.path, result.writable);
+    }
+  });
+  mountsHeader.appendChild(mountsTitle);
+  mountsHeader.appendChild(addMountBtn);
+  mountsSection.appendChild(mountsHeader);
+
+  const mountsList = document.createElement("div");
+  mountsList.className = "kb-mounts-list";
+  mountsSection.appendChild(mountsList);
+
+  kbPane.appendChild(mountsSection);
+  kbPane.appendChild(kbList);
+  // KB list is always visible inside KB pane (no heading needed)
+  kbList.hidden = false;
+  container.appendChild(kbPane);
+
+  // Remove the standalone KB heading — no longer needed in tabbed layout
+  // (kbHeading was created earlier but we don't add it to the DOM)
+
   container.appendChild(footer);
+
+  // Tab switching
+  let activeTab: "graphs" | "kb" = "graphs";
+  function switchTab(tab: "graphs" | "kb") {
+    activeTab = tab;
+    graphsTab.classList.toggle("active", tab === "graphs");
+    kbTab.classList.toggle("active", tab === "kb");
+    graphsPane.classList.toggle("hidden", tab !== "graphs");
+    kbPane.classList.toggle("hidden", tab !== "kb");
+  }
+  graphsTab.addEventListener("click", () => switchTab("graphs"));
+  kbTab.addEventListener("click", () => switchTab("kb"));
+
+  // KB filter (searches documents client-side)
+  let kbItems: HTMLLIElement[] = [];
+  kbFilter.addEventListener("input", () => {
+    const query = kbFilter.value.toLowerCase();
+    for (const item of kbItems) {
+      const title = item.dataset.title ?? "";
+      item.style.display = title.includes(query) ? "" : "none";
+    }
+  });
 
   let items: HTMLLIElement[] = [];
   let remoteItems: HTMLLIElement[] = [];
@@ -478,6 +586,121 @@ export function initSidebar(
       // Re-apply active state in case the active graph is a remote
       if (activeName) {
         this.setActive(activeName);
+      }
+    },
+
+    setKBDocuments(documents: KBDocumentSummary[]) {
+      kbList.replaceChildren();
+      kbItems = [];
+
+      if (documents.length === 0) {
+        const empty = document.createElement("li");
+        empty.className = "kb-empty-state";
+        empty.textContent = "No documents yet. Use backpack_kb_save via MCP to create one.";
+        kbList.appendChild(empty);
+        return;
+      }
+
+      for (const doc of documents) {
+        const li = document.createElement("li");
+        li.className = "ontology-item kb-item";
+        li.dataset.id = doc.id;
+        li.dataset.title = doc.title.toLowerCase();
+
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "name";
+        nameSpan.textContent = doc.title;
+
+        const statsSpan = document.createElement("span");
+        statsSpan.className = "stats";
+        const parts: string[] = [];
+        if (doc.collection) parts.push(doc.collection);
+        if (doc.tags.length > 0) parts.push(doc.tags.join(", "));
+        if (doc.sourceGraphs.length > 0) {
+          parts.push(`from: ${doc.sourceGraphs.join(", ")}`);
+        }
+        statsSpan.textContent = parts.join(" · ") || "document";
+
+        li.appendChild(nameSpan);
+        li.appendChild(statsSpan);
+
+        li.addEventListener("click", () => cbs.onKBDocSelect?.(doc.id));
+
+        kbList.appendChild(li);
+        kbItems.push(li);
+      }
+    },
+
+    setKBMounts(mounts: KBMountInfo[]) {
+      mountsList.replaceChildren();
+      for (const m of mounts) {
+        const row = document.createElement("div");
+        row.className = "kb-mount-row";
+
+        const info = document.createElement("div");
+        info.className = "kb-mount-info";
+
+        const name = document.createElement("span");
+        name.className = "kb-mount-name";
+        name.textContent = m.name;
+
+        const pathSpan = document.createElement("span");
+        pathSpan.className = "kb-mount-path";
+        pathSpan.textContent = m.path;
+        pathSpan.title = m.path + " — click to edit";
+
+        pathSpan.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const input = document.createElement("input");
+          input.type = "text";
+          input.className = "kb-mount-path-input";
+          input.value = m.path;
+          pathSpan.replaceWith(input);
+          input.focus();
+          input.select();
+          const finish = () => {
+            const val = input.value.trim();
+            if (val && val !== m.path) {
+              cbs.onKBMountEdit?.(m.name, val);
+            }
+            input.replaceWith(pathSpan);
+          };
+          input.addEventListener("blur", finish);
+          input.addEventListener("keydown", (ke) => {
+            if (ke.key === "Enter") input.blur();
+            if (ke.key === "Escape") { input.value = m.path; input.blur(); }
+          });
+        });
+
+        const details = document.createElement("span");
+        details.className = "kb-mount-details";
+        const detailParts: string[] = [];
+        detailParts.push(`${m.docCount} doc${m.docCount !== 1 ? "s" : ""}`);
+        if (!m.writable) detailParts.push("read-only");
+        details.textContent = detailParts.join(" · ");
+
+        info.appendChild(name);
+        info.appendChild(pathSpan);
+        info.appendChild(details);
+        row.appendChild(info);
+
+        // Don't allow removing the last mount (or the default "private")
+        if (mounts.length > 1) {
+          const removeBtn = document.createElement("button");
+          removeBtn.className = "kb-mount-remove-btn";
+          removeBtn.type = "button";
+          removeBtn.textContent = "\u00d7";
+          removeBtn.title = `Remove ${m.name}`;
+          removeBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            showConfirm("Remove mount", `Remove KB mount "${m.name}"? Documents at this path will not be deleted.`).then((ok) => {
+              if (ok) cbs.onKBMountRemove?.(m.name);
+            });
+          });
+          row.appendChild(removeBtn);
+        }
+
+        mountsList.appendChild(row);
       }
     },
 
