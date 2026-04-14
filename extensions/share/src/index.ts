@@ -141,8 +141,11 @@ async function fetchGraphs(token: string): Promise<{ graphs: GraphSummary[]; err
     if (!res.ok) return { graphs: [], error: `status ${res.status}` };
     const data = await res.json();
     return { graphs: Array.isArray(data) ? data : [] };
-  } catch (err) {
-    return { graphs: [], error: (err as Error).message };
+  } catch {
+    // Network errors (e.g., expired token causing a redirect that CORS
+    // blocks) surface as "Failed to fetch". Treat as unauthorized so the
+    // extension clears the stale token and prompts re-auth.
+    return { graphs: [], error: "unauthorized" };
   }
 }
 
