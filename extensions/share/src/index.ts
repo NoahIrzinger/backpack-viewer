@@ -454,12 +454,14 @@ async function startOAuthFlow(viewer: ViewerExtensionAPI, container: HTMLElement
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirectUri, client_id: client.client_id, code_verifier: codeVerifier }).toString(),
         });
-        const tokenData = (await tokenRes.json()) as { access_token?: string };
-        if (!tokenData.access_token) {
-          appendError(container, "Token exchange failed: no access token returned.");
+        const tokenData = (await tokenRes.json()) as { access_token?: string; id_token?: string };
+        // Prefer id_token (validated by the relay's auth layer) over access_token
+        const bearerToken = tokenData.id_token || tokenData.access_token;
+        if (!bearerToken) {
+          appendError(container, "Token exchange failed: no token returned.");
           return;
         }
-        await viewer.settings.set("relay_token", tokenData.access_token);
+        await viewer.settings.set("relay_token", bearerToken);
         renderSharePanel(viewer, container);
       } catch (err) {
         appendError(container, `Token exchange failed: ${(err as Error).message}`);

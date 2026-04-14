@@ -11,6 +11,10 @@ import {
   setActiveBackpack,
   registerBackpack,
   unregisterBackpack,
+  getKBMounts,
+  addKBMount,
+  removeKBMount,
+  DocumentStore,
   configDir,
   resolveAuthorName,
 } from "backpack-ontology";
@@ -495,6 +499,115 @@ export async function handleApiRequest(
       return true;
     }
 
+    // --- /api/kb/* (Knowledge Base documents) ---
+
+    // Helper: resolve a DocumentStore for the active backpack
+    async function getDocStore(): Promise<DocumentStore> {
+      const active = ctx.storage.activeEntry;
+      if (!active) throw new Error("No active backpack");
+      const mountConfigs = await getKBMounts(active.path);
+      return new DocumentStore(
+        mountConfigs.map((m) => ({
+          name: m.name,
+          path: m.path,
+          writable: m.writable !== false,
+        })),
+      );
+    }
+
+    if (url === "/api/kb/documents" && method === "GET") {
+      try {
+        const docs = await getDocStore();
+        const params = new URL(req.url ?? "/", "http://localhost").searchParams;
+        const result = await docs.list({
+          collection: params.get("collection") ?? undefined,
+          limit: params.has("limit") ? parseInt(params.get("limit")!, 10) : undefined,
+          offset: params.has("offset") ? parseInt(params.get("offset")!, 10) : undefined,
+        });
+        sendJson(res, 200, result);
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    if (url === "/api/kb/search" && method === "GET") {
+      try {
+        const docs = await getDocStore();
+        const params = new URL(req.url ?? "/", "http://localhost").searchParams;
+        const query = params.get("q") ?? "";
+        const result = await docs.search(query, {
+          collection: params.get("collection") ?? undefined,
+          limit: params.has("limit") ? parseInt(params.get("limit")!, 10) : undefined,
+          offset: params.has("offset") ? parseInt(params.get("offset")!, 10) : undefined,
+        });
+        sendJson(res, 200, result);
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    if (url === "/api/kb/mounts" && method === "GET") {
+      try {
+        const docs = await getDocStore();
+        const mounts = await docs.listMounts();
+        sendJson(res, 200, mounts);
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    if (url === "/api/kb/mounts" && method === "POST") {
+      const body = await readBody(req);
+      try {
+        const active = ctx.storage.activeEntry;
+        if (!active) throw new Error("No active backpack");
+        const { action, name, path: mountPath, writable } = JSON.parse(body);
+        if (action === "add") {
+          await addKBMount(active.path, {
+            name,
+            path: mountPath,
+            ...(writable === false ? { writable: false } : {}),
+          });
+        } else if (action === "remove") {
+          await removeKBMount(active.path, name);
+        } else {
+          throw new Error(`Unknown action: ${action}`);
+        }
+        sendJson(res, 200, { ok: true });
+      } catch (err) {
+        sendErr(res, 400, (err as Error).message);
+      }
+      return true;
+    }
+
+    const kbDocItem = url.match(/^\/api\/kb\/documents\/(.+)$/);
+    if (kbDocItem && method === "GET") {
+      const id = decodeURIComponent(kbDocItem[1]);
+      try {
+        const docs = await getDocStore();
+        const doc = await docs.read(id);
+        sendJson(res, 200, doc);
+      } catch (err) {
+        sendErr(res, 404, (err as Error).message);
+      }
+      return true;
+    }
+
+    if (kbDocItem && method === "DELETE") {
+      const id = decodeURIComponent(kbDocItem[1]);
+      try {
+        const docs = await getDocStore();
+        await docs.delete(id);
+        sendJson(res, 200, { ok: true });
+      } catch (err) {
+        sendErr(res, 400, (err as Error).message);
+      }
+      return true;
+    }
+
     // --- /api/ontologies/* ---
     if (url === "/api/ontologies" && method === "GET") {
       try {
@@ -599,14 +712,15 @@ export async function handleApiRequest(
   })
   .then(function(r) { return r.json(); })
   .then(function(data) {
-    if (!data.access_token) {
+    var token = data.id_token || data.access_token;
+    if (!token) {
       document.body.textContent = "Token exchange failed: " + JSON.stringify(data);
       return;
     }
     return fetch("/api/extensions/share/settings/relay_token", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ value: data.access_token })
+      body: JSON.stringify({ value: token })
     }).then(function() {
       sessionStorage.removeItem("share_oauth_token_endpoint");
       sessionStorage.removeItem("share_oauth_client_id");
