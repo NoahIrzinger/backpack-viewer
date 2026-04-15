@@ -1598,6 +1598,8 @@ async function main() {
     });
 
     import.meta.hot.on("ontology-change", async () => {
+      // Cloud mode manages its own state — ignore local file changes
+      if (isCloudActive) return;
       // If the user had manually pinned nodes, the incoming data change
       // is going to reset their layout tweaks. Warn them so they know
       // the change wasn't their fault — this is the one involuntary

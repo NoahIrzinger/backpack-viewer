@@ -125,6 +125,13 @@ async function syncGraphToRelay(
   } else {
     payload = graphJSON;
     format = "plaintext";
+    // Remove stale key if switching from encrypted to unencrypted
+    const settings = await readExtensionSettings("share");
+    const keys = ((settings.keys as Record<string, string>) || {});
+    if (keys[name]) {
+      delete keys[name];
+      await writeExtensionSetting("share", "keys", keys);
+    }
   }
 
   // Build BPAK envelope
@@ -1127,7 +1134,8 @@ export async function handleApiRequest(
         const body = await readBody(req);
         const parsed = JSON.parse(body);
 
-        const params = new URLSearchParams(url.split("?")[1] || "");
+        // Parse query params from the raw URL (urlPath() strips the query string)
+        const params = new URLSearchParams((req.url || "").split("?")[1] || "");
         const wantEncrypted = params.get("encrypted") !== "false";
         const kind = params.get("kind") || "learning_graph";
 
