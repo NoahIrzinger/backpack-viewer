@@ -36,12 +36,12 @@ export interface SidebarCallbacks {
   onKBMountEdit?: (name: string, newPath: string) => void;
   onSignIn?: () => void;
   onSignOut?: () => void;
-  onSyncGraph?: (name: string) => void;
+  onSyncGraph?: (name: string, encrypted?: boolean) => void;
   onSyncPush?: (encrypted?: boolean) => Promise<SyncResult>;
   onSyncPull?: () => Promise<SyncResult>;
   onCloudRefresh?: () => Promise<{ graphs: number; kbDocs: number }>;
-  onSyncKBDoc?: (docId: string) => Promise<boolean>;
-  onSyncKBMount?: (mountName: string) => Promise<{ synced: number; failed: number; total: number }>;
+  onSyncKBDoc?: (docId: string, encrypted?: boolean) => Promise<boolean>;
+  onSyncKBMount?: (mountName: string, encrypted?: boolean) => Promise<{ synced: number; failed: number; total: number }>;
   onKBDocDelete?: (docId: string) => Promise<void>;
 }
 
@@ -387,9 +387,18 @@ export function initSidebar(
       syncItem.textContent = "Sync to cloud";
       syncItem.addEventListener("click", () => {
         hideItemMenu();
-        cbs.onSyncGraph?.(graphName);
+        cbs.onSyncGraph?.(graphName, true);
       });
       itemMenu.appendChild(syncItem);
+
+      const syncUnencItem = document.createElement("button");
+      syncUnencItem.className = "sidebar-item-menu-action sidebar-item-menu-danger";
+      syncUnencItem.textContent = "Sync unencrypted";
+      syncUnencItem.addEventListener("click", () => {
+        hideItemMenu();
+        cbs.onSyncGraph?.(graphName, false);
+      });
+      itemMenu.appendChild(syncUnencItem);
     }
 
     const rect = btn.getBoundingClientRect();
@@ -428,10 +437,20 @@ export function initSidebar(
       syncItem.addEventListener("click", async () => {
         hideKBItemMenu();
         syncItem.disabled = true;
-        const ok = await cbs.onSyncKBDoc!(docId);
+        const ok = await cbs.onSyncKBDoc!(docId, true);
         if (!ok) { /* toast handled by caller */ }
       });
       kbItemMenu.appendChild(syncItem);
+
+      const syncUnencItem = document.createElement("button");
+      syncUnencItem.className = "sidebar-item-menu-action sidebar-item-menu-danger";
+      syncUnencItem.textContent = "Sync unencrypted";
+      syncUnencItem.addEventListener("click", async () => {
+        hideKBItemMenu();
+        const ok = await cbs.onSyncKBDoc!(docId, false);
+        if (!ok) { /* toast handled by caller */ }
+      });
+      kbItemMenu.appendChild(syncUnencItem);
     }
 
     if (mountWritable && cbs.onKBDocDelete) {
@@ -751,9 +770,18 @@ export function initSidebar(
       syncItem.textContent = `Sync "${selectedMount}" to cloud`;
       syncItem.addEventListener("click", async () => {
         kbMenu.hidden = true;
-        if (cbs.onSyncKBMount) await cbs.onSyncKBMount(selectedMount);
+        if (cbs.onSyncKBMount) await cbs.onSyncKBMount(selectedMount, true);
       });
       kbMenu.appendChild(syncItem);
+
+      const syncUnencItem = document.createElement("button");
+      syncUnencItem.className = "sidebar-item-menu-action sidebar-item-menu-danger";
+      syncUnencItem.textContent = `Sync "${selectedMount}" unencrypted`;
+      syncUnencItem.addEventListener("click", async () => {
+        kbMenu.hidden = true;
+        if (cbs.onSyncKBMount) await cbs.onSyncKBMount(selectedMount, false);
+      });
+      kbMenu.appendChild(syncUnencItem);
     }
 
     if (isAuthenticated && cbs.onSyncKBMount && selectedMount === "__all__") {
@@ -763,10 +791,21 @@ export function initSidebar(
       syncAllItem.addEventListener("click", async () => {
         kbMenu.hidden = true;
         for (const m of currentKBMounts) {
-          if (cbs.onSyncKBMount) await cbs.onSyncKBMount(m.name);
+          if (cbs.onSyncKBMount) await cbs.onSyncKBMount(m.name, true);
         }
       });
       kbMenu.appendChild(syncAllItem);
+
+      const syncAllUnencItem = document.createElement("button");
+      syncAllUnencItem.className = "sidebar-item-menu-action sidebar-item-menu-danger";
+      syncAllUnencItem.textContent = "Sync all KB unencrypted";
+      syncAllUnencItem.addEventListener("click", async () => {
+        kbMenu.hidden = true;
+        for (const m of currentKBMounts) {
+          if (cbs.onSyncKBMount) await cbs.onSyncKBMount(m.name, false);
+        }
+      });
+      kbMenu.appendChild(syncAllUnencItem);
     }
 
     const addItem = document.createElement("button");

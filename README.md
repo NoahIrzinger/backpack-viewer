@@ -41,6 +41,23 @@ Opens http://localhost:5173. Click any learning graph in the sidebar to visualiz
 - **Lock heartbeat badge** — each graph in the sidebar shows `editing: <author>` when another writer is actively editing (within the last 5 minutes). Backed by a batched `/api/locks` endpoint.
 - **Remote graphs section** — subscribe to learning graphs hosted at HTTPS URLs and view them read-only alongside your local graphs.
 
+### Knowledge base
+- **KB panel** — a tabbed panel for managing documents alongside your graphs
+- **Mount selector** — switch between local, cloud, and extension-provided document sources
+- **Document list** — browse, search, and manage documents with a three-dot context menu
+- **Markdown rendering** — documents render with tables, code blocks, and task lists
+
+### Cloud cache
+- **Cloud backpack switching** — switch between local and cloud backpacks via the sidebar indicator
+- **Write-through cache** — CloudCacheBackend stores graphs locally and syncs to BackpackApp cloud
+- **Sync controls** — push (encrypted BPAK upload) and pull (cache refresh) with per-item status results
+
+### Extensions
+- **Extension system** — third-party extensions with sandboxed API (graph reads/writes, events, UI panels, network proxy)
+- **kb-local** — local document storage mount for the KB panel
+- **share** — graph sharing extension
+- **chat** — chat extension
+
 ### Versioning
 - **Branches and snapshots** — the underlying storage is event-sourced; the viewer exposes branch switching and snapshot/rollback UI via the MCP tools.
 

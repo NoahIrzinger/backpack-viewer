@@ -730,12 +730,19 @@ async function main() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name: "__cloud__" }),
           });
-          // Load graphs from cloud cache
-          const summaries = await fetch("/api/ontologies").then(r => r.json());
-          sidebar.setSummaries(summaries);
-          sidebar.setCloudBackpacks([]);
           isCloudActive = true;
           sidebar.setCloudMode(true);
+          sidebar.setCloudBackpacks([]);
+          // Auto-refresh cache from relay so we show actual cloud state
+          try {
+            await fetch("/api/cloud-cache/refresh", { method: "POST" });
+          } catch { /* offline — fall back to stale cache */ }
+          try {
+            const summaries = await fetch("/api/ontologies").then(r => r.ok ? r.json() : []);
+            sidebar.setSummaries(summaries);
+          } catch {
+            sidebar.setSummaries([]);
+          }
           refreshKB();
           return;
         }
@@ -806,12 +813,12 @@ async function main() {
         await fetch("/api/extensions/share/settings/relay_token", { method: "DELETE" });
         window.dispatchEvent(new CustomEvent("backpack-auth-changed"));
       },
-      onSyncGraph: async (graphName) => {
+      onSyncGraph: async (graphName, encrypted = true) => {
         try {
           const data = graphName === activeOntology && currentData
             ? currentData
             : await loadOntology(graphName);
-          const res = await fetch(`/api/cloud-sync/${encodeURIComponent(graphName)}`, {
+          const res = await fetch(`/api/cloud-sync/${encodeURIComponent(graphName)}?encrypted=${encrypted}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(data),
@@ -857,20 +864,20 @@ async function main() {
         }
         return result;
       },
-      onSyncKBDoc: async (docId: string) => {
-        // Sync single KB doc via encrypted BPAK envelope through server proxy
+      onSyncKBDoc: async (docId: string, encrypted = true) => {
+        // Sync single KB doc through server proxy
         const docRes = await fetch(`/api/kb/documents/${encodeURIComponent(docId)}`);
         if (!docRes.ok) return false;
         const doc = await docRes.json();
-        const res = await fetch("/api/cloud-sync/knowledge-base?kind=knowledge_base", {
+        const res = await fetch(`/api/cloud-sync/knowledge-base?kind=knowledge_base&encrypted=${encrypted}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ documents: [doc] }),
         });
         return res.ok;
       },
-      onSyncKBMount: async (mountName: string) => {
-        // Sync all docs in a mount via encrypted BPAK envelope
+      onSyncKBMount: async (mountName: string, encrypted = true) => {
+        // Sync all docs in a mount
         const listRes = await fetch(`/api/kb/documents?collection=${encodeURIComponent(mountName)}&limit=1000`);
         if (!listRes.ok) return { synced: 0, failed: 1, total: 0 };
         const { documents } = await listRes.json();
@@ -881,7 +888,7 @@ async function main() {
             return r.json();
           }),
         );
-        const res = await fetch("/api/cloud-sync/knowledge-base?kind=knowledge_base", {
+        const res = await fetch(`/api/cloud-sync/knowledge-base?kind=knowledge_base&encrypted=${encrypted}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ documents: allDocs }),
