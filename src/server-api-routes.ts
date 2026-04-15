@@ -18,9 +18,9 @@ import {
   DocumentStore,
   configDir,
   resolveAuthorName,
+  CloudCacheBackend,
 } from "backpack-ontology";
 import type { ViewerConfig } from "./config.js";
-import { CloudCacheBackend } from "backpack-ontology";
 import { readExtensionSettings, writeExtensionSetting } from "./server-extensions.js";
 
 /**

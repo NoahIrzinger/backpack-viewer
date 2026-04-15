@@ -954,11 +954,11 @@ export function initSidebar(
 
       const subtitle = document.createElement("div");
       subtitle.className = "sidebar-stale-banner-subtitle";
-      subtitle.textContent = `Latest is ${latest}. Your version is stuck because of an npx cache.`;
+      subtitle.textContent = `Latest is ${latest}. Run the command below to update:`;
 
       const hint = document.createElement("pre");
       hint.className = "sidebar-stale-banner-hint";
-      hint.textContent = "npm cache clean --force\nnpx backpack-viewer@latest";
+      hint.textContent = "npx backpack-viewer@latest --yes";
 
       staleBanner.appendChild(title);
       staleBanner.appendChild(subtitle);

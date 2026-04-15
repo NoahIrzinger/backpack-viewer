@@ -83,9 +83,10 @@ async function getCachedVersionCheck(currentVersion) {
 
 if (hasDistBuild) {
   // --- Production: static file server + API (zero native deps) ---
-  const { JsonFileBackend, RemoteRegistry, getActiveBackpack, CloudCacheBackend } = await import(
-    "backpack-ontology"
-  );
+  const ontologyPkg = await import("backpack-ontology");
+  const { JsonFileBackend, RemoteRegistry, getActiveBackpack } = ontologyPkg;
+  // CloudCacheBackend may not exist in older ontology versions — degrade gracefully
+  const CloudCacheBackend = ontologyPkg.CloudCacheBackend ?? null;
   const { loadViewerConfig } = await import("../dist/config.js");
   const { writeViewerState, readViewerState } = await import(
     "../dist/server-viewer-state.js"
@@ -153,18 +154,20 @@ if (hasDistBuild) {
     disabledFirstParty,
   );
 
-  const cloudCache = new CloudCacheBackend(
-    CloudCacheBackend.defaultCachePath(),
-    async () => {
-      try {
-        const settings = await readExtensionSettings("share");
-        const token = settings.relay_token;
-        if (!token || typeof token !== "string") return null;
-        const relayUrl = (settings.relay_url) || "https://app.backpackontology.com";
-        return { token, relayUrl };
-      } catch { return null; }
-    },
-  );
+  const cloudCache = CloudCacheBackend
+    ? new CloudCacheBackend(
+        CloudCacheBackend.defaultCachePath(),
+        async () => {
+          try {
+            const settings = await readExtensionSettings("share");
+            const token = settings.relay_token;
+            if (!token || typeof token !== "string") return null;
+            const relayUrl = (settings.relay_url) || "https://app.backpackontology.com";
+            return { token, relayUrl };
+          } catch { return null; }
+        },
+      )
+    : undefined;
 
   // Context object passed to the shared API route handler.
   const apiContext = {
