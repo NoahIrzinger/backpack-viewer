@@ -2,7 +2,7 @@ import { defineConfig, type Plugin } from "vite";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { JsonFileBackend, RemoteRegistry, getActiveBackpack } from "backpack-ontology";
+import { JsonFileBackend, RemoteRegistry, getActiveBackpack, CloudCacheBackend } from "backpack-ontology";
 import { loadViewerConfig } from "./src/config.js";
 import { writeViewerState, readViewerState } from "./src/server-viewer-state.js";
 import {
@@ -46,6 +46,19 @@ function backpackApiPlugin(): Plugin {
   let currentWatcher: fs.FSWatcher | null = null;
   let loadedExtensions: LoadedExtension[] = [];
   let apiContext: ApiContext;
+
+  const cloudCache = new CloudCacheBackend(
+    CloudCacheBackend.defaultCachePath(),
+    async () => {
+      try {
+        const settings = await readExtensionSettings("share");
+        const token = settings.relay_token;
+        if (!token || typeof token !== "string") return null;
+        const relayUrl = (settings.relay_url as string) || "https://app.backpackontology.com";
+        return { token, relayUrl };
+      } catch { return null; }
+    },
+  );
 
   async function makeBackend() {
     const entry = await getActiveBackpack();
@@ -128,6 +141,7 @@ function backpackApiPlugin(): Plugin {
         remoteRegistry,
         viewerConfig: userCfg,
         makeBackend,
+        cloudCache,
         // Vite gets a hook so a backpack switch broadcasts to the
         // browser via WS — production has no live channel.
         onActiveBackpackChange: () => {

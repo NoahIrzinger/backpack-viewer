@@ -83,7 +83,7 @@ async function getCachedVersionCheck(currentVersion) {
 
 if (hasDistBuild) {
   // --- Production: static file server + API (zero native deps) ---
-  const { JsonFileBackend, RemoteRegistry, getActiveBackpack } = await import(
+  const { JsonFileBackend, RemoteRegistry, getActiveBackpack, CloudCacheBackend } = await import(
     "backpack-ontology"
   );
   const { loadViewerConfig } = await import("../dist/config.js");
@@ -153,12 +153,26 @@ if (hasDistBuild) {
     disabledFirstParty,
   );
 
+  const cloudCache = new CloudCacheBackend(
+    CloudCacheBackend.defaultCachePath(),
+    async () => {
+      try {
+        const settings = await readExtensionSettings("share");
+        const token = settings.relay_token;
+        if (!token || typeof token !== "string") return null;
+        const relayUrl = (settings.relay_url) || "https://app.backpackontology.com";
+        return { token, relayUrl };
+      } catch { return null; }
+    },
+  );
+
   // Context object passed to the shared API route handler.
   const apiContext = {
     storage: storageHolder,
     remoteRegistry,
     viewerConfig,
     makeBackend,
+    cloudCache,
     versionCheck: () => getCachedVersionCheck(currentVersion),
   };
 

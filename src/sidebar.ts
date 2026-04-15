@@ -37,7 +37,16 @@ export interface SidebarCallbacks {
   onSignIn?: () => void;
   onSignOut?: () => void;
   onSyncGraph?: (name: string) => void;
+  onSyncPush?: (encrypted?: boolean) => Promise<SyncResult>;
+  onSyncPull?: () => Promise<SyncResult>;
+  onCloudRefresh?: () => Promise<{ graphs: number; kbDocs: number }>;
+  onSyncKBDoc?: (docId: string) => Promise<boolean>;
+  onSyncKBMount?: (mountName: string) => Promise<{ synced: number; failed: number; total: number }>;
+  onKBDocDelete?: (docId: string) => Promise<void>;
 }
+
+export interface SyncResultItem { name: string; kind: "graph" | "kb"; status: "synced" | "failed" | "skipped"; error?: string }
+export interface SyncResult { total: number; synced: number; failed: number; skipped: number; errors: string[]; items: SyncResultItem[] }
 
 export function initSidebar(
   container: HTMLElement,
@@ -336,12 +345,16 @@ export function initSidebar(
       signOutBtn.textContent = "Sign out";
       signOutBtn.addEventListener("click", () => cbs.onSignOut?.());
       authContent.appendChild(signOutBtn);
+      bpMenuBtn.hidden = false;
     } else {
       const signInBtn = document.createElement("button");
       signInBtn.className = "sidebar-auth-link sidebar-auth-signin";
       signInBtn.textContent = "Sign in to sync";
       signInBtn.addEventListener("click", () => cbs.onSignIn?.());
       authContent.appendChild(signInBtn);
+      bpMenuBtn.hidden = true;
+      syncStatus.hidden = true;
+      syncPopup.hidden = true;
     }
   }
 
@@ -398,6 +411,60 @@ export function initSidebar(
 
   container.appendChild(itemMenu);
 
+  // --- Shared context menu for KB document items ---
+  const kbItemMenu = document.createElement("div");
+  kbItemMenu.className = "sidebar-item-menu";
+  kbItemMenu.hidden = true;
+  let kbItemMenuTarget = "";
+
+  function showKBItemMenu(btn: HTMLElement, docId: string, docTitle: string, mountWritable: boolean) {
+    kbItemMenuTarget = docId;
+    kbItemMenu.replaceChildren();
+
+    if (isAuthenticated && cbs.onSyncKBDoc) {
+      const syncItem = document.createElement("button");
+      syncItem.className = "sidebar-item-menu-action";
+      syncItem.textContent = "Sync to cloud";
+      syncItem.addEventListener("click", async () => {
+        hideKBItemMenu();
+        syncItem.disabled = true;
+        const ok = await cbs.onSyncKBDoc!(docId);
+        if (!ok) { /* toast handled by caller */ }
+      });
+      kbItemMenu.appendChild(syncItem);
+    }
+
+    if (mountWritable && cbs.onKBDocDelete) {
+      const deleteItem = document.createElement("button");
+      deleteItem.className = "sidebar-item-menu-action sidebar-item-menu-danger";
+      deleteItem.textContent = "Delete";
+      deleteItem.addEventListener("click", async () => {
+        hideKBItemMenu();
+        const ok = await showConfirm("Delete document", `Delete "${docTitle}"? This cannot be undone.`);
+        if (ok) cbs.onKBDocDelete!(docId);
+      });
+      kbItemMenu.appendChild(deleteItem);
+    }
+
+    const rect = btn.getBoundingClientRect();
+    kbItemMenu.style.top = rect.bottom + 2 + "px";
+    kbItemMenu.style.left = rect.left + "px";
+    kbItemMenu.hidden = false;
+  }
+
+  function hideKBItemMenu() {
+    kbItemMenu.hidden = true;
+    kbItemMenuTarget = "";
+  }
+
+  document.addEventListener("click", (e) => {
+    if (!kbItemMenu.hidden && !kbItemMenu.contains(e.target as Node) && !(e.target as HTMLElement).closest(".sidebar-item-menu-btn")) {
+      hideKBItemMenu();
+    }
+  });
+
+  container.appendChild(kbItemMenu);
+
   function triggerInlineRename(graphName: string, nameEl: HTMLElement) {
     const renameCb = cbs.onRename!;
     const input = document.createElement("input");
@@ -422,6 +489,160 @@ export function initSidebar(
       if (ke.key === "Escape") { input.value = graphName; input.blur(); }
     });
   }
+
+  // --- Backpack three-dot menu (sync actions, visible when authenticated) ---
+  const bpMenuBtn = document.createElement("button");
+  bpMenuBtn.className = "sidebar-picker-menu-btn";
+  bpMenuBtn.type = "button";
+  bpMenuBtn.textContent = "\u22EE";
+  bpMenuBtn.title = "Backpack actions";
+  bpMenuBtn.hidden = true;
+  pickerContainer.appendChild(bpMenuBtn);
+
+  const bpMenu = document.createElement("div");
+  bpMenu.className = "sidebar-item-menu";
+  bpMenu.hidden = true;
+  container.appendChild(bpMenu);
+
+  // Sync results popup (shared)
+  const syncPopup = document.createElement("div");
+  syncPopup.className = "sidebar-sync-popup";
+  syncPopup.hidden = true;
+
+  const syncStatus = document.createElement("div");
+  syncStatus.className = "sidebar-sync-status";
+  syncStatus.hidden = true;
+
+  function showSyncResults(title: string, result: SyncResult) {
+    syncPopup.replaceChildren();
+    syncPopup.hidden = false;
+    const header = document.createElement("div");
+    header.className = "sidebar-sync-popup-header";
+    const headerTitle = document.createElement("span");
+    headerTitle.textContent = `${title}: ${result.synced}/${result.total}`;
+    if (result.failed > 0) headerTitle.textContent += ` (${result.failed} failed)`;
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "sidebar-sync-popup-close";
+    closeBtn.type = "button";
+    closeBtn.textContent = "\u00d7";
+    closeBtn.addEventListener("click", (e) => { e.stopPropagation(); syncPopup.hidden = true; });
+    header.appendChild(headerTitle);
+    header.appendChild(closeBtn);
+    syncPopup.appendChild(header);
+    const itemList = document.createElement("div");
+    itemList.className = "sidebar-sync-popup-list";
+    for (const item of result.items) {
+      const row = document.createElement("div");
+      row.className = "sidebar-sync-popup-item";
+      const icon = document.createElement("span");
+      icon.className = "sidebar-sync-popup-icon";
+      if (item.status === "synced") { icon.textContent = "\u2713"; icon.classList.add("sidebar-sync-ok"); }
+      else if (item.status === "failed") { icon.textContent = "\u2717"; icon.classList.add("sidebar-sync-fail"); }
+      else { icon.textContent = "\u2014"; icon.classList.add("sidebar-sync-skip"); }
+      const label = document.createElement("span");
+      label.className = "sidebar-sync-popup-label";
+      label.textContent = item.name;
+      const badge = document.createElement("span");
+      badge.className = "sidebar-sync-popup-badge";
+      badge.textContent = item.kind;
+      row.appendChild(icon);
+      row.appendChild(label);
+      row.appendChild(badge);
+      if (item.error && item.status !== "synced") row.title = item.error;
+      itemList.appendChild(row);
+    }
+    syncPopup.appendChild(itemList);
+  }
+  container.appendChild(syncPopup);
+  container.appendChild(syncStatus);
+
+  async function doSyncPush(encrypted: boolean = true) {
+    if (!cbs.onSyncPush) return;
+    syncPopup.hidden = true;
+    syncStatus.hidden = false;
+    syncStatus.textContent = encrypted ? "Syncing (encrypted)\u2026" : "Syncing (unencrypted)\u2026";
+    syncStatus.className = "sidebar-sync-status";
+    try {
+      const result = await cbs.onSyncPush(encrypted);
+      syncStatus.hidden = true;
+      showSyncResults(encrypted ? "Pushed (encrypted)" : "Pushed (unencrypted)", result);
+    } catch (err) {
+      syncStatus.textContent = "Sync failed: " + (err as Error).message;
+      syncStatus.className = "sidebar-sync-status sidebar-sync-error";
+    }
+  }
+
+  async function doSyncPull() {
+    if (!cbs.onSyncPull) return;
+    syncPopup.hidden = true;
+    syncStatus.hidden = false;
+    syncStatus.textContent = "Pulling from cloud\u2026";
+    syncStatus.className = "sidebar-sync-status";
+    try {
+      const result = await cbs.onSyncPull();
+      syncStatus.hidden = true;
+      showSyncResults("Pulled", result);
+    } catch (err) {
+      syncStatus.textContent = "Pull failed: " + (err as Error).message;
+      syncStatus.className = "sidebar-sync-status sidebar-sync-error";
+    }
+  }
+
+  let cloudModeActive = false;
+
+  function showBpMenu() {
+    bpMenu.replaceChildren();
+
+    if (cloudModeActive) {
+      // Cloud backpack active — only show refresh
+      const refreshItem = document.createElement("button");
+      refreshItem.className = "sidebar-item-menu-action";
+      refreshItem.textContent = "Refresh from Cloud";
+      refreshItem.addEventListener("click", async () => {
+        bpMenu.hidden = true;
+        syncStatus.hidden = false;
+        syncStatus.textContent = "Refreshing from cloud\u2026";
+        syncStatus.className = "sidebar-sync-status";
+        try {
+          const result = await cbs.onCloudRefresh?.();
+          syncStatus.textContent = result ? `Refreshed ${result.graphs} graphs, ${result.kbDocs} KB docs` : "Refreshed";
+          setTimeout(() => { syncStatus.hidden = true; }, 3000);
+        } catch (err) {
+          syncStatus.textContent = "Refresh failed: " + (err as Error).message;
+          syncStatus.className = "sidebar-sync-status sidebar-sync-error";
+        }
+      });
+      bpMenu.appendChild(refreshItem);
+    } else {
+      // Local backpack active — push/pull options
+      const pushItem = document.createElement("button");
+      pushItem.className = "sidebar-item-menu-action";
+      pushItem.textContent = "Sync to Cloud";
+      pushItem.addEventListener("click", () => { bpMenu.hidden = true; doSyncPush(true); });
+      bpMenu.appendChild(pushItem);
+
+      const pushUnencItem = document.createElement("button");
+      pushUnencItem.className = "sidebar-item-menu-action sidebar-item-menu-danger";
+      pushUnencItem.textContent = "Sync unencrypted";
+      pushUnencItem.addEventListener("click", () => { bpMenu.hidden = true; doSyncPush(false); });
+      bpMenu.appendChild(pushUnencItem);
+    }
+
+    const rect = bpMenuBtn.getBoundingClientRect();
+    bpMenu.style.top = rect.bottom + 2 + "px";
+    bpMenu.style.left = rect.left + "px";
+    bpMenu.hidden = false;
+  }
+
+  bpMenuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!bpMenu.hidden) { bpMenu.hidden = true; } else { showBpMenu(); }
+  });
+  document.addEventListener("click", (e) => {
+    if (!bpMenu.hidden && !bpMenu.contains(e.target as Node) && !(e.target as HTMLElement).closest(".sidebar-picker-menu-btn")) {
+      bpMenu.hidden = true;
+    }
+  });
 
   // --- Tab bar: Graphs | Knowledge Base ---
   const tabBar = document.createElement("div");
@@ -471,43 +692,179 @@ export function initSidebar(
   const kbPane = document.createElement("div");
   kbPane.className = "sidebar-tab-pane hidden";
 
+  // KB mount picker (pill style matching backpack picker)
+  const kbPickerContainer = document.createElement("div");
+  kbPickerContainer.className = "kb-picker-container";
+
+  const kbPickerBtn = document.createElement("button");
+  kbPickerBtn.className = "kb-picker-pill";
+  kbPickerBtn.type = "button";
+  kbPickerBtn.setAttribute("aria-haspopup", "listbox");
+  const kbPickerName = document.createElement("span");
+  kbPickerName.className = "kb-picker-name";
+  kbPickerName.textContent = "All";
+  const kbPickerCaret = document.createElement("span");
+  kbPickerCaret.className = "backpack-picker-caret";
+  kbPickerCaret.textContent = "\u25BE";
+  kbPickerBtn.appendChild(kbPickerName);
+  kbPickerBtn.appendChild(kbPickerCaret);
+
+  const kbPickerDropdown = document.createElement("div");
+  kbPickerDropdown.className = "backpack-picker-dropdown";
+  kbPickerDropdown.hidden = true;
+
+  kbPickerContainer.appendChild(kbPickerBtn);
+  kbPickerContainer.appendChild(kbPickerDropdown);
+
+  let kbPickerOpen = false;
+  kbPickerBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    kbPickerOpen = !kbPickerOpen;
+    kbPickerDropdown.hidden = !kbPickerOpen;
+  });
+  document.addEventListener("click", (e) => {
+    if (kbPickerOpen && !kbPickerContainer.contains(e.target as Node)) {
+      kbPickerOpen = false;
+      kbPickerDropdown.hidden = true;
+    }
+  });
+
+  // KB three-dot menu (sync mount + add mount)
+  const kbMenuBtn = document.createElement("button");
+  kbMenuBtn.className = "sidebar-picker-menu-btn";
+  kbMenuBtn.type = "button";
+  kbMenuBtn.textContent = "\u22EE";
+  kbMenuBtn.title = "Knowledge base actions";
+  kbPickerContainer.appendChild(kbMenuBtn);
+
+  const kbMenu = document.createElement("div");
+  kbMenu.className = "sidebar-item-menu";
+  kbMenu.hidden = true;
+  container.appendChild(kbMenu);
+
+  function showKBMenu() {
+    kbMenu.replaceChildren();
+
+    if (isAuthenticated && cbs.onSyncKBMount && selectedMount !== "__all__") {
+      const syncItem = document.createElement("button");
+      syncItem.className = "sidebar-item-menu-action";
+      syncItem.textContent = `Sync "${selectedMount}" to cloud`;
+      syncItem.addEventListener("click", async () => {
+        kbMenu.hidden = true;
+        if (cbs.onSyncKBMount) await cbs.onSyncKBMount(selectedMount);
+      });
+      kbMenu.appendChild(syncItem);
+    }
+
+    if (isAuthenticated && cbs.onSyncKBMount && selectedMount === "__all__") {
+      const syncAllItem = document.createElement("button");
+      syncAllItem.className = "sidebar-item-menu-action";
+      syncAllItem.textContent = "Sync all KB to cloud";
+      syncAllItem.addEventListener("click", async () => {
+        kbMenu.hidden = true;
+        for (const m of currentKBMounts) {
+          if (cbs.onSyncKBMount) await cbs.onSyncKBMount(m.name);
+        }
+      });
+      kbMenu.appendChild(syncAllItem);
+    }
+
+    const addItem = document.createElement("button");
+    addItem.className = "sidebar-item-menu-action";
+    addItem.textContent = "Add mount\u2026";
+    addItem.addEventListener("click", async () => {
+      kbMenu.hidden = true;
+      const result = await showKBMountDialog();
+      if (result) cbs.onKBMountAdd?.(result.name, result.path, result.writable);
+    });
+    kbMenu.appendChild(addItem);
+
+    const rect = kbMenuBtn.getBoundingClientRect();
+    kbMenu.style.top = rect.bottom + 2 + "px";
+    kbMenu.style.left = rect.left + "px";
+    kbMenu.hidden = false;
+  }
+
+  kbMenuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!kbMenu.hidden) { kbMenu.hidden = true; } else { showKBMenu(); }
+  });
+  document.addEventListener("click", (e) => {
+    if (!kbMenu.hidden && !kbMenu.contains(e.target as Node) && !(e.target as HTMLElement).closest(".sidebar-picker-menu-btn")) {
+      kbMenu.hidden = true;
+    }
+  });
+
+  kbPane.appendChild(kbPickerContainer);
+
   const kbFilter = document.createElement("input");
   kbFilter.type = "text";
   kbFilter.placeholder = "Search documents...";
   kbFilter.className = "sidebar-kb-filter";
   kbPane.appendChild(kbFilter);
 
-  // Mounts section
-  const mountsSection = document.createElement("div");
-  mountsSection.className = "kb-mounts-section";
+  let selectedMount = "__all__";
+  let currentKBMounts: KBMountInfo[] = [];
 
-  const mountsHeader = document.createElement("div");
-  mountsHeader.className = "kb-mounts-header";
-  const mountsTitle = document.createElement("span");
-  mountsTitle.className = "kb-mounts-title";
-  mountsTitle.textContent = "MOUNTS";
-  const addMountBtn = document.createElement("button");
-  addMountBtn.className = "kb-mounts-add-btn";
-  addMountBtn.type = "button";
-  addMountBtn.textContent = "+";
-  addMountBtn.title = "Add KB mount";
-  addMountBtn.addEventListener("click", async () => {
-    const result = await showKBMountDialog();
-    if (result) {
-      cbs.onKBMountAdd?.(result.name, result.path, result.writable);
+  function renderKBPickerDropdown() {
+    kbPickerDropdown.replaceChildren();
+    const totalDocs = currentKBMounts.reduce((s, m) => s + m.docCount, 0);
+
+    // "All" option
+    const allItem = document.createElement("button");
+    allItem.className = "backpack-picker-item" + (selectedMount === "__all__" ? " active" : "");
+    allItem.type = "button";
+    const allLabel = document.createElement("span");
+    allLabel.className = "backpack-picker-item-name";
+    allLabel.textContent = `All (${totalDocs} docs)`;
+    allItem.appendChild(allLabel);
+    allItem.addEventListener("click", () => {
+      selectedMount = "__all__";
+      kbPickerName.textContent = "All";
+      kbPickerOpen = false;
+      kbPickerDropdown.hidden = true;
+      filterKBItems();
+    });
+    kbPickerDropdown.appendChild(allItem);
+
+    if (currentKBMounts.length > 0) {
+      const div = document.createElement("div");
+      div.className = "backpack-picker-divider";
+      kbPickerDropdown.appendChild(div);
     }
-  });
-  mountsHeader.appendChild(mountsTitle);
-  mountsHeader.appendChild(addMountBtn);
-  mountsSection.appendChild(mountsHeader);
 
-  const mountsList = document.createElement("div");
-  mountsList.className = "kb-mounts-list";
-  mountsSection.appendChild(mountsList);
+    for (const m of currentKBMounts) {
+      const item = document.createElement("button");
+      item.className = "backpack-picker-item" + (selectedMount === m.name ? " active" : "");
+      item.type = "button";
+      const label = document.createElement("span");
+      label.className = "backpack-picker-item-name";
+      label.textContent = `${m.name} (${m.docCount})`;
+      if (!m.writable) label.textContent += " \u2022 read-only";
+      item.appendChild(label);
+      item.addEventListener("click", () => {
+        selectedMount = m.name;
+        kbPickerName.textContent = m.name;
+        kbPickerOpen = false;
+        kbPickerDropdown.hidden = true;
+        filterKBItems();
+      });
+      kbPickerDropdown.appendChild(item);
+    }
+  }
 
-  kbPane.appendChild(mountsSection);
+  function filterKBItems() {
+    const query = kbFilter.value.toLowerCase();
+    for (const item of kbItems) {
+      const title = item.dataset.title ?? "";
+      const mount = item.dataset.mount ?? "";
+      const matchesSearch = title.includes(query);
+      const matchesMount = selectedMount === "__all__" || mount === selectedMount;
+      item.style.display = matchesSearch && matchesMount ? "" : "none";
+    }
+  }
+
   kbPane.appendChild(kbList);
-  // KB list is always visible inside KB pane (no heading needed)
   kbList.hidden = false;
   container.appendChild(kbPane);
 
@@ -528,15 +885,8 @@ export function initSidebar(
   graphsTab.addEventListener("click", () => switchTab("graphs"));
   kbTab.addEventListener("click", () => switchTab("kb"));
 
-  // KB filter (searches documents client-side)
   let kbItems: HTMLLIElement[] = [];
-  kbFilter.addEventListener("input", () => {
-    const query = kbFilter.value.toLowerCase();
-    for (const item of kbItems) {
-      const title = item.dataset.title ?? "";
-      item.style.display = title.includes(query) ? "" : "none";
-    }
-  });
+  kbFilter.addEventListener("input", () => filterKBItems());
 
   let items: HTMLLIElement[] = [];
   let remoteItems: HTMLLIElement[] = [];
@@ -826,6 +1176,7 @@ export function initSidebar(
         li.className = "ontology-item kb-item";
         li.dataset.id = doc.id;
         li.dataset.title = doc.title.toLowerCase();
+        li.dataset.mount = doc.collection || "";
 
         const nameSpan = document.createElement("span");
         nameSpan.className = "name";
@@ -834,94 +1185,55 @@ export function initSidebar(
         const statsSpan = document.createElement("span");
         statsSpan.className = "stats";
         const parts: string[] = [];
-        if (doc.collection) parts.push(doc.collection);
         if (doc.tags.length > 0) parts.push(doc.tags.join(", "));
         if (doc.sourceGraphs.length > 0) {
           parts.push(`from: ${doc.sourceGraphs.join(", ")}`);
         }
-        statsSpan.textContent = parts.join(" · ") || "document";
+        statsSpan.textContent = parts.join(" · ") || doc.collection || "document";
+
+        // Determine if this doc's mount is writable
+        const docMount = currentKBMounts.find(m => m.name === doc.collection);
+        const mountWritable = docMount ? docMount.writable : true;
+
+        // Three-dot menu button
+        const menuBtn = document.createElement("button");
+        menuBtn.className = "sidebar-item-menu-btn";
+        menuBtn.textContent = "\u22EE";
+        menuBtn.title = "Actions";
+        menuBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (!kbItemMenu.hidden && kbItemMenuTarget === doc.id) {
+            hideKBItemMenu();
+          } else {
+            showKBItemMenu(menuBtn, doc.id, doc.title, mountWritable);
+          }
+        });
 
         li.appendChild(nameSpan);
         li.appendChild(statsSpan);
+        li.appendChild(menuBtn);
 
-        li.addEventListener("click", () => cbs.onKBDocSelect?.(doc.id));
+        li.addEventListener("click", (e) => {
+          // Don't open doc if click was on the menu button
+          if ((e.target as HTMLElement).closest(".sidebar-item-menu-btn")) return;
+          cbs.onKBDocSelect?.(doc.id);
+        });
 
         kbList.appendChild(li);
         kbItems.push(li);
       }
+      filterKBItems();
     },
 
     setKBMounts(mounts: KBMountInfo[]) {
-      mountsList.replaceChildren();
-      for (const m of mounts) {
-        const row = document.createElement("div");
-        row.className = "kb-mount-row";
-
-        const info = document.createElement("div");
-        info.className = "kb-mount-info";
-
-        const name = document.createElement("span");
-        name.className = "kb-mount-name";
-        name.textContent = m.name;
-
-        const pathSpan = document.createElement("span");
-        pathSpan.className = "kb-mount-path";
-        pathSpan.textContent = m.path;
-        pathSpan.title = m.path + " — click to edit";
-
-        pathSpan.addEventListener("click", (e) => {
-          e.stopPropagation();
-          const input = document.createElement("input");
-          input.type = "text";
-          input.className = "kb-mount-path-input";
-          input.value = m.path;
-          pathSpan.replaceWith(input);
-          input.focus();
-          input.select();
-          const finish = () => {
-            const val = input.value.trim();
-            if (val && val !== m.path) {
-              cbs.onKBMountEdit?.(m.name, val);
-            }
-            input.replaceWith(pathSpan);
-          };
-          input.addEventListener("blur", finish);
-          input.addEventListener("keydown", (ke) => {
-            if (ke.key === "Enter") input.blur();
-            if (ke.key === "Escape") { input.value = m.path; input.blur(); }
-          });
-        });
-
-        const details = document.createElement("span");
-        details.className = "kb-mount-details";
-        const detailParts: string[] = [];
-        detailParts.push(`${m.docCount} doc${m.docCount !== 1 ? "s" : ""}`);
-        if (!m.writable) detailParts.push("read-only");
-        details.textContent = detailParts.join(" · ");
-
-        info.appendChild(name);
-        info.appendChild(pathSpan);
-        info.appendChild(details);
-        row.appendChild(info);
-
-        // Don't allow removing the last mount (or the default "private")
-        if (mounts.length > 1) {
-          const removeBtn = document.createElement("button");
-          removeBtn.className = "kb-mount-remove-btn";
-          removeBtn.type = "button";
-          removeBtn.textContent = "\u00d7";
-          removeBtn.title = `Remove ${m.name}`;
-          removeBtn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            showConfirm("Remove mount", `Remove KB mount "${m.name}"? Documents at this path will not be deleted.`).then((ok) => {
-              if (ok) cbs.onKBMountRemove?.(m.name);
-            });
-          });
-          row.appendChild(removeBtn);
-        }
-
-        mountsList.appendChild(row);
+      currentKBMounts = mounts;
+      // Validate current selection still exists
+      if (selectedMount !== "__all__" && !mounts.some(m => m.name === selectedMount)) {
+        selectedMount = "__all__";
+        kbPickerName.textContent = "All";
       }
+      renderKBPickerDropdown();
+      filterKBItems();
     },
 
     setActiveBranch(graphName: string, branchName: string, allBranches?: { name: string; active: boolean }[]) {
@@ -1003,6 +1315,10 @@ export function initSidebar(
         badge.title = "This graph has been synced";
         badge.classList.add("active");
       }
+    },
+
+    setCloudMode(active: boolean) {
+      cloudModeActive = active;
     },
 
     toggle: toggleSidebar,

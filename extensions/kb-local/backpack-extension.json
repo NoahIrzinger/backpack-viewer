@@ -1,0 +1,14 @@
+{
+  "name": "kb-local",
+  "version": "0.1.0",
+  "viewerApi": "1",
+  "displayName": "Local Knowledge Base",
+  "description": "Mount local filesystem directories as knowledge base sources. Browse, search, sync, and manage markdown documents.",
+  "entry": "src/index.js",
+  "permissions": {
+    "graph": [],
+    "viewer": [],
+    "settings": true,
+    "kb": ["read", "write", "mount"]
+  }
+}

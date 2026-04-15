@@ -20,6 +20,7 @@ import {
   resolveAuthorName,
 } from "backpack-ontology";
 import type { ViewerConfig } from "./config.js";
+import { CloudCacheBackend } from "backpack-ontology";
 import { readExtensionSettings, writeExtensionSetting } from "./server-extensions.js";
 
 /**
@@ -49,11 +50,13 @@ export interface BackpackEntry {
 
 export interface ApiContext {
   /** Mutable wrapper around the storage backend so backpack-switch can swap it. */
-  storage: { current: JsonFileBackend; activeEntry: BackpackEntry | null };
+  storage: { current: JsonFileBackend | CloudCacheBackend; activeEntry: BackpackEntry | null };
   remoteRegistry: RemoteRegistry;
   viewerConfig: ViewerConfig;
   /** Recreate the backend pointing at the active backpack. */
   makeBackend: () => Promise<{ backend: JsonFileBackend; entry: BackpackEntry }>;
+  /** Cloud cache backend — always available, used when "Cloud" backpack is active. */
+  cloudCache: CloudCacheBackend;
   /** Optional hook called after a successful backpack switch (vite uses this for WS broadcast). */
   onActiveBackpackChange?: () => void;
   /** How to answer GET /api/version-check. Differs between dev (always not-stale) and prod (cached npm lookup). */
@@ -84,6 +87,107 @@ function sendErr(res: ServerResponse, status: number, message: string): void {
 
 function urlPath(req: IncomingMessage): string {
   return (req.url ?? "/").replace(/\?.*$/, "");
+}
+
+// --- Shared sync helpers ---
+
+/**
+ * Sync a single graph to the cloud relay using BPAK envelope format.
+ * Handles encryption, envelope building, device headers, and synced-status tracking.
+ */
+async function syncGraphToRelay(
+  name: string,
+  data: Record<string, unknown>,
+  token: string,
+  relayUrl: string,
+  encrypted: boolean = true,
+  kind: string = "learning_graph",
+): Promise<void> {
+  const graphJSON = new TextEncoder().encode(JSON.stringify(data));
+  let payload: Uint8Array;
+  let format: string;
+
+  if (encrypted) {
+    const age = await import("age-encryption");
+    const settings = await readExtensionSettings("share");
+    const keys = ((settings.keys as Record<string, string>) || {});
+    let secretKey = keys[name];
+    if (!secretKey) {
+      secretKey = await age.generateX25519Identity();
+      keys[name] = secretKey;
+      await writeExtensionSetting("share", "keys", keys);
+    }
+    const publicKey = await age.identityToRecipient(secretKey);
+    const e = new age.Encrypter();
+    e.addRecipient(publicKey);
+    payload = await e.encrypt(graphJSON);
+    format = "age-v1";
+  } else {
+    payload = graphJSON;
+    format = "plaintext";
+  }
+
+  // Build BPAK envelope
+  const typeSet = new Set<string>();
+  const nodes = (data as Record<string, unknown>).nodes as { type: string }[] | undefined;
+  if (nodes) for (const n of nodes) typeSet.add(n.type);
+  const checksumBuf = await crypto.subtle.digest("SHA-256", new Uint8Array(payload).buffer as ArrayBuffer);
+  const checksum = "sha256:" + Array.from(new Uint8Array(checksumBuf)).map(b => b.toString(16).padStart(2, "0")).join("");
+  const headerObj: Record<string, unknown> = {
+    format,
+    kind,
+    created_at: new Date().toISOString(),
+    backpack_name: name,
+    checksum,
+  };
+  if (kind === "knowledge_base") {
+    headerObj.document_count = ((data as Record<string, unknown>).documents as unknown[] || []).length;
+  } else {
+    headerObj.graph_count = 1;
+    headerObj.node_count = (nodes || []).length;
+    headerObj.edge_count = ((data as Record<string, unknown>).edges as unknown[] || []).length;
+    headerObj.node_types = Array.from(typeSet);
+  }
+  const header = JSON.stringify(headerObj);
+  const headerBytes = new TextEncoder().encode(header);
+  const headerLenBuf = new ArrayBuffer(4);
+  new DataView(headerLenBuf).setUint32(0, headerBytes.length, false);
+  const envelope = new Uint8Array(4 + 1 + 4 + headerBytes.length + payload.length);
+  let off = 0;
+  envelope.set(new Uint8Array([0x42, 0x50, 0x41, 0x4b]), off); off += 4;
+  envelope[off] = 0x01; off += 1;
+  envelope.set(new Uint8Array(headerLenBuf), off); off += 4;
+  envelope.set(headerBytes, off); off += headerBytes.length;
+  envelope.set(payload, off);
+
+  // Send to relay
+  const syncHeaders: Record<string, string> = {
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": "application/octet-stream",
+  };
+  try {
+    syncHeaders["X-Backpack-Device-Name"] = os.hostname();
+    syncHeaders["X-Backpack-Device-Hostname"] = os.hostname();
+    syncHeaders["X-Backpack-Device-Platform"] = os.platform();
+  } catch { /* device info unavailable */ }
+
+  const relayRes = await fetch(`${relayUrl}/api/graphs/${encodeURIComponent(name)}/sync`, {
+    method: "PUT",
+    headers: syncHeaders,
+    body: envelope,
+  });
+
+  if (!relayRes.ok) {
+    let msg = `Sync failed (${relayRes.status})`;
+    try { const b = await relayRes.json() as Record<string, string>; if (b.error) msg = b.error; } catch {}
+    throw new Error(msg);
+  }
+
+  // Mark as synced
+  const syncedSettings = await readExtensionSettings("share");
+  const synced = ((syncedSettings.synced as Record<string, boolean>) || {});
+  synced[name] = true;
+  await writeExtensionSetting("share", "synced", synced);
 }
 
 // --- Main dispatcher ---
@@ -185,6 +289,14 @@ export async function handleApiRequest(
       return true;
     }
 
+    // Helper: get local-only backend (branches/snapshots/snippets don't apply to cloud)
+    function localBackend(): JsonFileBackend {
+      if (ctx.storage.current instanceof CloudCacheBackend) {
+        throw new Error("Branches, snapshots, and snippets are not available for cloud backpacks");
+      }
+      return ctx.storage.current;
+    }
+
     // --- /api/graphs/<name>/branches/* ---
     const branchSwitch = url.match(/^\/api\/graphs\/(.+)\/branches\/switch$/);
     if (branchSwitch && method === "POST") {
@@ -192,7 +304,7 @@ export async function handleApiRequest(
       const body = await readBody(req);
       try {
         const { name: branchName } = JSON.parse(body);
-        await ctx.storage.current.switchBranch(graphName, branchName);
+        await localBackend().switchBranch(graphName, branchName);
         sendJson(res, 200, { ok: true });
       } catch (err) {
         sendErr(res, 400, (err as Error).message);
@@ -205,7 +317,7 @@ export async function handleApiRequest(
       const graphName = decodeURIComponent(deleteBranch[1]);
       const branchName = decodeURIComponent(deleteBranch[2]);
       try {
-        await ctx.storage.current.deleteBranch(graphName, branchName);
+        await localBackend().deleteBranch(graphName, branchName);
         sendJson(res, 200, { ok: true });
       } catch (err) {
         sendErr(res, 400, (err as Error).message);
@@ -217,7 +329,7 @@ export async function handleApiRequest(
     if (branches && method === "GET") {
       const graphName = decodeURIComponent(branches[1]);
       try {
-        const list = await ctx.storage.current.listBranches(graphName);
+        const list = await localBackend().listBranches(graphName);
         sendJson(res, 200, list);
       } catch (err) {
         sendErr(res, 500, (err as Error).message);
@@ -230,7 +342,7 @@ export async function handleApiRequest(
       const body = await readBody(req);
       try {
         const { name: branchName, from } = JSON.parse(body);
-        await ctx.storage.current.createBranch(graphName, branchName, from);
+        await localBackend().createBranch(graphName, branchName, from);
         sendJson(res, 200, { ok: true });
       } catch (err) {
         sendErr(res, 400, (err as Error).message);
@@ -243,7 +355,7 @@ export async function handleApiRequest(
     if (snapshots && method === "GET") {
       const graphName = decodeURIComponent(snapshots[1]);
       try {
-        const list = await ctx.storage.current.listSnapshots(graphName);
+        const list = await localBackend().listSnapshots(graphName);
         sendJson(res, 200, list);
       } catch (err) {
         sendErr(res, 500, (err as Error).message);
@@ -256,7 +368,7 @@ export async function handleApiRequest(
       const body = await readBody(req);
       try {
         const { label } = JSON.parse(body);
-        await ctx.storage.current.createSnapshot(graphName, label);
+        await localBackend().createSnapshot(graphName, label);
         sendJson(res, 200, { ok: true });
       } catch (err) {
         sendErr(res, 400, (err as Error).message);
@@ -271,7 +383,7 @@ export async function handleApiRequest(
       const body = await readBody(req);
       try {
         const { version } = JSON.parse(body);
-        await ctx.storage.current.rollback(graphName, version);
+        await localBackend().rollback(graphName, version);
         sendJson(res, 200, { ok: true });
       } catch (err) {
         sendErr(res, 400, (err as Error).message);
@@ -286,7 +398,7 @@ export async function handleApiRequest(
       const version = parseInt(diff[2], 10);
       try {
         const current = await ctx.storage.current.loadOntology(graphName);
-        const snapshot = await ctx.storage.current.loadSnapshot(graphName, version);
+        const snapshot = await localBackend().loadSnapshot(graphName, version);
         const currentNodeIds = new Set(current.nodes.map((n: any) => n.id));
         const snapshotNodeIds = new Set(snapshot.nodes.map((n: any) => n.id));
         const currentEdgeIds = new Set(current.edges.map((e: any) => e.id));
@@ -309,7 +421,7 @@ export async function handleApiRequest(
       const graphName = decodeURIComponent(snippetItem[1]);
       const snippetId = decodeURIComponent(snippetItem[2]);
       try {
-        const snippet = await ctx.storage.current.loadSnippet(graphName, snippetId);
+        const snippet = await localBackend().loadSnippet(graphName, snippetId);
         sendJson(res, 200, snippet);
       } catch {
         sendErr(res, 404, "Snippet not found");
@@ -321,7 +433,7 @@ export async function handleApiRequest(
       const graphName = decodeURIComponent(snippetItem[1]);
       const snippetId = decodeURIComponent(snippetItem[2]);
       try {
-        await ctx.storage.current.deleteSnippet(graphName, snippetId);
+        await localBackend().deleteSnippet(graphName, snippetId);
         sendJson(res, 200, { ok: true });
       } catch (err) {
         sendErr(res, 400, (err as Error).message);
@@ -333,7 +445,7 @@ export async function handleApiRequest(
     if (snippets && method === "GET") {
       const graphName = decodeURIComponent(snippets[1]);
       try {
-        const list = await ctx.storage.current.listSnippets(graphName);
+        const list = await localBackend().listSnippets(graphName);
         sendJson(res, 200, list);
       } catch {
         sendJson(res, 200, []);
@@ -346,7 +458,7 @@ export async function handleApiRequest(
       const body = await readBody(req);
       try {
         const { label, description, nodeIds, edgeIds } = JSON.parse(body);
-        const id = await ctx.storage.current.saveSnippet(graphName, {
+        const id = await localBackend().saveSnippet(graphName, {
           label,
           description,
           nodeIds,
@@ -409,12 +521,21 @@ export async function handleApiRequest(
       const body = await readBody(req);
       try {
         const { name } = JSON.parse(body);
-        await setActiveBackpack(name);
-        const swapped = await ctx.makeBackend();
-        ctx.storage.current = swapped.backend;
-        ctx.storage.activeEntry = swapped.entry;
-        ctx.onActiveBackpackChange?.();
-        sendJson(res, 200, { ok: true, active: ctx.storage.activeEntry });
+        if (name === "__cloud__") {
+          // Switch to cloud cache backend
+          await ctx.cloudCache.initialize();
+          ctx.storage.current = ctx.cloudCache;
+          ctx.storage.activeEntry = { name: "Cloud", path: "cloud://app.backpackontology.com", color: "#5b9bd5" };
+          ctx.onActiveBackpackChange?.();
+          sendJson(res, 200, { ok: true, active: ctx.storage.activeEntry });
+        } else {
+          await setActiveBackpack(name);
+          const swapped = await ctx.makeBackend();
+          ctx.storage.current = swapped.backend;
+          ctx.storage.activeEntry = swapped.entry;
+          ctx.onActiveBackpackChange?.();
+          sendJson(res, 200, { ok: true, active: ctx.storage.activeEntry });
+        }
       } catch (err) {
         sendErr(res, 400, (err as Error).message);
       }
@@ -523,7 +644,9 @@ export async function handleApiRequest(
 
     // --- /api/kb/* (Knowledge Base documents) ---
 
-    // Helper: resolve a DocumentStore for the active backpack
+    const isCloudActive = ctx.storage.current instanceof CloudCacheBackend;
+
+    // Helper: resolve a DocumentStore for the active backpack (local only)
     async function getDocStore(): Promise<DocumentStore> {
       const active = ctx.storage.activeEntry;
       if (!active) throw new Error("No active backpack");
@@ -539,14 +662,19 @@ export async function handleApiRequest(
 
     if (url === "/api/kb/documents" && method === "GET") {
       try {
-        const docs = await getDocStore();
-        const params = new URL(req.url ?? "/", "http://localhost").searchParams;
-        const result = await docs.list({
-          collection: params.get("collection") ?? undefined,
-          limit: params.has("limit") ? parseInt(params.get("limit")!, 10) : undefined,
-          offset: params.has("offset") ? parseInt(params.get("offset")!, 10) : undefined,
-        });
-        sendJson(res, 200, result);
+        if (isCloudActive) {
+          const docs = await ctx.cloudCache.listCachedKBDocs();
+          sendJson(res, 200, { documents: docs, total: docs.length, hasMore: false });
+        } else {
+          const docs = await getDocStore();
+          const params = new URL(req.url ?? "/", "http://localhost").searchParams;
+          const result = await docs.list({
+            collection: params.get("collection") ?? undefined,
+            limit: params.has("limit") ? parseInt(params.get("limit")!, 10) : undefined,
+            offset: params.has("offset") ? parseInt(params.get("offset")!, 10) : undefined,
+          });
+          sendJson(res, 200, result);
+        }
       } catch (err) {
         sendErr(res, 500, (err as Error).message);
       }
@@ -572,9 +700,14 @@ export async function handleApiRequest(
 
     if (url === "/api/kb/mounts" && method === "GET") {
       try {
-        const docs = await getDocStore();
-        const mounts = await docs.listMounts();
-        sendJson(res, 200, mounts);
+        if (isCloudActive) {
+          const docs = await ctx.cloudCache.listCachedKBDocs();
+          sendJson(res, 200, [{ name: "cloud", path: "cloud://backpack", writable: true, docCount: docs.length, type: "cloud" }]);
+        } else {
+          const docs = await getDocStore();
+          const mounts = await docs.listMounts();
+          sendJson(res, 200, mounts);
+        }
       } catch (err) {
         sendErr(res, 500, (err as Error).message);
       }
@@ -611,9 +744,14 @@ export async function handleApiRequest(
     if (kbDocItem && method === "GET") {
       const id = decodeURIComponent(kbDocItem[1]);
       try {
-        const docs = await getDocStore();
-        const doc = await docs.read(id);
-        sendJson(res, 200, doc);
+        if (isCloudActive) {
+          const doc = await ctx.cloudCache.readCachedKBDoc(id);
+          sendJson(res, 200, doc);
+        } else {
+          const docs = await getDocStore();
+          const doc = await docs.read(id);
+          sendJson(res, 200, doc);
+        }
       } catch (err) {
         sendErr(res, 404, (err as Error).message);
       }
@@ -636,7 +774,7 @@ export async function handleApiRequest(
     if (url === "/api/backpack/sync" && method === "POST") {
       const body = await readBody(req);
       try {
-        const { direction } = JSON.parse(body) as { direction: "push" | "pull" };
+        const { direction, encrypted: wantEncrypted = true } = JSON.parse(body) as { direction: "push" | "pull"; encrypted?: boolean };
         const settings = await readExtensionSettings("share");
         const token = settings.relay_token;
         if (!token || typeof token !== "string") {
@@ -645,115 +783,94 @@ export async function handleApiRequest(
         }
         const relayUrl = (settings.relay_url as string) || "https://app.backpackontology.com";
 
-        const result = { total: 0, synced: 0, skipped: 0, failed: 0, errors: [] as string[] };
+        type SyncItemStatus = "synced" | "failed" | "skipped";
+        interface SyncItem { name: string; kind: "graph" | "kb"; status: SyncItemStatus; error?: string }
+        const result = { total: 0, synced: 0, skipped: 0, failed: 0, errors: [] as string[], items: [] as SyncItem[] };
 
         if (direction === "push") {
-          // Push graphs via cloud-sync proxy (handles BPAK + encryption)
+          // Push graphs via BPAK envelopes with encryption
           const summaries = await ctx.storage.current.listOntologies();
           result.total += summaries.length;
           for (const s of summaries) {
             try {
               const data = await ctx.storage.current.loadOntology(s.name);
-              const syncRes = await fetch(`${relayUrl}/api/graphs/${encodeURIComponent(s.name)}`, {
-                method: "PUT",
-                headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-                body: JSON.stringify(data),
-              });
-              if (syncRes.ok) { result.synced++; }
-              else if (syncRes.status === 404) {
-                // Graph doesn't exist yet — create first
-                const createRes = await fetch(`${relayUrl}/api/graphs`, {
-                  method: "POST",
-                  headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-                  body: JSON.stringify({ name: s.name, description: data.metadata?.description || "" }),
-                });
-                if (createRes.ok) {
-                  const saveRes = await fetch(`${relayUrl}/api/graphs/${encodeURIComponent(s.name)}`, {
-                    method: "PUT",
-                    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-                    body: JSON.stringify(data),
-                  });
-                  if (saveRes.ok) { result.synced++; } else { result.failed++; result.errors.push(`Graph "${s.name}": save failed ${saveRes.status}`); }
-                } else { result.failed++; result.errors.push(`Graph "${s.name}": create failed ${createRes.status}`); }
-              }
-              else { result.failed++; result.errors.push(`Graph "${s.name}": ${syncRes.status}`); }
-            } catch (err) { result.failed++; result.errors.push(`Graph "${s.name}": ${(err as Error).message}`); }
+              await syncGraphToRelay(s.name, data as unknown as Record<string, unknown>, token, relayUrl, wantEncrypted);
+              result.synced++;
+              result.items.push({ name: s.name, kind: "graph", status: "synced" });
+            } catch (err) {
+              result.failed++;
+              const msg = (err as Error).message;
+              result.errors.push(`Graph "${s.name}": ${msg}`);
+              result.items.push({ name: s.name, kind: "graph", status: "failed", error: msg });
+            }
           }
 
-          // Push KB docs individually
+          // Push KB docs as encrypted BPAK envelope (same as graphs)
           try {
             const docs = await getDocStore();
             const kbResult = await docs.list();
-            result.total += kbResult.documents.length;
-            for (const summary of kbResult.documents) {
+            if (kbResult.documents.length > 0) {
+              const allDocs = await Promise.all(kbResult.documents.map(s => docs.read(s.id)));
+              result.total++;
               try {
-                const doc = await docs.read(summary.id);
-                const putRes = await fetch(`${relayUrl}/api/kb/documents/${encodeURIComponent(doc.id)}`, {
-                  method: "PUT",
-                  headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-                  body: JSON.stringify(doc),
-                });
-                if (putRes.ok) { result.synced++; } else { result.failed++; result.errors.push(`KB "${doc.title}": ${putRes.status}`); }
-              } catch (err) { result.failed++; result.errors.push(`KB "${summary.title}": ${(err as Error).message}`); }
+                await syncGraphToRelay(
+                  "knowledge-base",
+                  { documents: allDocs } as unknown as Record<string, unknown>,
+                  token, relayUrl, wantEncrypted, "knowledge_base",
+                );
+                result.synced++;
+                result.items.push({ name: `KB (${allDocs.length} docs)`, kind: "kb", status: "synced" });
+              } catch (err) {
+                result.failed++;
+                result.errors.push(`KB: ${(err as Error).message}`);
+                result.items.push({ name: `KB (${allDocs.length} docs)`, kind: "kb", status: "failed", error: (err as Error).message });
+              }
             }
           } catch { /* no KB mount configured */ }
         } else {
-          // Pull graphs
-          const cloudRes = await fetch(`${relayUrl}/api/graphs`, { headers: { "Authorization": `Bearer ${token}` } });
-          if (!cloudRes.ok) {
+          // Pull graphs + KB into cloud cache (never into local backpacks)
+          try {
+            await ctx.cloudCache.initialize();
+            const refreshResult = await ctx.cloudCache.refreshFromCloud();
+            result.total = refreshResult.graphs + refreshResult.kbDocs;
+            result.synced = refreshResult.graphs + refreshResult.kbDocs;
+            result.items.push({ name: `${refreshResult.graphs} graphs`, kind: "graph", status: "synced" });
+            if (refreshResult.kbDocs > 0) {
+              result.items.push({ name: `${refreshResult.kbDocs} KB docs`, kind: "kb", status: "synced" });
+            }
+          } catch (pullErr) {
             result.failed++;
-            result.errors.push(`Failed to list cloud graphs: ${cloudRes.status}`);
-          } else {
-            const cloudGraphs = await cloudRes.json() as { name: string; encrypted?: boolean }[];
-            const localNames = new Set((await ctx.storage.current.listOntologies()).map(s => s.name));
-            const pullable = cloudGraphs.filter(g => !g.encrypted && !localNames.has(g.name));
-            result.total += pullable.length;
-            for (const g of pullable) {
-              try {
-                const dataRes = await fetch(`${relayUrl}/api/graphs/${encodeURIComponent(g.name)}`, { headers: { "Authorization": `Bearer ${token}` } });
-                if (!dataRes.ok) { result.failed++; result.errors.push(`Graph "${g.name}": ${dataRes.status}`); continue; }
-                const data = await dataRes.json();
-                await ctx.storage.current.createOntology(g.name, data.metadata?.description || "");
-                await ctx.storage.current.saveOntology(g.name, data);
-                result.synced++;
-              } catch (err) { result.failed++; result.errors.push(`Graph "${g.name}": ${(err as Error).message}`); }
-            }
-          }
-
-          // Pull KB docs
-          const kbRes = await fetch(`${relayUrl}/api/kb/documents?limit=1000`, { headers: { "Authorization": `Bearer ${token}` } });
-          if (!kbRes.ok) {
-            result.errors.push(`Failed to list cloud KB docs: ${kbRes.status}`);
-          } else {
-            const cloudDocs = (await kbRes.json()) as { documents: { id: string; title: string; updatedAt: string }[] };
-            result.total += cloudDocs.documents.length;
-            try {
-              const docs = await getDocStore();
-              const localDocs = await docs.list();
-              const localMap = new Map(localDocs.documents.map(d => [d.id, d]));
-              for (const cd of cloudDocs.documents) {
-                const local = localMap.get(cd.id);
-                if (local && new Date(local.updatedAt) >= new Date(cd.updatedAt)) {
-                  result.skipped++;
-                  continue;
-                }
-                try {
-                  const fullRes = await fetch(`${relayUrl}/api/kb/documents/${encodeURIComponent(cd.id)}`, { headers: { "Authorization": `Bearer ${token}` } });
-                  if (!fullRes.ok) { result.failed++; continue; }
-                  const fullDoc = await fullRes.json();
-                  await docs.save(fullDoc);
-                  result.synced++;
-                } catch (err) { result.failed++; result.errors.push(`KB "${cd.title}": ${(err as Error).message}`); }
-              }
-            } catch (kbErr) {
-              result.errors.push(`KB mount: ${(kbErr as Error).message}`);
-            }
+            result.errors.push(`Pull failed: ${(pullErr as Error).message}`);
+            result.items.push({ name: "Cloud refresh", kind: "graph", status: "failed", error: (pullErr as Error).message });
           }
         }
 
         sendJson(res, 200, result);
       } catch (err) {
         sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    // --- /api/cloud-cache/refresh ---
+    if (url === "/api/cloud-cache/refresh" && method === "POST") {
+      try {
+        await ctx.cloudCache.initialize();
+        const refreshResult = await ctx.cloudCache.refreshFromCloud();
+        sendJson(res, 200, refreshResult);
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    // --- /api/cloud-cache/meta ---
+    if (url === "/api/cloud-cache/meta" && method === "GET") {
+      try {
+        const meta = await ctx.cloudCache.getCacheMeta();
+        sendJson(res, 200, meta || {});
+      } catch {
+        sendJson(res, 200, {});
       }
       return true;
     }
@@ -990,98 +1107,14 @@ export async function handleApiRequest(
         }
         const relayUrl = (settings.relay_url as string) || "https://app.backpackontology.com";
         const body = await readBody(req);
-        const graphJSON = new TextEncoder().encode(body);
+        const parsed = JSON.parse(body);
 
         const params = new URLSearchParams(url.split("?")[1] || "");
         const wantEncrypted = params.get("encrypted") !== "false";
-
-        let payload: Uint8Array;
-        let format: string;
-
-        if (wantEncrypted) {
-          const age = await import("age-encryption");
-          const keys = ((settings.keys as Record<string, string>) || {});
-          let secretKey = keys[name];
-          if (!secretKey) {
-            secretKey = await age.generateX25519Identity();
-            keys[name] = secretKey;
-            await writeExtensionSetting("share", "keys", keys);
-          }
-          const publicKey = await age.identityToRecipient(secretKey);
-          const e = new age.Encrypter();
-          e.addRecipient(publicKey);
-          payload = await e.encrypt(graphJSON);
-          format = "age-v1";
-        } else {
-          payload = graphJSON;
-          format = "plaintext";
-        }
-
-        // Build BPAK envelope
-        const parsed = JSON.parse(body);
         const kind = params.get("kind") || "learning_graph";
-        const typeSet = new Set<string>();
-        if (parsed.nodes) for (const n of parsed.nodes) typeSet.add(n.type);
-        const checksumBuf = await crypto.subtle.digest("SHA-256", new Uint8Array(payload).buffer as ArrayBuffer);
-        const checksum = "sha256:" + Array.from(new Uint8Array(checksumBuf)).map(b => b.toString(16).padStart(2, "0")).join("");
-        const headerObj: Record<string, unknown> = {
-          format,
-          kind,
-          created_at: new Date().toISOString(),
-          backpack_name: name,
-          checksum,
-        };
-        if (kind === "knowledge_base") {
-          headerObj.document_count = (parsed.documents || []).length;
-        } else {
-          headerObj.graph_count = 1;
-          headerObj.node_count = (parsed.nodes || []).length;
-          headerObj.edge_count = (parsed.edges || []).length;
-          headerObj.node_types = Array.from(typeSet);
-        }
-        const header = JSON.stringify(headerObj);
-        const headerBytes = new TextEncoder().encode(header);
-        const headerLenBuf = new ArrayBuffer(4);
-        new DataView(headerLenBuf).setUint32(0, headerBytes.length, false);
-        const envelope = new Uint8Array(4 + 1 + 4 + headerBytes.length + payload.length);
-        let off = 0;
-        envelope.set(new Uint8Array([0x42, 0x50, 0x41, 0x4b]), off); off += 4;
-        envelope[off] = 0x01; off += 1;
-        envelope.set(new Uint8Array(headerLenBuf), off); off += 4;
-        envelope.set(headerBytes, off); off += headerBytes.length;
-        envelope.set(payload, off);
 
-        // Proxy to relay
-        const syncHeaders: Record<string, string> = {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/octet-stream",
-        };
-        try {
-          syncHeaders["X-Backpack-Device-Name"] = os.hostname();
-          syncHeaders["X-Backpack-Device-Hostname"] = os.hostname();
-          syncHeaders["X-Backpack-Device-Platform"] = os.platform();
-        } catch { /* device info unavailable */ }
-
-        const relayRes = await fetch(`${relayUrl}/api/graphs/${encodeURIComponent(name)}/sync`, {
-          method: "PUT",
-          headers: syncHeaders,
-          body: envelope,
-        });
-
-        if (!relayRes.ok) {
-          let msg = `Sync failed (${relayRes.status})`;
-          try { const b = await relayRes.json(); if (b.error) msg = b.error; } catch {}
-          sendErr(res, relayRes.status, msg);
-          return true;
-        }
-
-        // Mark as synced in extension settings
-        const synced = ((settings.synced as Record<string, boolean>) || {});
-        synced[name] = true;
-        await writeExtensionSetting("share", "synced", synced);
-
-        const result = await relayRes.json();
-        sendJson(res, 200, result);
+        await syncGraphToRelay(name, parsed, token, relayUrl, wantEncrypted, kind);
+        sendJson(res, 200, { ok: true });
       } catch (err) {
         sendErr(res, 500, (err as Error).message);
       }

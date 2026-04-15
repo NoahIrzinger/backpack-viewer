@@ -11,6 +11,7 @@ import {
 import { initKBPanel } from "./kb-panel";
 import { renderMarkdown } from "./markdown";
 import { initSidebar } from "./sidebar";
+import { kbMountProviders } from "./extensions/api";
 import { initCanvas, type FocusInfo } from "./canvas";
 import { initInfoPanel } from "./info-panel";
 import { createPanelMount } from "./extensions/panel-mount";
@@ -33,6 +34,7 @@ import "./style.css";
 
 let activeOntology = "";
 let currentData: LearningGraphData | null = null;
+let isCloudActive = false;
 let remoteNames = new Set<string>();
 let cloudNames = new Set<string>();
 let cachedCloudBackpacks: { name: string; encrypted: boolean; nodeCount?: number; edgeCount?: number }[] = [];
@@ -722,15 +724,25 @@ async function main() {
           return;
         }
         if (name === "__cloud__") {
-          // Show only cloud — hide local graphs + local KB
-          sidebar.setSummaries([]);
-          sidebar.setCloudBackpacks(cachedCloudBackpacks, cachedCloudEmail);
-          sidebar.setKBDocuments([]);
-          sidebar.setKBMounts([]);
+          // Switch server-side to cloud cache backend
+          await fetch("/api/backpacks/switch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: "__cloud__" }),
+          });
+          // Load graphs from cloud cache
+          const summaries = await fetch("/api/ontologies").then(r => r.json());
+          sidebar.setSummaries(summaries);
+          sidebar.setCloudBackpacks([]);
+          isCloudActive = true;
+          sidebar.setCloudMode(true);
+          refreshKB();
           return;
         }
         // Specific local backpack — show only that backpack's graphs + KB, hide cloud
         sidebar.setCloudBackpacks([]);
+        isCloudActive = false;
+        sidebar.setCloudMode(false);
         await fetch("/api/backpacks/switch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -812,6 +824,77 @@ async function main() {
         } catch (err) {
           sidebar.setSyncResult(graphName, false);
           showToast((err as Error).message);
+        }
+      },
+      onSyncPush: async (encrypted = true) => {
+        const res = await fetch("/api/backpack/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ direction: "push", encrypted }),
+        });
+        return res.json();
+      },
+      onSyncPull: async () => {
+        // Pull refreshes the cloud cache, NOT the local backpack
+        const res = await fetch("/api/cloud-cache/refresh", { method: "POST" });
+        const refreshResult = await res.json();
+        // If cloud is active, refresh the graph list from cache
+        if (isCloudActive) {
+          const summaries = await fetch("/api/ontologies").then(r => r.json());
+          sidebar.setSummaries(summaries);
+          refreshKB();
+        }
+        return { total: refreshResult.graphs + refreshResult.kbDocs, synced: refreshResult.graphs + refreshResult.kbDocs, failed: 0, skipped: 0, errors: [], items: [] };
+      },
+      onCloudRefresh: async () => {
+        const res = await fetch("/api/cloud-cache/refresh", { method: "POST" });
+        const result = await res.json();
+        // Refresh sidebar if cloud is active
+        if (isCloudActive) {
+          const summaries = await fetch("/api/ontologies").then(r => r.json());
+          sidebar.setSummaries(summaries);
+          refreshKB();
+        }
+        return result;
+      },
+      onSyncKBDoc: async (docId: string) => {
+        // Sync single KB doc via encrypted BPAK envelope through server proxy
+        const docRes = await fetch(`/api/kb/documents/${encodeURIComponent(docId)}`);
+        if (!docRes.ok) return false;
+        const doc = await docRes.json();
+        const res = await fetch("/api/cloud-sync/knowledge-base?kind=knowledge_base", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ documents: [doc] }),
+        });
+        return res.ok;
+      },
+      onSyncKBMount: async (mountName: string) => {
+        // Sync all docs in a mount via encrypted BPAK envelope
+        const listRes = await fetch(`/api/kb/documents?collection=${encodeURIComponent(mountName)}&limit=1000`);
+        if (!listRes.ok) return { synced: 0, failed: 1, total: 0 };
+        const { documents } = await listRes.json();
+        if (documents.length === 0) return { synced: 0, failed: 0, total: 0 };
+        const allDocs = await Promise.all(
+          documents.map(async (d: { id: string }) => {
+            const r = await fetch(`/api/kb/documents/${encodeURIComponent(d.id)}`);
+            return r.json();
+          }),
+        );
+        const res = await fetch("/api/cloud-sync/knowledge-base?kind=knowledge_base", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ documents: allDocs }),
+        });
+        return { synced: res.ok ? allDocs.length : 0, failed: res.ok ? 0 : allDocs.length, total: allDocs.length };
+      },
+      onKBDocDelete: async (docId: string) => {
+        await fetch(`/api/kb/documents/${encodeURIComponent(docId)}`, { method: "DELETE" });
+        // Refresh KB list
+        const kbRes = await fetch("/api/kb/documents?limit=1000");
+        if (kbRes.ok) {
+          const { documents } = await kbRes.json();
+          sidebar.setKBDocuments(documents);
         }
       },
     }
@@ -903,17 +986,36 @@ async function main() {
 
   async function refreshKB() {
     try {
-      const [kbResult, mounts] = await Promise.all([
-        listKBDocuments({ limit: 50 }),
-        listKBMounts(),
-      ]);
-      sidebar.setKBDocuments(kbResult.documents);
-      sidebar.setKBMounts(mounts);
+      if (kbMountProviders.size > 0) {
+        // Use extension-registered providers
+        const allDocs: { id: string; title: string; tags: string[]; sourceGraphs: string[]; collection: string; createdAt: string; updatedAt: string }[] = [];
+        const mountInfos: { name: string; path: string; writable: boolean; docCount: number; type?: string }[] = [];
+        for (const [, provider] of kbMountProviders) {
+          try {
+            const result = await provider.list({ limit: 1000 });
+            for (const doc of result.documents) allDocs.push(doc);
+            mountInfos.push({ name: provider.name, path: "", writable: provider.writable, docCount: result.total, type: provider.type });
+          } catch { /* provider failed, skip */ }
+        }
+        sidebar.setKBMounts(mountInfos as any);
+        sidebar.setKBDocuments(allDocs as any);
+      } else {
+        // Fallback to server API
+        const [kbResult, mounts] = await Promise.all([
+          listKBDocuments({ limit: 50 }),
+          listKBMounts(),
+        ]);
+        sidebar.setKBDocuments(kbResult.documents);
+        sidebar.setKBMounts(mounts);
+      }
     } catch {
       sidebar.setKBDocuments([]);
       sidebar.setKBMounts([]);
     }
   }
+
+  // Re-fetch KB when extensions register/unregister mount providers
+  window.addEventListener("backpack-kb-mounts-changed", () => refreshKB());
 
   async function refreshBackpacksAndGraphs() {
     try {
@@ -1283,13 +1385,14 @@ async function main() {
         if (auth.authenticated) {
           const cloud = await fetch("/api/cloud-backpacks").then(r => r.json()) as { authenticated: boolean; email?: string; backpacks: { name: string; encrypted: boolean; nodeCount?: number; edgeCount?: number }[] };
           const localSet = new Set(summaries.map(s => s.name));
+          // Show viewable (non-encrypted, not-local) graphs in the cloud section
           const cloudOnly = cloud.backpacks.filter(bp => !localSet.has(bp.name) && !bp.encrypted);
           cloudNames = new Set(cloudOnly.map(bp => bp.name));
           cachedCloudBackpacks = cloudOnly;
           cachedCloudEmail = cloud.email;
-          // Don't show cloud section by default — only when "All" or "Cloud" is selected.
-          // Just populate the picker so the user can switch to it.
-          sidebar.setCloudBackpacksInPicker(cloudOnly.map(bp => bp.name));
+          // Always show Cloud entry in picker when authenticated (even if all graphs are encrypted)
+          const allCloudNames = cloud.backpacks.map(bp => bp.name);
+          sidebar.setCloudBackpacksInPicker(allCloudNames.length > 0 ? allCloudNames : ["__cloud__"]);
         } else {
           cloudNames = new Set();
           cachedCloudBackpacks = [];

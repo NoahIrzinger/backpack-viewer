@@ -66,6 +66,65 @@ export interface ViewerExtensionAPI {
 
   // --- Network (server-side proxy with manifest-declared origins) ---
   fetch(url: string, init?: RequestInit): Promise<Response>;
+
+  // --- Knowledge Base mount registration ---
+  registerKBMount(mount: KBMountProvider): () => void;
+}
+
+/**
+ * A KB mount provider registered by an extension. The viewer uses these
+ * callbacks to list, read, and optionally write documents for this mount.
+ * Extensions that back mounts with HTTP APIs (Confluence, Notion) implement
+ * these using `viewer.fetch()` through their declared network permissions.
+ * Extensions that delegate to the built-in server API (kb-local) can use
+ * plain `fetch()` calls to `/api/kb/*`.
+ */
+export interface KBMountProvider {
+  /** Unique mount name (used as collection identifier) */
+  name: string;
+  /** Human-readable label shown in the mount dropdown */
+  label?: string;
+  /** Mount type for UI differentiation */
+  type: "local" | "cloud" | "extension";
+  /** Whether documents can be created/updated/deleted */
+  writable: boolean;
+  /** List documents in this mount */
+  list(opts?: { limit?: number; offset?: number }): Promise<KBMountListResult>;
+  /** Read a single document by ID */
+  read(id: string): Promise<KBMountDocument>;
+  /** Search documents (optional — falls back to client-side filter if not provided) */
+  search?(query: string, opts?: { limit?: number }): Promise<KBMountListResult>;
+  /** Save a document (required if writable) */
+  save?(doc: KBMountDocument): Promise<KBMountDocument>;
+  /** Delete a document by ID (required if writable) */
+  delete?(id: string): Promise<void>;
+}
+
+export interface KBMountDocument {
+  id: string;
+  title: string;
+  content: string;
+  tags: string[];
+  sourceGraphs: string[];
+  sourceNodeIds: string[];
+  collection: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KBMountListResult {
+  documents: KBMountDocumentSummary[];
+  total: number;
+}
+
+export interface KBMountDocumentSummary {
+  id: string;
+  title: string;
+  tags: string[];
+  sourceGraphs: string[];
+  collection: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type TaskbarPosition =

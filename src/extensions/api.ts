@@ -5,10 +5,18 @@ import type {
   TaskbarIconOptions,
   MountPanelOptions,
   MountedPanel,
+  KBMountProvider,
 } from "./types";
 import { VIEWER_API_VERSION } from "./types";
 import type { Taskbar } from "./taskbar";
 import type { PanelMount } from "./panel-mount";
+
+/**
+ * Global KB mount provider registry. Extensions register mount providers
+ * here via `viewer.registerKBMount()`. The sidebar and server routes
+ * consult this registry to dispatch KB requests.
+ */
+export const kbMountProviders = new Map<string, KBMountProvider>();
 
 /**
  * Construct a per-extension `ViewerExtensionAPI` instance. Each loaded
@@ -164,6 +172,20 @@ export function createExtensionAPI(
           throw new Error(`settings.remove failed: ${err || res.status}`);
         }
       },
+    },
+
+    // --- KB mount registration ---
+    registerKBMount(mount: KBMountProvider): () => void {
+      if (kbMountProviders.has(mount.name)) {
+        throw new Error(`KB mount "${mount.name}" already registered`);
+      }
+      kbMountProviders.set(mount.name, mount);
+      // Dispatch event so sidebar can refresh mount list
+      window.dispatchEvent(new CustomEvent("backpack-kb-mounts-changed"));
+      return () => {
+        kbMountProviders.delete(mount.name);
+        window.dispatchEvent(new CustomEvent("backpack-kb-mounts-changed"));
+      };
     },
 
     // --- Network ---
