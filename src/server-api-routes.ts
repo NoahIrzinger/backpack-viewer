@@ -931,8 +931,7 @@ export async function handleApiRequest(
           "Content-Type": "application/octet-stream",
         };
         try {
-          const authorName = await resolveAuthorName();
-          syncHeaders["X-Backpack-Device-Name"] = authorName;
+          syncHeaders["X-Backpack-Device-Name"] = os.hostname();
           syncHeaders["X-Backpack-Device-Hostname"] = os.hostname();
           syncHeaders["X-Backpack-Device-Platform"] = os.platform();
         } catch { /* device info unavailable */ }

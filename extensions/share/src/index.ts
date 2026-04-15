@@ -754,7 +754,7 @@ async function doSyncAndShare(
     if (deviceRes.ok) {
       const device = (await deviceRes.json()) as { machineId: string; authorName: string; hostname: string; platform: string };
       syncHeaders["X-Backpack-Device-Id"] = device.machineId;
-      syncHeaders["X-Backpack-Device-Name"] = device.authorName;
+      syncHeaders["X-Backpack-Device-Name"] = device.hostname || device.authorName;
       syncHeaders["X-Backpack-Device-Hostname"] = device.hostname;
       syncHeaders["X-Backpack-Device-Platform"] = device.platform;
     }
