@@ -566,6 +566,102 @@ body {
   color: var(--text);
 }
 
+.kb-content-toggle {
+  display: flex;
+  gap: 0;
+  margin: 8px 0 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.kb-content-toggle-btn {
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.kb-content-toggle-btn:hover {
+  color: var(--text);
+}
+
+.kb-content-toggle-btn.active {
+  color: var(--text-strong);
+  border-bottom-color: var(--accent);
+}
+
+.kb-rendered {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.kb-rendered h1 { font-size: 20px; font-weight: 600; margin: 16px 0 8px; }
+.kb-rendered h2 { font-size: 17px; font-weight: 600; margin: 14px 0 6px; }
+.kb-rendered h3 { font-size: 15px; font-weight: 600; margin: 12px 0 4px; }
+.kb-rendered h4, .kb-rendered h5, .kb-rendered h6 { font-size: 13px; font-weight: 600; margin: 10px 0 4px; }
+
+.kb-rendered p { margin: 0 0 10px; }
+
+.kb-rendered strong { font-weight: 600; }
+
+.kb-rendered code {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 12px;
+  background: var(--bg-hover);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.kb-rendered pre {
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  overflow-x: auto;
+}
+
+.kb-rendered pre code {
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.kb-rendered blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 8px 0;
+  padding: 4px 12px;
+  color: var(--text-muted);
+}
+
+.kb-rendered ul, .kb-rendered ol {
+  margin: 4px 0 10px;
+  padding-left: 20px;
+}
+
+.kb-rendered li { margin: 2px 0; }
+
+.kb-rendered a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.kb-rendered a:hover {
+  text-decoration: underline;
+}
+
+.kb-rendered hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 12px 0;
+}
+
 .kb-panel-error {
   color: var(--text-muted);
   font-style: italic;

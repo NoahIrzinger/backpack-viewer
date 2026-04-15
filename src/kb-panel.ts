@@ -2,6 +2,7 @@ import type { KBDocument } from "backpack-ontology";
 import type { MountedPanel } from "./extensions/types";
 import type { PanelMount } from "./extensions/panel-mount";
 import { readKBDocument } from "./api";
+import { renderMarkdown } from "./markdown";
 
 export function initKBPanel(panelMount: PanelMount) {
   const bodyEl = document.createElement("div");
@@ -13,6 +14,8 @@ export function initKBPanel(panelMount: PanelMount) {
     hideOnClose: true,
   });
   handle.setVisible(false);
+
+  let viewMode: "preview" | "raw" = "preview";
 
   function renderDoc(doc: KBDocument) {
     bodyEl.replaceChildren();
@@ -62,16 +65,55 @@ export function initKBPanel(panelMount: PanelMount) {
     timestamps.textContent = parts.join(" · ");
     bodyEl.appendChild(timestamps);
 
-    // Divider
-    const hr = document.createElement("hr");
-    hr.className = "kb-panel-divider";
-    bodyEl.appendChild(hr);
+    // Preview/Raw toggle
+    const toggle = document.createElement("div");
+    toggle.className = "kb-content-toggle";
 
-    // Content (rendered as preformatted markdown)
-    const content = document.createElement("div");
-    content.className = "kb-panel-body";
-    content.textContent = doc.content;
-    bodyEl.appendChild(content);
+    const previewBtn = document.createElement("button");
+    previewBtn.className = "kb-content-toggle-btn" + (viewMode === "preview" ? " active" : "");
+    previewBtn.type = "button";
+    previewBtn.textContent = "Preview";
+
+    const rawBtn = document.createElement("button");
+    rawBtn.className = "kb-content-toggle-btn" + (viewMode === "raw" ? " active" : "");
+    rawBtn.type = "button";
+    rawBtn.textContent = "Raw";
+
+    toggle.appendChild(previewBtn);
+    toggle.appendChild(rawBtn);
+    bodyEl.appendChild(toggle);
+
+    // Content area
+    const contentArea = document.createElement("div");
+
+    function renderContent() {
+      contentArea.replaceChildren();
+      if (viewMode === "preview") {
+        contentArea.appendChild(renderMarkdown(doc.content));
+      } else {
+        const raw = document.createElement("div");
+        raw.className = "kb-panel-body";
+        raw.textContent = doc.content;
+        contentArea.appendChild(raw);
+      }
+    }
+
+    previewBtn.addEventListener("click", () => {
+      viewMode = "preview";
+      previewBtn.classList.add("active");
+      rawBtn.classList.remove("active");
+      renderContent();
+    });
+
+    rawBtn.addEventListener("click", () => {
+      viewMode = "raw";
+      rawBtn.classList.add("active");
+      previewBtn.classList.remove("active");
+      renderContent();
+    });
+
+    renderContent();
+    bodyEl.appendChild(contentArea);
   }
 
   return {

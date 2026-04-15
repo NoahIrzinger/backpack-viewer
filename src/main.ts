@@ -9,6 +9,7 @@ import {
   type RemoteSummary,
 } from "./api";
 import { initKBPanel } from "./kb-panel";
+import { renderMarkdown } from "./markdown";
 import { initSidebar } from "./sidebar";
 import { initCanvas, type FocusInfo } from "./canvas";
 import { initInfoPanel } from "./info-panel";
@@ -79,10 +80,9 @@ function renderSharedKB(title: string, documents: { id: string; title: string; c
       card.appendChild(sources);
     }
 
-    const body = document.createElement("div");
-    body.className = "shared-kb-doc-body";
-    body.textContent = doc.content;
-    card.appendChild(body);
+    const contentArea = document.createElement("div");
+    contentArea.appendChild(renderMarkdown(doc.content));
+    card.appendChild(contentArea);
 
     app.appendChild(card);
   }
