@@ -423,6 +423,46 @@ function appendFooter(viewer: ViewerExtensionAPI, container: HTMLElement, w: HTM
       renderUnencryptedConfirm(viewer, container, token);
     });
     footer.appendChild(unencBtn);
+
+    // KB mount sync
+    const kbSyncBtn = document.createElement("button");
+    kbSyncBtn.className = "share-token-link";
+    kbSyncBtn.textContent = "Sync Knowledge Base";
+    kbSyncBtn.addEventListener("click", async () => {
+      kbSyncBtn.disabled = true;
+      kbSyncBtn.textContent = "Syncing KB\u2026";
+      try {
+        await syncKBMount(token);
+        kbSyncBtn.textContent = "KB synced!";
+        setTimeout(() => { kbSyncBtn.textContent = "Sync Knowledge Base"; kbSyncBtn.disabled = false; }, 2000);
+      } catch (err) {
+        kbSyncBtn.textContent = (err as Error).message;
+        kbSyncBtn.disabled = false;
+      }
+    });
+    footer.appendChild(kbSyncBtn);
+
+    // KB share (sync + share link)
+    const kbShareBtn = document.createElement("button");
+    kbShareBtn.className = "share-token-link";
+    kbShareBtn.textContent = "Share Knowledge Base";
+    kbShareBtn.addEventListener("click", async () => {
+      kbShareBtn.disabled = true;
+      kbShareBtn.textContent = "Sharing KB\u2026";
+      try {
+        const shareLink = await syncAndShareKB(token, viewer);
+        if (shareLink) {
+          renderSuccess(container, shareLink, true, undefined);
+        } else {
+          kbShareBtn.textContent = "No KB documents to share";
+          kbShareBtn.disabled = false;
+        }
+      } catch (err) {
+        kbShareBtn.textContent = (err as Error).message;
+        kbShareBtn.disabled = false;
+      }
+    });
+    footer.appendChild(kbShareBtn);
   }
 
   const logoutBtn = document.createElement("button");
@@ -436,6 +476,53 @@ function appendFooter(viewer: ViewerExtensionAPI, container: HTMLElement, w: HTM
   footer.appendChild(logoutBtn);
   w.appendChild(footer);
   container.replaceChildren(w);
+}
+
+async function syncKBMount(token: string): Promise<void> {
+  const listRes = await fetch("/api/kb/documents?limit=1000");
+  if (!listRes.ok) throw new Error("Failed to list KB documents");
+  const { documents } = (await listRes.json()) as { documents: { id: string }[] };
+  if (documents.length === 0) throw new Error("No KB documents to sync");
+
+  const fullDocs = await Promise.all(
+    documents.map(async (d) => {
+      const r = await fetch(`/api/kb/documents/${encodeURIComponent(d.id)}`);
+      return r.json();
+    }),
+  );
+
+  const body = JSON.stringify({ documents: fullDocs });
+  const res = await fetch("/api/cloud-sync/knowledge-base?kind=knowledge_base", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body,
+  });
+  if (!res.ok) {
+    let msg = `KB sync failed (${res.status})`;
+    try { const b = await res.json(); if (b.error) msg = b.error; } catch {}
+    throw new Error(msg);
+  }
+}
+
+async function syncAndShareKB(token: string, viewer: ViewerExtensionAPI): Promise<string | null> {
+  await syncKBMount(token);
+
+  // Create share link
+  const shareRes = await relayFetch(token, `${RELAY_URL}/api/graphs/${encodeURIComponent("knowledge-base")}/share`, {
+    method: "POST",
+  });
+  if (!shareRes.ok) return null;
+
+  const shareData = (await shareRes.json()) as { token: string; url: string; expires_at?: string };
+
+  // Get the encryption key for the fragment
+  const settings = await viewer.settings.get<Record<string, string>>("keys") || {};
+  const secretKey = settings["knowledge-base"];
+  if (secretKey) {
+    const fragmentKey = btoa(secretKey).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    return `${shareData.url}#k=${fragmentKey}`;
+  }
+  return shareData.url;
 }
 
 async function doSyncOnly(

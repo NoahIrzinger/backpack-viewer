@@ -872,21 +872,28 @@ export async function handleApiRequest(
         }
 
         // Build BPAK envelope
-        const graph = JSON.parse(body);
+        const parsed = JSON.parse(body);
+        const kind = params.get("kind") || "learning_graph";
         const typeSet = new Set<string>();
-        for (const n of (graph.nodes || [])) typeSet.add(n.type);
+        if (parsed.nodes) for (const n of parsed.nodes) typeSet.add(n.type);
         const checksumBuf = await crypto.subtle.digest("SHA-256", new Uint8Array(payload).buffer as ArrayBuffer);
         const checksum = "sha256:" + Array.from(new Uint8Array(checksumBuf)).map(b => b.toString(16).padStart(2, "0")).join("");
-        const header = JSON.stringify({
+        const headerObj: Record<string, unknown> = {
           format,
+          kind,
           created_at: new Date().toISOString(),
           backpack_name: name,
-          graph_count: 1,
           checksum,
-          node_count: (graph.nodes || []).length,
-          edge_count: (graph.edges || []).length,
-          node_types: Array.from(typeSet),
-        });
+        };
+        if (kind === "knowledge_base") {
+          headerObj.document_count = (parsed.documents || []).length;
+        } else {
+          headerObj.graph_count = 1;
+          headerObj.node_count = (parsed.nodes || []).length;
+          headerObj.edge_count = (parsed.edges || []).length;
+          headerObj.node_types = Array.from(typeSet);
+        }
+        const header = JSON.stringify(headerObj);
         const headerBytes = new TextEncoder().encode(header);
         const headerLenBuf = new ArrayBuffer(4);
         new DataView(headerLenBuf).setUint32(0, headerBytes.length, false);

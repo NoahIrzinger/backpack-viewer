@@ -36,6 +36,58 @@ let remoteNames = new Set<string>();
 let cloudNames = new Set<string>();
 let activeIsRemote = false;
 
+function renderSharedKB(title: string, documents: { id: string; title: string; content: string; tags: string[]; sourceGraphs: string[] }[]) {
+  const app = document.getElementById("app")!;
+  app.replaceChildren();
+  app.className = "shared-kb-view";
+
+  const header = document.createElement("h2");
+  header.className = "shared-kb-title";
+  header.textContent = title;
+  app.appendChild(header);
+
+  const count = document.createElement("p");
+  count.className = "shared-kb-count";
+  count.textContent = `${documents.length} document${documents.length !== 1 ? "s" : ""}`;
+  app.appendChild(count);
+
+  for (const doc of documents) {
+    const card = document.createElement("div");
+    card.className = "shared-kb-doc";
+
+    const docTitle = document.createElement("h3");
+    docTitle.className = "shared-kb-doc-title";
+    docTitle.textContent = doc.title;
+    card.appendChild(docTitle);
+
+    if (doc.tags.length > 0) {
+      const tags = document.createElement("div");
+      tags.className = "shared-kb-doc-tags";
+      for (const tag of doc.tags) {
+        const t = document.createElement("span");
+        t.className = "kb-panel-tag";
+        t.textContent = tag;
+        tags.appendChild(t);
+      }
+      card.appendChild(tags);
+    }
+
+    if (doc.sourceGraphs.length > 0) {
+      const sources = document.createElement("div");
+      sources.className = "shared-kb-doc-sources";
+      sources.textContent = `From: ${doc.sourceGraphs.join(", ")}`;
+      card.appendChild(sources);
+    }
+
+    const body = document.createElement("div");
+    body.className = "shared-kb-doc-body";
+    body.textContent = doc.content;
+    card.appendChild(body);
+
+    app.appendChild(card);
+  }
+}
+
 async function main() {
   const canvasContainer = document.getElementById("canvas-container")!;
 
@@ -649,14 +701,16 @@ async function main() {
         await refreshSnippets(graphName);
       },
       onBackpackSwitch: async (name) => {
+        if (name === "__all__") {
+          // "All" mode — don't switch backend, just refresh to show everything
+          await refreshBackpacksAndGraphs();
+          return;
+        }
         await fetch("/api/backpacks/switch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name }),
         });
-        // The dev WS will fire an active-backpack-change event that
-        // triggers refreshBackpacksAndGraphs(). Production server has no
-        // live-reload channel, so we refresh immediately as fallback.
         await refreshBackpacksAndGraphs();
       },
       onBackpackRegister: async (p, activate) => {
@@ -1119,12 +1173,11 @@ async function main() {
       // - BPAK envelope (encrypted or synced graphs) with Content-Type: application/octet-stream
       const contentType = dataRes.headers.get("Content-Type") || "";
       let graphData: LearningGraphData;
+      let envelopeKind = "learning_graph";
 
       if (contentType.includes("application/json")) {
-        // Raw JSON — plaintext graph data, no envelope wrapping
         graphData = await dataRes.json() as LearningGraphData;
       } else {
-        // BPAK envelope — parse magic bytes, header, payload
         const envelopeBytes = new Uint8Array(await dataRes.arrayBuffer());
         if (envelopeBytes.length < 9 || envelopeBytes[0] !== 0x42 || envelopeBytes[1] !== 0x50 || envelopeBytes[2] !== 0x41 || envelopeBytes[3] !== 0x4B) {
           throw new Error("Invalid share data");
@@ -1133,25 +1186,31 @@ async function main() {
         if (9 + headerLen > envelopeBytes.length) throw new Error("Invalid envelope: header length exceeds data");
         const envelopeHeader = JSON.parse(new TextDecoder().decode(envelopeBytes.slice(9, 9 + headerLen)));
         const envelopePayload = envelopeBytes.slice(9 + headerLen);
+        envelopeKind = envelopeHeader.kind || "learning_graph";
 
+        let decryptedBytes: Uint8Array;
         if (envelopeHeader.format !== "plaintext") {
-          // Encrypted — decrypt client-side using fragment key
           const fragment = window.location.hash.slice(1);
           const keyParam = new URLSearchParams(fragment).get("k") ?? fragment.split("k=")[1];
           if (!keyParam) throw new Error("Missing decryption key in URL fragment");
-
           const { Decrypter } = await import("age-encryption");
           const secretKey = atob(keyParam.replace(/-/g, "+").replace(/_/g, "/"));
-
           const d = new Decrypter();
           d.addIdentity(secretKey);
-          const plaintext = await d.decrypt(envelopePayload);
-          const parsed = JSON.parse(new TextDecoder().decode(plaintext));
-          graphData = parsed.version === 2 ? parsed.graph : parsed;
+          decryptedBytes = await d.decrypt(envelopePayload);
         } else {
-          const parsed = JSON.parse(new TextDecoder().decode(envelopePayload));
-          graphData = parsed.version === 2 ? parsed.graph : parsed;
+          decryptedBytes = envelopePayload;
         }
+
+        if (envelopeKind === "knowledge_base") {
+          // KB share — render document list instead of graph
+          const kbData = JSON.parse(new TextDecoder().decode(decryptedBytes)) as { documents: { id: string; title: string; content: string; tags: string[]; sourceGraphs: string[] }[] };
+          renderSharedKB(meta.backpack_name || "Shared Knowledge Base", kbData.documents);
+          return; // skip graph rendering below
+        }
+
+        const parsed = JSON.parse(new TextDecoder().decode(decryptedBytes));
+        graphData = parsed.version === 2 ? parsed.graph : parsed;
       }
 
       // Render in read-only mode

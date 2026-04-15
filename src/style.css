@@ -622,6 +622,59 @@ body {
   margin-left: 4px;
 }
 
+.shared-kb-view {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 40px 24px;
+}
+
+.shared-kb-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 4px;
+}
+
+.shared-kb-count {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 0 0 24px;
+}
+
+.shared-kb-doc {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.shared-kb-doc-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 8px;
+}
+
+.shared-kb-doc-tags {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.shared-kb-doc-sources {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.shared-kb-doc-body {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
 .remote-source {
   display: block;
   font-size: 10px;
@@ -807,6 +860,11 @@ body {
   height: 1px;
   background: var(--border);
   margin: 4px 0;
+}
+
+.backpack-picker-all {
+  font-style: italic;
+  opacity: 0.85;
 }
 
 .backpack-picker-section-label {

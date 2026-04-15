@@ -182,8 +182,34 @@ export function initSidebar(
   let currentActiveBackpack: BackpackSummary | null = null;
   let cloudPickerNames: string[] = [];
 
+  let pickerAllMode = false;
+
   function renderPickerDropdown() {
     pickerDropdown.replaceChildren();
+
+    // "All graphs" entry
+    if (currentBackpacks.length > 1 || cloudPickerNames.length > 0) {
+      const allItem = document.createElement("button");
+      allItem.className = "backpack-picker-item backpack-picker-all";
+      allItem.type = "button";
+      if (pickerAllMode) allItem.classList.add("active");
+      const allLabel = document.createElement("span");
+      allLabel.className = "backpack-picker-item-name";
+      allLabel.textContent = "All graphs";
+      allItem.appendChild(allLabel);
+      allItem.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closePicker();
+        pickerAllMode = true;
+        pickerName.textContent = "All graphs";
+        cbs.onBackpackSwitch?.("__all__");
+      });
+      pickerDropdown.appendChild(allItem);
+      const allDiv = document.createElement("div");
+      allDiv.className = "backpack-picker-divider";
+      pickerDropdown.appendChild(allDiv);
+    }
+
     for (const b of currentBackpacks) {
       const item = document.createElement("button");
       item.className = "backpack-picker-item";
@@ -210,6 +236,7 @@ export function initSidebar(
       item.addEventListener("click", (e) => {
         e.stopPropagation();
         closePicker();
+        pickerAllMode = false;
         if (!b.active && cbs.onBackpackSwitch) {
           cbs.onBackpackSwitch(b.name);
         }
