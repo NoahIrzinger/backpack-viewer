@@ -35,6 +35,8 @@ let activeOntology = "";
 let currentData: LearningGraphData | null = null;
 let remoteNames = new Set<string>();
 let cloudNames = new Set<string>();
+let cachedCloudBackpacks: { name: string; encrypted: boolean; nodeCount?: number; edgeCount?: number }[] = [];
+let cachedCloudEmail: string | undefined;
 let activeIsRemote = false;
 
 function renderSharedKB(title: string, documents: { id: string; title: string; content: string; tags: string[]; sourceGraphs: string[] }[]) {
@@ -702,23 +704,30 @@ async function main() {
       },
       onBackpackSwitch: async (name) => {
         if (name === "__all__") {
-          // Show all local graphs + cloud graphs
+          // Show local graphs + cloud section + local KB
           const localSummaries = await listOntologies();
           sidebar.setSummaries(localSummaries);
-          // Cloud section already visible from refreshAuthAndCloud
+          sidebar.setCloudBackpacks(cachedCloudBackpacks, cachedCloudEmail);
+          refreshKB();
           return;
         }
         if (name === "__cloud__") {
-          // Show only cloud graphs — clear local summaries, cloud section handles the rest
+          // Show only cloud — hide local graphs + local KB
           sidebar.setSummaries([]);
+          sidebar.setCloudBackpacks(cachedCloudBackpacks, cachedCloudEmail);
+          sidebar.setKBDocuments([]);
+          sidebar.setKBMounts([]);
           return;
         }
+        // Specific local backpack — show only that backpack's graphs + KB, hide cloud
+        sidebar.setCloudBackpacks([]);
         await fetch("/api/backpacks/switch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name }),
         });
         await refreshBackpacksAndGraphs();
+        refreshKB();
       },
       onBackpackRegister: async (p, activate) => {
         await fetch("/api/backpacks", {
@@ -1263,10 +1272,15 @@ async function main() {
           const localSet = new Set(summaries.map(s => s.name));
           const cloudOnly = cloud.backpacks.filter(bp => !localSet.has(bp.name) && !bp.encrypted);
           cloudNames = new Set(cloudOnly.map(bp => bp.name));
-          sidebar.setCloudBackpacks(cloudOnly, cloud.email);
+          cachedCloudBackpacks = cloudOnly;
+          cachedCloudEmail = cloud.email;
+          // Don't show cloud section by default — only when "All" or "Cloud" is selected.
+          // Just populate the picker so the user can switch to it.
           sidebar.setCloudBackpacksInPicker(cloudOnly.map(bp => bp.name));
         } else {
           cloudNames = new Set();
+          cachedCloudBackpacks = [];
+          cachedCloudEmail = undefined;
           sidebar.setCloudBackpacks([]);
           sidebar.setCloudBackpacksInPicker([]);
         }
