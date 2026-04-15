@@ -1,6 +1,29 @@
 # Changelog
 
-## Unreleased
+## 0.7.27
+
+### Cloud sync overhaul
+- **Bidirectional backpack sync** — push all graphs + KB to cloud, pull from cloud into isolated cache.
+- **Cloud cache backpack** — switch to a "Cloud" backpack in the sidebar that reads from the relay via `CloudCacheBackend`. Auto-refreshes from relay on switch.
+- **Per-item "Sync unencrypted"** — every graph, KB doc, and KB mount three-dot menu now has a red "Sync unencrypted" option alongside the default encrypted sync.
+- **Sync results popup** — per-item checkmarks/X marks showing sync status for each graph and KB doc.
+- **Encryption preservation** — push no longer re-encrypts previously unencrypted cloud graphs.
+
+### Extensions
+- **KB extension system** — `registerKBMount()` API for extensions to provide KB mount data.
+- **kb-local extension** — registers filesystem mounts as KB providers.
+- **Share extension stripped** — removed all sync controls; sharing implicitly syncs the open graph.
+
+### UI
+- **Three-dot context menus** — backpack picker, graph items, KB docs, and KB mounts all use consistent three-dot menus.
+- **KB pill picker** — replaced native `<select>` with pill-style dropdown matching the backpack picker.
+- **Cloud picker fix** — switching to cloud now correctly shows "Cloud" in the picker (was being overwritten by HMR event).
+- **Favicon** — added SVG graph icon as browser tab favicon.
+- **Markdown tables** — pipe-delimited table rendering with column alignment.
+- **Strikethrough, task lists, images** — additional markdown rendering support.
+
+### Security
+- **XSS prevention** — reject `javascript:`/`vbscript:`/`data:` URIs in markdown links, restrict image `data:` URIs to safe MIME types.
 
 ### Knowledge Base integration
 - **Tabbed sidebar** — Graphs and Knowledge Base are peer tabs in the sidebar, reflecting the two components of a backpack.
