@@ -1391,10 +1391,10 @@ async function main() {
         const auth = await fetch("/api/auth/status").then(r => r.json()) as { authenticated: boolean; email?: string };
         sidebar.setAuthStatus(auth);
         if (auth.authenticated) {
-          const cloud = await fetch("/api/cloud-backpacks").then(r => r.json()) as { authenticated: boolean; email?: string; backpacks: { name: string; encrypted: boolean; nodeCount?: number; edgeCount?: number }[] };
+          const cloud = await fetch("/api/cloud-backpacks").then(r => r.json()) as { authenticated: boolean; email?: string; backpacks: { name: string; encrypted: boolean; source?: string; nodeCount?: number; edgeCount?: number }[] };
           const localSet = new Set(summaries.map(s => s.name));
-          // Show viewable (non-encrypted, not-local) graphs in the cloud section
-          const cloudOnly = cloud.backpacks.filter(bp => !localSet.has(bp.name) && !bp.encrypted);
+          // Show only cloud-native graphs (not synced from devices, not encrypted, not already local)
+          const cloudOnly = cloud.backpacks.filter(bp => !localSet.has(bp.name) && !bp.encrypted && bp.source !== "local");
           cloudNames = new Set(cloudOnly.map(bp => bp.name));
           cachedCloudBackpacks = cloudOnly;
           cachedCloudEmail = cloud.email;
