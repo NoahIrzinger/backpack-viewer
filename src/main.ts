@@ -702,8 +702,15 @@ async function main() {
       },
       onBackpackSwitch: async (name) => {
         if (name === "__all__") {
-          // "All" mode — don't switch backend, just refresh to show everything
-          await refreshBackpacksAndGraphs();
+          // Show all local graphs + cloud graphs
+          const localSummaries = await listOntologies();
+          sidebar.setSummaries(localSummaries);
+          // Cloud section already visible from refreshAuthAndCloud
+          return;
+        }
+        if (name === "__cloud__") {
+          // Show only cloud graphs — clear local summaries, cloud section handles the rest
+          sidebar.setSummaries([]);
           return;
         }
         await fetch("/api/backpacks/switch", {

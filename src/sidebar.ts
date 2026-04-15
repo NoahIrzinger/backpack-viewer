@@ -180,28 +180,28 @@ export function initSidebar(
 
   let currentBackpacks: BackpackSummary[] = [];
   let currentActiveBackpack: BackpackSummary | null = null;
-  let cloudPickerNames: string[] = [];
 
   let pickerAllMode = false;
+  let hasCloudBackpack = false;
 
   function renderPickerDropdown() {
     pickerDropdown.replaceChildren();
 
-    // "All graphs" entry
-    if (currentBackpacks.length > 1 || cloudPickerNames.length > 0) {
+    // "All" entry — shows content from all backpacks
+    if (currentBackpacks.length > 1 || hasCloudBackpack) {
       const allItem = document.createElement("button");
       allItem.className = "backpack-picker-item backpack-picker-all";
       allItem.type = "button";
       if (pickerAllMode) allItem.classList.add("active");
       const allLabel = document.createElement("span");
       allLabel.className = "backpack-picker-item-name";
-      allLabel.textContent = "All graphs";
+      allLabel.textContent = "All";
       allItem.appendChild(allLabel);
       allItem.addEventListener("click", (e) => {
         e.stopPropagation();
         closePicker();
         pickerAllMode = true;
-        pickerName.textContent = "All graphs";
+        pickerName.textContent = "All";
         cbs.onBackpackSwitch?.("__all__");
       });
       pickerDropdown.appendChild(allItem);
@@ -210,12 +210,13 @@ export function initSidebar(
       pickerDropdown.appendChild(allDiv);
     }
 
+    // Local backpacks
     for (const b of currentBackpacks) {
       const item = document.createElement("button");
       item.className = "backpack-picker-item";
       item.type = "button";
       item.setAttribute("role", "option");
-      if (b.active) item.classList.add("active");
+      if (b.active && !pickerAllMode) item.classList.add("active");
 
       const dot = document.createElement("span");
       dot.className = "backpack-picker-item-dot";
@@ -237,46 +238,46 @@ export function initSidebar(
         e.stopPropagation();
         closePicker();
         pickerAllMode = false;
-        if (!b.active && cbs.onBackpackSwitch) {
+        if (cbs.onBackpackSwitch) {
           cbs.onBackpackSwitch(b.name);
         }
       });
       pickerDropdown.appendChild(item);
     }
 
-    // Cloud backpacks section (if authenticated and any exist)
-    if (cloudPickerNames.length > 0) {
+    // Cloud backpack entry (single entry, not per-graph)
+    if (hasCloudBackpack) {
       const cloudDivider = document.createElement("div");
       cloudDivider.className = "backpack-picker-divider";
       pickerDropdown.appendChild(cloudDivider);
 
-      const cloudLabel = document.createElement("span");
-      cloudLabel.className = "backpack-picker-section-label";
-      cloudLabel.textContent = "CLOUD";
-      pickerDropdown.appendChild(cloudLabel);
+      const cloudItem = document.createElement("button");
+      cloudItem.className = "backpack-picker-item backpack-picker-cloud";
+      cloudItem.type = "button";
 
-      for (const cloudName of cloudPickerNames) {
-        const cloudItem = document.createElement("button");
-        cloudItem.className = "backpack-picker-item backpack-picker-cloud";
-        cloudItem.type = "button";
+      const cloudIcon = document.createElement("span");
+      cloudIcon.className = "backpack-picker-item-dot";
+      cloudIcon.textContent = "\u2601";
 
-        const cloudIcon = document.createElement("span");
-        cloudIcon.className = "backpack-picker-item-dot";
-        cloudIcon.textContent = "\u2601";
+      const cloudNameEl = document.createElement("span");
+      cloudNameEl.className = "backpack-picker-item-name";
+      cloudNameEl.textContent = "Cloud";
 
-        const cloudNameEl = document.createElement("span");
-        cloudNameEl.className = "backpack-picker-item-name";
-        cloudNameEl.textContent = cloudName;
+      const cloudPath = document.createElement("span");
+      cloudPath.className = "backpack-picker-item-path";
+      cloudPath.textContent = "app.backpackontology.com";
 
-        cloudItem.appendChild(cloudIcon);
-        cloudItem.appendChild(cloudNameEl);
-        cloudItem.addEventListener("click", (e) => {
-          e.stopPropagation();
-          closePicker();
-          cbs.onSelect(cloudName);
-        });
-        pickerDropdown.appendChild(cloudItem);
-      }
+      cloudItem.appendChild(cloudIcon);
+      cloudItem.appendChild(cloudNameEl);
+      cloudItem.appendChild(cloudPath);
+      cloudItem.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closePicker();
+        pickerAllMode = false;
+        pickerName.textContent = "Cloud";
+        cbs.onBackpackSwitch?.("__cloud__");
+      });
+      pickerDropdown.appendChild(cloudItem);
     }
 
     // Separator + "Add new backpack..." action
@@ -991,7 +992,7 @@ export function initSidebar(
     },
 
     setCloudBackpacksInPicker(names: string[]) {
-      cloudPickerNames = names;
+      hasCloudBackpack = names.length > 0;
       renderPickerDropdown();
     },
 
