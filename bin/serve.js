@@ -81,6 +81,31 @@ async function getCachedVersionCheck(currentVersion) {
   };
 }
 
+// --- Auto-update check (runs before heavy imports) ---
+// When launched via npx, check if a newer version exists on npm.
+// If stale, re-exec with the latest version automatically.
+if (hasDistBuild && !process.env.BACKPACK_SKIP_UPDATE_CHECK) {
+  const pkgVersion = JSON.parse(
+    fs.readFileSync(path.join(root, "package.json"), "utf8"),
+  ).version;
+  const latest = await fetchLatestVersion("backpack-viewer");
+  if (latest && latest !== pkgVersion) {
+    const { execSync } = await import("node:child_process");
+    console.log(`\x1b[33mBackpack Viewer ${pkgVersion} → ${latest}\x1b[0m`);
+    console.log("Updating to latest version...\n");
+    try {
+      // Clear npx cache entry and re-exec with latest
+      execSync(
+        `npx --yes backpack-viewer@${latest}`,
+        { stdio: "inherit", env: { ...process.env, BACKPACK_SKIP_UPDATE_CHECK: "1" } },
+      );
+      process.exit(0);
+    } catch {
+      console.log("\x1b[33mAuto-update failed. Continuing with current version.\x1b[0m\n");
+    }
+  }
+}
+
 if (hasDistBuild) {
   // --- Production: static file server + API (zero native deps) ---
   const ontologyPkg = await import("backpack-ontology");
