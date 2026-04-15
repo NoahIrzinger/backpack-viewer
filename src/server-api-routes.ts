@@ -788,13 +788,31 @@ export async function handleApiRequest(
         const result = { total: 0, synced: 0, skipped: 0, failed: 0, errors: [] as string[], items: [] as SyncItem[] };
 
         if (direction === "push") {
-          // Push graphs via BPAK envelopes with encryption
+          // Fetch existing cloud graphs to preserve their encryption status
+          let cloudEncryptionMap = new Map<string, boolean>();
+          try {
+            const cloudRes = await fetch(`${relayUrl}/api/graphs`, { headers: { "Authorization": `Bearer ${token}` } });
+            if (cloudRes.ok) {
+              const cloudGraphs = await cloudRes.json() as { name: string; encrypted?: boolean }[];
+              for (const g of cloudGraphs) cloudEncryptionMap.set(g.name, g.encrypted === true);
+            }
+          } catch { /* cloud unreachable, fall through to wantEncrypted default */ }
+
+          // Push graphs via BPAK envelopes — preserve existing encryption status
           const summaries = await ctx.storage.current.listOntologies();
           result.total += summaries.length;
           for (const s of summaries) {
             try {
               const data = await ctx.storage.current.loadOntology(s.name);
-              await syncGraphToRelay(s.name, data as unknown as Record<string, unknown>, token, relayUrl, wantEncrypted);
+              // If user explicitly chose unencrypted, force plaintext (fixes corrupted graphs).
+              // Otherwise, preserve cloud encryption status for existing graphs.
+              // New graphs use the user's default preference.
+              const encrypt = !wantEncrypted
+                ? false
+                : cloudEncryptionMap.has(s.name)
+                  ? cloudEncryptionMap.get(s.name)!
+                  : wantEncrypted;
+              await syncGraphToRelay(s.name, data as unknown as Record<string, unknown>, token, relayUrl, encrypt);
               result.synced++;
               result.items.push({ name: s.name, kind: "graph", status: "synced" });
             } catch (err) {
