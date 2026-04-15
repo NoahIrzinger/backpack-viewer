@@ -709,14 +709,7 @@ async function main() {
         }
         await refreshKB();
       },
-      onSignIn: () => {
-        const shareBtn = document.querySelector('.extension-taskbar-icon[aria-label="Share"]') as HTMLElement | null;
-        if (shareBtn) {
-          shareBtn.click();
-        } else {
-          showToast("Enable the Share extension to sign in");
-        }
-      },
+      onSignIn: () => startStandaloneAuth(),
       onSignOut: async () => {
         await fetch("/api/extensions/share/settings/relay_token", { method: "DELETE" });
         window.dispatchEvent(new CustomEvent("backpack-auth-changed"));
@@ -743,6 +736,90 @@ async function main() {
       },
     }
   );
+
+  // --- Standalone OAuth sign-in (independent of Share extension) ---
+  async function startStandaloneAuth() {
+    const RELAY = "https://app.backpackontology.com";
+    try {
+      const metaRes = await fetch(`${RELAY}/.well-known/oauth-authorization-server`);
+      if (!metaRes.ok) { showToast("Auth server unreachable"); return; }
+      const meta = await metaRes.json() as { authorization_endpoint: string; token_endpoint: string; registration_endpoint: string };
+      const regRes = await fetch(meta.registration_endpoint, { method: "POST" });
+      const client = await regRes.json() as { client_id: string };
+
+      // PKCE
+      const verifierArr = new Uint8Array(32);
+      crypto.getRandomValues(verifierArr);
+      const codeVerifier = btoa(String.fromCharCode(...verifierArr)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      const challengeBuf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(codeVerifier));
+      const codeChallenge = btoa(String.fromCharCode(...new Uint8Array(challengeBuf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+      const redirectUri = window.location.origin + "/oauth/callback";
+      const state = crypto.randomUUID();
+      const authUrl = new URL(meta.authorization_endpoint);
+      authUrl.searchParams.set("client_id", client.client_id);
+      authUrl.searchParams.set("redirect_uri", redirectUri);
+      authUrl.searchParams.set("response_type", "code");
+      authUrl.searchParams.set("code_challenge", codeChallenge);
+      authUrl.searchParams.set("code_challenge_method", "S256");
+      authUrl.searchParams.set("state", state);
+      authUrl.searchParams.set("scope", "openid email profile offline_access");
+
+      // Store PKCE params for the callback page (same-tab fallback)
+      sessionStorage.setItem("share_oauth_state", state);
+      sessionStorage.setItem("share_oauth_token_endpoint", meta.token_endpoint);
+      sessionStorage.setItem("share_oauth_client_id", client.client_id);
+      sessionStorage.setItem("share_oauth_code_verifier", codeVerifier);
+      sessionStorage.setItem("share_oauth_redirect_uri", redirectUri);
+
+      const popup = window.open(authUrl.toString(), "backpack-auth", "width=500,height=700");
+
+      const handler = async (event: MessageEvent) => {
+        if (event.data?.type !== "backpack-oauth-callback") return;
+        window.removeEventListener("message", handler);
+        const { code, returnedState } = event.data;
+        if (returnedState !== state) return;
+        sessionStorage.removeItem("share_oauth_state");
+        sessionStorage.removeItem("share_oauth_token_endpoint");
+        sessionStorage.removeItem("share_oauth_client_id");
+        sessionStorage.removeItem("share_oauth_code_verifier");
+        sessionStorage.removeItem("share_oauth_redirect_uri");
+        try {
+          const tokenRes = await fetch(meta.token_endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              grant_type: "authorization_code",
+              code,
+              redirect_uri: redirectUri,
+              client_id: client.client_id,
+              code_verifier: codeVerifier,
+            }).toString(),
+          });
+          const tokenData = await tokenRes.json() as { access_token?: string; id_token?: string };
+          const bearerToken = tokenData.id_token || tokenData.access_token;
+          if (!bearerToken) { showToast("Sign-in failed: no token returned"); return; }
+          // Store token in share extension settings (same location the Share panel uses)
+          await fetch("/api/extensions/share/settings/relay_token", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ value: bearerToken }),
+          });
+          window.dispatchEvent(new CustomEvent("backpack-auth-changed"));
+        } catch (err) {
+          showToast(`Sign-in failed: ${(err as Error).message}`);
+        }
+      };
+      window.addEventListener("message", handler);
+
+      if (!popup || popup.closed) {
+        // Fallback: same-tab redirect (callback page handles token exchange)
+        window.location.href = authUrl.toString();
+      }
+    } catch (err) {
+      showToast(`Sign-in failed: ${(err as Error).message}`);
+    }
+  }
 
   async function refreshKB() {
     try {
