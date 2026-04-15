@@ -1358,6 +1358,12 @@ export function initSidebar(
 
     setCloudMode(active: boolean) {
       cloudModeActive = active;
+      if (active) {
+        pickerName.textContent = "Cloud";
+        pickerDot.style.setProperty("--backpack-color", "#5b9bd5");
+        container.style.setProperty("--backpack-color", "#5b9bd5");
+        pickerAllMode = false;
+      }
     },
 
     toggle: toggleSidebar,

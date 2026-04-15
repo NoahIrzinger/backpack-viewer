@@ -1025,6 +1025,7 @@ async function main() {
   window.addEventListener("backpack-kb-mounts-changed", () => refreshKB());
 
   async function refreshBackpacksAndGraphs() {
+    if (isCloudActive) return; // Cloud mode manages its own state
     try {
       const res = await fetch("/api/backpacks");
       const list = await res.json();
