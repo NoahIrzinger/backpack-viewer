@@ -95,6 +95,19 @@ function urlPath(req: IncomingMessage): string {
  * Sync a single graph to the cloud relay using BPAK envelope format.
  * Handles encryption, envelope building, device headers, and synced-status tracking.
  */
+/** Read or generate the persistent machine-id (same logic as /api/device-info). */
+async function getMachineId(): Promise<string> {
+  const idPath = path.join(configDir(), "machine-id");
+  try {
+    return (await fs.readFile(idPath, "utf-8")).trim();
+  } catch {
+    const hash = crypto.createHash("sha256").update(os.hostname() + os.platform()).digest("hex").slice(0, 16);
+    try { await fs.mkdir(configDir(), { recursive: true }); } catch {}
+    await fs.writeFile(idPath, hash, "utf-8");
+    return hash;
+  }
+}
+
 async function syncGraphToRelay(
   name: string,
   data: Record<string, unknown>,
@@ -102,6 +115,8 @@ async function syncGraphToRelay(
   relayUrl: string,
   encrypted: boolean = true,
   kind: string = "learning_graph",
+  machineId?: string,
+  sourceBackpackName?: string,
 ): Promise<void> {
   const graphJSON = new TextEncoder().encode(JSON.stringify(data));
   let payload: Uint8Array;
@@ -176,6 +191,8 @@ async function syncGraphToRelay(
     syncHeaders["X-Backpack-Device-Name"] = os.hostname();
     syncHeaders["X-Backpack-Device-Hostname"] = os.hostname();
     syncHeaders["X-Backpack-Device-Platform"] = os.platform();
+    if (machineId) syncHeaders["X-Backpack-Device-Id"] = machineId;
+    if (sourceBackpackName) syncHeaders["X-Backpack-Source-Name"] = sourceBackpackName;
   } catch { /* device info unavailable */ }
 
   const relayRes = await fetch(`${relayUrl}/api/graphs/${encodeURIComponent(name)}/sync`, {
@@ -794,6 +811,9 @@ export async function handleApiRequest(
         interface SyncItem { name: string; kind: "graph" | "kb"; status: SyncItemStatus; error?: string }
         const result = { total: 0, synced: 0, skipped: 0, failed: 0, errors: [] as string[], items: [] as SyncItem[] };
 
+        const bulkMachineId = await getMachineId().catch(() => undefined);
+        const bulkSourceName = ctx.storage.activeEntry?.name;
+
         if (direction === "push") {
           // Fetch existing cloud graphs to preserve their encryption status
           let cloudEncryptionMap = new Map<string, boolean>();
@@ -819,7 +839,7 @@ export async function handleApiRequest(
                 : cloudEncryptionMap.has(s.name)
                   ? cloudEncryptionMap.get(s.name)!
                   : wantEncrypted;
-              await syncGraphToRelay(s.name, data as unknown as Record<string, unknown>, token, relayUrl, encrypt);
+              await syncGraphToRelay(s.name, data as unknown as Record<string, unknown>, token, relayUrl, encrypt, "learning_graph", bulkMachineId, bulkSourceName);
               result.synced++;
               result.items.push({ name: s.name, kind: "graph", status: "synced" });
             } catch (err) {
@@ -842,6 +862,7 @@ export async function handleApiRequest(
                   "knowledge-base",
                   { documents: allDocs } as unknown as Record<string, unknown>,
                   token, relayUrl, wantEncrypted, "knowledge_base",
+                  bulkMachineId, bulkSourceName,
                 );
                 result.synced++;
                 result.items.push({ name: `KB (${allDocs.length} docs)`, kind: "kb", status: "synced" });
@@ -1139,7 +1160,9 @@ export async function handleApiRequest(
         const wantEncrypted = params.get("encrypted") !== "false";
         const kind = params.get("kind") || "learning_graph";
 
-        await syncGraphToRelay(name, parsed, token, relayUrl, wantEncrypted, kind);
+        const mid = await getMachineId().catch(() => undefined);
+        const srcName = ctx.storage.activeEntry?.name;
+        await syncGraphToRelay(name, parsed, token, relayUrl, wantEncrypted, kind, mid, srcName);
         sendJson(res, 200, { ok: true });
       } catch (err) {
         sendErr(res, 500, (err as Error).message);

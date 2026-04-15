@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Sync provenance
+- **Device identity in sync** — `syncGraphToRelay()` now sends `X-Backpack-Device-Id` (machine-id) and `X-Backpack-Source-Name` (active backpack name) headers. All sync paths (per-graph, bulk push, KB) include provenance.
+- **`getMachineId()` helper** — reusable machine-id read/generate extracted from `/api/device-info` handler.
+
 ## 0.7.27
 
 ### Cloud sync overhaul
