@@ -1,6 +1,6 @@
 {
   "name": "backpack-viewer",
-  "version": "0.7.26",
+  "version": "0.7.27",
   "description": "Web-based graph visualizer for backpack-ontology — Canvas 2D, force-directed layout, live reload",
   "license": "Apache-2.0",
   "author": "Noah Irzinger",
