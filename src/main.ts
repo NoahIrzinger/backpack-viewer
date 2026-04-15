@@ -909,7 +909,10 @@ async function main() {
       ]);
       sidebar.setKBDocuments(kbResult.documents);
       sidebar.setKBMounts(mounts);
-    } catch {}
+    } catch {
+      sidebar.setKBDocuments([]);
+      sidebar.setKBMounts([]);
+    }
   }
 
   async function refreshBackpacksAndGraphs() {
