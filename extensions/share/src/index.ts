@@ -463,6 +463,71 @@ function appendFooter(viewer: ViewerExtensionAPI, container: HTMLElement, w: HTM
       }
     });
     footer.appendChild(kbShareBtn);
+
+    // --- Sync Backpack (all graphs + KB) ---
+    const syncDivider = document.createElement("div");
+    syncDivider.className = "share-divider";
+    footer.appendChild(syncDivider);
+
+    const syncStatus = document.createElement("div");
+    syncStatus.className = "share-sync-status";
+    syncStatus.hidden = true;
+    footer.appendChild(syncStatus);
+
+    const syncPushBtn = document.createElement("button");
+    syncPushBtn.className = "share-cta-btn share-btn-small";
+    syncPushBtn.textContent = "Sync to Cloud";
+    syncPushBtn.addEventListener("click", async () => {
+      syncPushBtn.disabled = true;
+      syncPullBtn.disabled = true;
+      syncStatus.hidden = false;
+      syncStatus.textContent = "Syncing to cloud\u2026";
+      try {
+        const res = await fetch("/api/backpack/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ direction: "push" }),
+        });
+        const result = await res.json() as { total: number; synced: number; failed: number; skipped: number; errors: string[] };
+        syncStatus.textContent = `Synced ${result.synced}/${result.total}` +
+          (result.failed > 0 ? ` (${result.failed} failed)` : "") +
+          (result.skipped > 0 ? ` (${result.skipped} skipped)` : "");
+        if (result.errors.length > 0) {
+          syncStatus.title = result.errors.join("\n");
+        }
+      } catch (err) {
+        syncStatus.textContent = "Sync failed: " + (err as Error).message;
+      }
+      syncPushBtn.disabled = false;
+      syncPullBtn.disabled = false;
+    });
+    footer.appendChild(syncPushBtn);
+
+    const syncPullBtn = document.createElement("button");
+    syncPullBtn.className = "share-btn-secondary share-btn-small";
+    syncPullBtn.textContent = "Pull from Cloud";
+    syncPullBtn.addEventListener("click", async () => {
+      syncPushBtn.disabled = true;
+      syncPullBtn.disabled = true;
+      syncStatus.hidden = false;
+      syncStatus.textContent = "Pulling from cloud\u2026";
+      try {
+        const res = await fetch("/api/backpack/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ direction: "pull" }),
+        });
+        const result = await res.json() as { total: number; synced: number; failed: number; skipped: number; errors: string[] };
+        syncStatus.textContent = `Pulled ${result.synced}/${result.total}` +
+          (result.failed > 0 ? ` (${result.failed} failed)` : "") +
+          (result.skipped > 0 ? ` (${result.skipped} skipped)` : "");
+      } catch (err) {
+        syncStatus.textContent = "Pull failed: " + (err as Error).message;
+      }
+      syncPushBtn.disabled = false;
+      syncPullBtn.disabled = false;
+    });
+    footer.appendChild(syncPullBtn);
   }
 
   const logoutBtn = document.createElement("button");

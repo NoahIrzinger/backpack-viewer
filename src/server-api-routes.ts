@@ -632,6 +632,132 @@ export async function handleApiRequest(
       return true;
     }
 
+    // --- /api/backpack/sync — bidirectional sync for graphs + KB ---
+    if (url === "/api/backpack/sync" && method === "POST") {
+      const body = await readBody(req);
+      try {
+        const { direction } = JSON.parse(body) as { direction: "push" | "pull" };
+        const settings = await readExtensionSettings("share");
+        const token = settings.relay_token;
+        if (!token || typeof token !== "string") {
+          sendErr(res, 401, "Not authenticated — sign in first");
+          return true;
+        }
+        const relayUrl = (settings.relay_url as string) || "https://app.backpackontology.com";
+
+        const result = { total: 0, synced: 0, skipped: 0, failed: 0, errors: [] as string[] };
+
+        if (direction === "push") {
+          // Push graphs via cloud-sync proxy (handles BPAK + encryption)
+          const summaries = await ctx.storage.current.listOntologies();
+          result.total += summaries.length;
+          for (const s of summaries) {
+            try {
+              const data = await ctx.storage.current.loadOntology(s.name);
+              const syncRes = await fetch(`${relayUrl}/api/graphs/${encodeURIComponent(s.name)}`, {
+                method: "PUT",
+                headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+                body: JSON.stringify(data),
+              });
+              if (syncRes.ok) { result.synced++; }
+              else if (syncRes.status === 404) {
+                // Graph doesn't exist yet — create first
+                const createRes = await fetch(`${relayUrl}/api/graphs`, {
+                  method: "POST",
+                  headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+                  body: JSON.stringify({ name: s.name, description: data.metadata?.description || "" }),
+                });
+                if (createRes.ok) {
+                  const saveRes = await fetch(`${relayUrl}/api/graphs/${encodeURIComponent(s.name)}`, {
+                    method: "PUT",
+                    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+                    body: JSON.stringify(data),
+                  });
+                  if (saveRes.ok) { result.synced++; } else { result.failed++; result.errors.push(`Graph "${s.name}": save failed ${saveRes.status}`); }
+                } else { result.failed++; result.errors.push(`Graph "${s.name}": create failed ${createRes.status}`); }
+              }
+              else { result.failed++; result.errors.push(`Graph "${s.name}": ${syncRes.status}`); }
+            } catch (err) { result.failed++; result.errors.push(`Graph "${s.name}": ${(err as Error).message}`); }
+          }
+
+          // Push KB docs individually
+          try {
+            const docs = await getDocStore();
+            const kbResult = await docs.list();
+            result.total += kbResult.documents.length;
+            for (const summary of kbResult.documents) {
+              try {
+                const doc = await docs.read(summary.id);
+                const putRes = await fetch(`${relayUrl}/api/kb/documents/${encodeURIComponent(doc.id)}`, {
+                  method: "PUT",
+                  headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+                  body: JSON.stringify(doc),
+                });
+                if (putRes.ok) { result.synced++; } else { result.failed++; result.errors.push(`KB "${doc.title}": ${putRes.status}`); }
+              } catch (err) { result.failed++; result.errors.push(`KB "${summary.title}": ${(err as Error).message}`); }
+            }
+          } catch { /* no KB mount configured */ }
+        } else {
+          // Pull graphs
+          const cloudRes = await fetch(`${relayUrl}/api/graphs`, { headers: { "Authorization": `Bearer ${token}` } });
+          if (!cloudRes.ok) {
+            result.failed++;
+            result.errors.push(`Failed to list cloud graphs: ${cloudRes.status}`);
+          } else {
+            const cloudGraphs = await cloudRes.json() as { name: string; encrypted?: boolean }[];
+            const localNames = new Set((await ctx.storage.current.listOntologies()).map(s => s.name));
+            const pullable = cloudGraphs.filter(g => !g.encrypted && !localNames.has(g.name));
+            result.total += pullable.length;
+            for (const g of pullable) {
+              try {
+                const dataRes = await fetch(`${relayUrl}/api/graphs/${encodeURIComponent(g.name)}`, { headers: { "Authorization": `Bearer ${token}` } });
+                if (!dataRes.ok) { result.failed++; result.errors.push(`Graph "${g.name}": ${dataRes.status}`); continue; }
+                const data = await dataRes.json();
+                await ctx.storage.current.createOntology(g.name, data.metadata?.description || "");
+                await ctx.storage.current.saveOntology(g.name, data);
+                result.synced++;
+              } catch (err) { result.failed++; result.errors.push(`Graph "${g.name}": ${(err as Error).message}`); }
+            }
+          }
+
+          // Pull KB docs
+          const kbRes = await fetch(`${relayUrl}/api/kb/documents?limit=1000`, { headers: { "Authorization": `Bearer ${token}` } });
+          if (!kbRes.ok) {
+            result.errors.push(`Failed to list cloud KB docs: ${kbRes.status}`);
+          } else {
+            const cloudDocs = (await kbRes.json()) as { documents: { id: string; title: string; updatedAt: string }[] };
+            result.total += cloudDocs.documents.length;
+            try {
+              const docs = await getDocStore();
+              const localDocs = await docs.list();
+              const localMap = new Map(localDocs.documents.map(d => [d.id, d]));
+              for (const cd of cloudDocs.documents) {
+                const local = localMap.get(cd.id);
+                if (local && new Date(local.updatedAt) >= new Date(cd.updatedAt)) {
+                  result.skipped++;
+                  continue;
+                }
+                try {
+                  const fullRes = await fetch(`${relayUrl}/api/kb/documents/${encodeURIComponent(cd.id)}`, { headers: { "Authorization": `Bearer ${token}` } });
+                  if (!fullRes.ok) { result.failed++; continue; }
+                  const fullDoc = await fullRes.json();
+                  await docs.save(fullDoc);
+                  result.synced++;
+                } catch (err) { result.failed++; result.errors.push(`KB "${cd.title}": ${(err as Error).message}`); }
+              }
+            } catch (kbErr) {
+              result.errors.push(`KB mount: ${(kbErr as Error).message}`);
+            }
+          }
+        }
+
+        sendJson(res, 200, result);
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
     // --- /api/ontologies/* ---
     if (url === "/api/ontologies" && method === "GET") {
       try {

@@ -210,6 +210,20 @@
   margin: 16px 0;
 }
 
+.share-btn-small {
+  font-size: 12px;
+  padding: 6px 14px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.share-sync-status {
+  font-size: 11px;
+  color: var(--text-muted, #999);
+  padding: 6px 0;
+  text-align: center;
+}
+
 .share-hidden {
   display: none;
 }
