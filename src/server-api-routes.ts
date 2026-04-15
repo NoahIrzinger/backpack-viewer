@@ -4,8 +4,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
-  type JsonFileBackend,
   type RemoteRegistry,
+  JsonFileBackend,
   listBackpacks,
   getActiveBackpack,
   setActiveBackpack,
@@ -369,6 +369,26 @@ export async function handleApiRequest(
           200,
           list.map((b) => ({ ...b, active: b.name === active.name })),
         );
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    // List graphs from ALL registered backpacks (for "All" picker mode)
+    if (url === "/api/backpacks/all-graphs" && method === "GET") {
+      try {
+        const bpList = await listBackpacks();
+        const all: (Record<string, unknown> & { backpack: string })[] = [];
+        for (const bp of bpList) {
+          try {
+            const backend = new JsonFileBackend(bp.path);
+            await backend.initialize();
+            const summaries = await backend.listOntologies();
+            for (const s of summaries) all.push({ ...s, backpack: bp.name });
+          } catch { /* skip inaccessible backpacks */ }
+        }
+        sendJson(res, 200, all);
       } catch (err) {
         sendErr(res, 500, (err as Error).message);
       }

@@ -704,9 +704,19 @@ async function main() {
       },
       onBackpackSwitch: async (name) => {
         if (name === "__all__") {
-          // Show local graphs + cloud section + local KB
-          const localSummaries = await listOntologies();
-          sidebar.setSummaries(localSummaries);
+          // Show graphs from ALL registered backpacks + cloud
+          try {
+            const allRes = await fetch("/api/backpacks/all-graphs");
+            if (allRes.ok) {
+              const allGraphs = await allRes.json();
+              sidebar.setSummaries(allGraphs);
+            } else {
+              // Fallback to active backpack only
+              sidebar.setSummaries(await listOntologies());
+            }
+          } catch {
+            sidebar.setSummaries(await listOntologies());
+          }
           sidebar.setCloudBackpacks(cachedCloudBackpacks, cachedCloudEmail);
           refreshKB();
           return;
