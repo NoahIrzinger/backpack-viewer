@@ -16,6 +16,7 @@ import {
   removeKBMount,
   editKBMount,
   DocumentStore,
+  SignalStore,
   configDir,
   resolveAuthorName,
   CloudCacheBackend,
@@ -1185,6 +1186,79 @@ export async function handleApiRequest(
         const mid = await getMachineId().catch(() => undefined);
         const srcName = ctx.storage.activeEntry?.name;
         await syncGraphToRelay(name, parsed, token, relayUrl, wantEncrypted, kind, mid, srcName);
+        sendJson(res, 200, { ok: true });
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    // --- /api/signals/* (Signals — the third primitive) ---
+
+    if (url === "/api/signals" && method === "GET") {
+      try {
+        const active = ctx.storage.activeEntry;
+        if (!active) { sendErr(res, 400, "No active backpack"); return true; }
+        const store = new SignalStore(active.path);
+        const params = new URL(req.url ?? "/", "http://localhost").searchParams;
+        const result = await store.list({
+          graph: params.get("graph") ?? undefined,
+          kind: (params.get("kind") ?? undefined) as any,
+          severity: params.get("severity") ?? undefined,
+          query: params.get("q") ?? undefined,
+        });
+        sendJson(res, 200, result);
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    if (url === "/api/signals/detect" && method === "POST") {
+      try {
+        const active = ctx.storage.activeEntry;
+        if (!active) { sendErr(res, 400, "No active backpack"); return true; }
+        const store = new SignalStore(active.path);
+        const backend = ctx.storage.current;
+
+        // Load all graphs
+        const names = await backend.listOntologies();
+        const graphs: { name: string; data: any }[] = [];
+        for (const s of names) {
+          try {
+            const data = await backend.loadOntology(s.name);
+            graphs.push({ name: s.name, data });
+          } catch { /* skip */ }
+        }
+
+        // Load KB docs
+        let docs: any[] = [];
+        try {
+          const mountConfigs = await getKBMounts(active.path);
+          const docStore = new DocumentStore(
+            mountConfigs.map((m) => ({ name: m.name, path: m.path, writable: m.writable !== false })),
+          );
+          const result = await docStore.list({ limit: 500 });
+          docs = result.documents;
+        } catch { /* KB might not be configured */ }
+
+        const result = await store.detect(graphs, docs);
+        sendJson(res, 200, result);
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    if (url === "/api/signals/dismiss" && method === "POST") {
+      try {
+        const active = ctx.storage.activeEntry;
+        if (!active) { sendErr(res, 400, "No active backpack"); return true; }
+        const store = new SignalStore(active.path);
+        const body = await readBody(req);
+        const { signalId } = JSON.parse(body);
+        if (!signalId) { sendErr(res, 400, "signalId required"); return true; }
+        await store.dismiss(signalId);
         sendJson(res, 200, { ok: true });
       } catch (err) {
         sendErr(res, 500, (err as Error).message);

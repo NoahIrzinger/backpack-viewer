@@ -427,8 +427,16 @@ body {
   color: var(--text-muted);
 }
 
+.kb-item {
+  position: relative;
+}
+
 .kb-item:hover {
   cursor: pointer;
+}
+
+.kb-item:hover .sidebar-item-menu-btn {
+  opacity: 0.7;
 }
 
 /* --- KB Document Panel --- */
@@ -971,7 +979,7 @@ body {
 
 .sidebar-lock-badge {
   font-size: 10px;
-  color: #c08c00;
+  color: var(--text-dim, #999);
   display: none;
   margin-top: 2px;
 }
@@ -981,8 +989,7 @@ body {
 }
 
 .sidebar-lock-badge.active::before {
-  content: "● ";
-  color: #c08c00;
+  content: "\2022 ";
 }
 
 .sidebar-tags {
@@ -1002,19 +1009,18 @@ body {
 }
 
 .sidebar-sync-badge {
-  font-size: 10px;
-  color: #5a9fd4;
+  color: var(--text-dim, #999);
   display: none;
   margin-top: 2px;
+  line-height: 1;
 }
 
 .sidebar-sync-badge.active {
-  display: block;
+  display: inline-block;
 }
 
-.sidebar-sync-badge.active::before {
-  content: "☁ ";
-  color: #5a9fd4;
+.sidebar-sync-badge svg {
+  vertical-align: middle;
 }
 
 .sidebar-auth-widget {
@@ -3421,4 +3427,628 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+/* ============================================================
+   Signals — the third primitive.
+
+   Design system: sv- prefix for all viz primitives.
+   Severity palette: critical=#c9463d, high=#c47a3a, medium=#b5a036, low=text-muted
+   Warmer, less saturated — sits inside the viewer's terracotta palette.
+   ============================================================ */
+
+/* --- Severity palette (used across all signal UI) --- */
+
+.sv-sev-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-top: 5px;
+}
+
+.sv-sev-bg-critical { background: #c9463d; }
+.sv-sev-bg-high { background: #c47a3a; }
+.sv-sev-bg-medium { background: #b5a036; }
+.sv-sev-bg-low { background: var(--text-dim); }
+
+.sv-sev-critical { stroke: #c9463d; }
+.sv-sev-high { stroke: #c47a3a; }
+.sv-sev-medium { stroke: #b5a036; }
+.sv-sev-low { stroke: var(--text-dim); }
+
+/* --- Sidebar --- */
+
+.signals-sidebar-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.signals-empty-item {
+  padding: 16px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.signal-sidebar-item {
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.signal-sidebar-item + .signal-sidebar-item {
+  border-top: 1px solid var(--bg-hover);
+}
+
+.signal-sidebar-item:hover {
+  background: var(--bg-hover);
+}
+
+.signal-sidebar-item.hidden {
+  display: none;
+}
+
+.signal-sidebar-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.signal-sidebar-title {
+  font-size: 11px;
+  color: var(--text);
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.signal-sidebar-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 4px;
+  padding-left: 14px;
+}
+
+.signal-sidebar-tag {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--chip-bg);
+  color: var(--text-dim);
+  letter-spacing: 0.2px;
+}
+
+.signal-sidebar-tag-more {
+  font-size: 9px;
+  color: var(--text-dim);
+}
+
+.signal-sidebar-nodes {
+  padding-left: 28px;
+  margin-top: 2px;
+}
+
+/* --- Signal checkbox (sidebar + card) --- */
+
+.signal-checkbox,
+.signal-card-checkbox {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1.5px solid var(--border);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.signal-checkbox {
+  margin-top: 1px;
+}
+
+.signal-card-checkbox {
+  margin-top: 1px;
+}
+
+.signal-checkbox:hover,
+.signal-card-checkbox:hover {
+  border-color: var(--text-muted);
+}
+
+.signal-checkbox.checked,
+.signal-card-checkbox.checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.signal-checkbox.checked::after,
+.signal-card-checkbox.checked::after {
+  content: "\2713";
+  font-size: 10px;
+  color: var(--bg);
+  line-height: 1;
+}
+
+/* Selected signal item in sidebar */
+.signal-sidebar-item.signal-selected {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+/* Selected signal card in panel */
+.signal-card-selected {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-surface));
+}
+
+/* --- Selection tray (sticky bottom of signals pane) --- */
+
+.signals-selection-tray {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
+  flex-shrink: 0;
+}
+
+.signals-tray-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  flex: 1;
+}
+
+.signals-tray-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 10px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.signals-tray-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* Adjust sidebar tags indent to account for checkbox */
+.signal-sidebar-tags {
+  padding-left: 28px;
+}
+
+/* --- Panel --- */
+
+.signals-panel-content {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.signals-empty-state {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+  padding: 32px 16px;
+  line-height: 1.6;
+}
+
+.signals-detect-btn,
+.signals-refresh-btn {
+  background: var(--bg-surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 12px;
+  font-size: 11px;
+  cursor: pointer;
+  margin-top: 10px;
+}
+
+.signals-detect-btn:hover,
+.signals-refresh-btn:hover {
+  background: var(--bg-hover);
+}
+
+.signals-refresh-btn {
+  margin: 0;
+  padding: 3px 8px;
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* Report header */
+.signals-report-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.signals-count-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.2px;
+}
+
+/* --- Severity groups --- */
+
+.signals-severity-group {
+  margin-bottom: 24px;
+}
+
+.signals-severity-group.hidden {
+  display: none;
+}
+
+.signals-group-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+
+.signals-group-critical .signals-group-label { color: #c9463d; }
+.signals-group-high .signals-group-label { color: #c47a3a; }
+.signals-group-medium .signals-group-label { color: #b5a036; }
+
+.signals-card-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* --- Signal card --- */
+
+.signal-card {
+  border-left: 3px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  padding: 12px 14px;
+}
+
+.signal-card.hidden {
+  display: none;
+}
+
+.signal-critical { border-left-color: #c9463d; }
+.signal-high { border-left-color: #c47a3a; }
+.signal-medium { border-left-color: #b5a036; }
+.signal-low { border-left-color: var(--text-dim); }
+
+.signal-card-dismissed {
+  opacity: 0;
+  transform: translateX(-6px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+/* Card header */
+.signal-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.signal-card-title {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.signal-dismiss-btn {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.signal-card:hover .signal-dismiss-btn {
+  opacity: 0.6;
+}
+
+.signal-dismiss-btn:hover {
+  opacity: 1;
+  color: var(--text);
+}
+
+/* Card meta */
+.signal-card-meta {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  letter-spacing: 0.2px;
+}
+
+/* Card tags */
+.signal-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 8px;
+}
+
+.sv-tag {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--chip-bg);
+  color: var(--text-dim);
+  letter-spacing: 0.2px;
+}
+
+/* Card footer */
+.signal-card-footer {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--bg-hover);
+}
+
+.signal-view-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--accent);
+  border-radius: 3px;
+  padding: 3px 10px;
+  font-size: 10px;
+  cursor: pointer;
+  letter-spacing: 0.2px;
+  transition: background 0.1s;
+}
+
+.signal-view-btn:hover {
+  background: var(--bg-hover);
+}
+
+/* Dismissed note */
+.signals-dismissed-note {
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 10px;
+  padding: 12px 0;
+}
+
+/* ============================================================
+   Signal viz primitives (sv- prefix)
+   ============================================================ */
+
+.sv-shell {
+  padding: 4px 0;
+}
+
+/* --- Metric row: ring gauge + number + label --- */
+
+.sv-metric-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sv-metric-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.sv-metric-num {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+}
+
+.sv-metric-hero {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text-strong);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -1px;
+  flex-shrink: 0;
+}
+
+.sv-metric-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+/* --- Ring gauge (SVG) --- */
+
+.sv-ring {
+  flex-shrink: 0;
+  display: block;
+}
+
+.sv-ring-track {
+  stroke: var(--bg-hover);
+}
+
+.sv-ring-fill {
+  stroke-linecap: round;
+}
+
+/* --- Dot grid --- */
+
+.sv-dot-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 8px;
+}
+
+.sv-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  opacity: 0.6;
+}
+
+.sv-dot-more {
+  font-size: 9px;
+  color: var(--text-dim);
+  align-self: center;
+  margin-left: 2px;
+}
+
+/* --- Compare row (side-by-side blocks) --- */
+
+.sv-compare-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.sv-compare-block {
+  text-align: center;
+  min-width: 48px;
+}
+
+.sv-compare-num {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+}
+
+.sv-compare-label {
+  font-size: 9px;
+  color: var(--text-dim);
+  margin-top: 3px;
+  letter-spacing: 0.3px;
+}
+
+.sv-compare-vs {
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.sv-gap-indicator {
+  font-size: 9px;
+  color: var(--text-dim);
+  padding: 2px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 3px;
+  letter-spacing: 0.3px;
+}
+
+.sv-sev-text-critical { color: #c9463d; }
+.sv-sev-text-high { color: #c47a3a; }
+.sv-sev-text-medium { color: #b5a036; }
+.sv-sev-text-low { color: var(--text-muted); }
+
+/* --- Block (icon + label, for KB-graph gap) --- */
+
+.sv-block {
+  text-align: center;
+  min-width: 48px;
+}
+
+.sv-block-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--chip-bg);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 4px;
+}
+
+.sv-block-label {
+  font-size: 9px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 80px;
+}
+
+/* --- Progress bar --- */
+
+.sv-progress {
+  margin: 6px 0;
+}
+
+.sv-progress-track {
+  height: 6px;
+  background: var(--bg-hover);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.sv-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.sv-progress-label {
+  font-size: 9px;
+  color: var(--text-dim);
+  margin-top: 3px;
+}
+
+.sv-caption {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 6px;
+}
+
+/* --- Chip row --- */
+
+.sv-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sv-chip {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: var(--chip-bg);
+  color: var(--text-muted);
+}
+
+/* --- Connector (visual hint between chips) --- */
+
+.sv-connector {
+  width: 24px;
+  height: 1px;
+  background: var(--border);
+  margin: 6px auto;
 }

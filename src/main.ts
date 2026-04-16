@@ -9,6 +9,7 @@ import {
   type RemoteSummary,
 } from "./api";
 import { initKBPanel } from "./kb-panel";
+import { initSignalsPanel } from "./signals-panel";
 import { renderMarkdown } from "./markdown";
 import { initSidebar } from "./sidebar";
 import { kbMountProviders } from "./extensions/api";
@@ -183,6 +184,7 @@ async function main() {
   const panelMount = createPanelMount(canvasContainer);
 
   const kbPanel = initKBPanel(panelMount);
+  const signalsPanel = initSignalsPanel(panelMount);
 
   const infoPanel = initInfoPanel(canvasContainer, panelMount, {
     onUpdateNode(nodeId, properties) {
@@ -376,6 +378,7 @@ async function main() {
       graph: activeOntology,
       selection: currentSelection,
       focus: canvas?.getFocusInfo() ?? null,
+      selectedSignalIds: sidebar.getSelectedSignalIds(),
     });
   }
 
@@ -784,6 +787,29 @@ async function main() {
       onKBDocSelect: (docId) => {
         kbPanel.show(docId);
       },
+      onSignalsTabSelect: async () => {
+        await signalsPanel.show();
+        const signals = await signalsPanel.getSignals();
+        sidebar.setSignals(signals as any);
+      },
+      onSignalsFilter: (query) => {
+        signalsPanel.filter(query);
+      },
+      onSignalSelectionChange: (ids) => {
+        // Sidebar changed → sync to panel (both add and remove)
+        const idSet = new Set(ids);
+        // Deselect anything panel has that sidebar doesn't
+        signalsPanel.clearSelection();
+        for (const id of ids) {
+          signalsPanel.setSelected(id, true);
+        }
+        publishBridgeState();
+      },
+      onSignalSelect: (_signalId) => {
+        // Scroll the panel card into view (panel is already visible)
+        const card = document.querySelector(`[data-signal-id="${CSS.escape(_signalId)}"]`);
+        if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
+      },
       onKBMountAdd: async (name, mountPath, writable) => {
         const res = await fetch("/api/kb/mounts", {
           method: "POST",
@@ -1038,6 +1064,23 @@ async function main() {
 
   // Re-fetch KB when extensions register/unregister mount providers
   window.addEventListener("backpack-kb-mounts-changed", () => refreshKB());
+
+  // Signals: the "View in" button navigates via hash URL, which the
+  // existing hash router handles (loads graph + focuses nodes).
+  signalsPanel.setDismissHandler(() => {});
+
+  // Sync selection between sidebar ↔ panel ↔ viewer state bridge
+  signalsPanel.setSelectionChangeHandler((ids) => {
+    // Panel changed → sync to sidebar
+    const sidebarIds = new Set(sidebar.getSelectedSignalIds());
+    for (const id of ids) {
+      if (!sidebarIds.has(id)) sidebar.setSignalSelected(id, true);
+    }
+    for (const id of sidebarIds) {
+      if (!ids.includes(id)) sidebar.setSignalSelected(id, false);
+    }
+    publishBridgeState();
+  });
 
   async function refreshBackpacksAndGraphs() {
     if (isCloudActive) return; // Cloud mode manages its own state

@@ -31,6 +31,10 @@ export interface SidebarCallbacks {
   onBackpackSwitch?: (pathOrName: string) => void;
   onBackpackRegister?: (path: string, activate: boolean) => void;
   onKBDocSelect?: (docId: string) => void;
+  onSignalsTabSelect?: () => void;
+  onSignalsFilter?: (query: string) => void;
+  onSignalSelect?: (signalId: string) => void;
+  onSignalSelectionChange?: (selectedIds: string[]) => void;
   onKBMountAdd?: (name: string, path: string, writable: boolean) => void;
   onKBMountRemove?: (name: string) => void;
   onKBMountEdit?: (name: string, newPath: string) => void;
@@ -689,8 +693,14 @@ export function initSidebar(
   kbTab.type = "button";
   kbTab.textContent = "Knowledge Base";
 
+  const signalsTab = document.createElement("button");
+  signalsTab.className = "sidebar-tab";
+  signalsTab.type = "button";
+  signalsTab.textContent = "Signals";
+
   tabBar.appendChild(graphsTab);
   tabBar.appendChild(kbTab);
+  tabBar.appendChild(signalsTab);
   container.appendChild(tabBar);
 
   // --- Graphs tab content ---
@@ -919,22 +929,127 @@ export function initSidebar(
   kbList.hidden = false;
   container.appendChild(kbPane);
 
+  // --- Signals tab content ---
+  const signalsPane = document.createElement("div");
+  signalsPane.className = "sidebar-tab-pane hidden";
+
+  const signalsFilter = document.createElement("input");
+  signalsFilter.className = "sidebar-search";
+  signalsFilter.type = "text";
+  signalsFilter.placeholder = "Filter signals…";
+  signalsPane.appendChild(signalsFilter);
+
+  const signalsList = document.createElement("ul");
+  signalsList.className = "signals-sidebar-list";
+  signalsPane.appendChild(signalsList);
+
+  // Selection tray (sticky bottom)
+  const signalsTray = document.createElement("div");
+  signalsTray.className = "signals-selection-tray";
+  signalsTray.hidden = true;
+
+  const trayCount = document.createElement("span");
+  trayCount.className = "signals-tray-count";
+
+  const traySelectAll = document.createElement("button");
+  traySelectAll.className = "signals-tray-btn";
+  traySelectAll.type = "button";
+  traySelectAll.textContent = "Select filtered";
+
+  const trayClear = document.createElement("button");
+  trayClear.className = "signals-tray-btn";
+  trayClear.type = "button";
+  trayClear.textContent = "Clear";
+
+  signalsTray.appendChild(trayCount);
+  signalsTray.appendChild(traySelectAll);
+  signalsTray.appendChild(trayClear);
+  signalsPane.appendChild(signalsTray);
+
+  container.appendChild(signalsPane);
+
+  // Selection state
+  const selectedSignalIds = new Set<string>();
+  let signalItems: HTMLLIElement[] = [];
+
+  function updateSelectionTray() {
+    const count = selectedSignalIds.size;
+    signalsTray.hidden = count === 0 && signalItems.length === 0;
+    trayCount.textContent = count > 0 ? `${count} selected` : "";
+    trayClear.hidden = count === 0;
+    cbs.onSignalSelectionChange?.([...selectedSignalIds]);
+  }
+
+  function toggleSignalSelection(id: string) {
+    if (selectedSignalIds.has(id)) {
+      selectedSignalIds.delete(id);
+    } else {
+      selectedSignalIds.add(id);
+    }
+    // Update visual state
+    for (const item of signalItems) {
+      if (item.dataset.signalId === id) {
+        item.classList.toggle("signal-selected", selectedSignalIds.has(id));
+        const cb = item.querySelector(".signal-checkbox") as HTMLElement | null;
+        if (cb) cb.classList.toggle("checked", selectedSignalIds.has(id));
+      }
+    }
+    updateSelectionTray();
+  }
+
+  traySelectAll.addEventListener("click", () => {
+    // Select all currently visible (not hidden) signal items
+    for (const item of signalItems) {
+      if (!item.classList.contains("hidden") && item.dataset.signalId) {
+        selectedSignalIds.add(item.dataset.signalId);
+        item.classList.add("signal-selected");
+        const cb = item.querySelector(".signal-checkbox") as HTMLElement | null;
+        if (cb) cb.classList.add("checked");
+      }
+    }
+    updateSelectionTray();
+  });
+
+  trayClear.addEventListener("click", () => {
+    selectedSignalIds.clear();
+    for (const item of signalItems) {
+      item.classList.remove("signal-selected");
+      const cb = item.querySelector(".signal-checkbox") as HTMLElement | null;
+      if (cb) cb.classList.remove("checked");
+    }
+    updateSelectionTray();
+  });
+
+  function filterSignalItems() {
+    const q = signalsFilter.value.toLowerCase();
+    for (const item of signalItems) {
+      const text = item.dataset.searchText ?? "";
+      item.classList.toggle("hidden", q.length > 0 && !text.includes(q));
+    }
+    cbs.onSignalsFilter?.(q);
+  }
+  signalsFilter.addEventListener("input", () => filterSignalItems());
+
   // Remove the standalone KB heading — no longer needed in tabbed layout
   // (kbHeading was created earlier but we don't add it to the DOM)
 
   container.appendChild(footer);
 
   // Tab switching
-  let activeTab: "graphs" | "kb" = "graphs";
-  function switchTab(tab: "graphs" | "kb") {
+  let activeTab: "graphs" | "kb" | "signals" = "graphs";
+  function switchTab(tab: "graphs" | "kb" | "signals") {
     activeTab = tab;
     graphsTab.classList.toggle("active", tab === "graphs");
     kbTab.classList.toggle("active", tab === "kb");
+    signalsTab.classList.toggle("active", tab === "signals");
     graphsPane.classList.toggle("hidden", tab !== "graphs");
     kbPane.classList.toggle("hidden", tab !== "kb");
+    signalsPane.classList.toggle("hidden", tab !== "signals");
+    if (tab === "signals") cbs.onSignalsTabSelect?.();
   }
   graphsTab.addEventListener("click", () => switchTab("graphs"));
   kbTab.addEventListener("click", () => switchTab("kb"));
+  signalsTab.addEventListener("click", () => switchTab("signals"));
 
   let kbItems: HTMLLIElement[] = [];
   kbFilter.addEventListener("input", () => filterKBItems());
@@ -949,7 +1064,8 @@ export function initSidebar(
     const query = input.value.toLowerCase();
     for (const item of items) {
       const name = item.dataset.name ?? "";
-      item.style.display = name.includes(query) ? "" : "none";
+      const tags = item.dataset.tags ?? "";
+      item.style.display = (name.includes(query) || tags.includes(query)) ? "" : "none";
     }
     for (const item of remoteItems) {
       const name = item.dataset.name ?? "";
@@ -1035,6 +1151,7 @@ export function initSidebar(
         const li = document.createElement("li");
         li.className = "ontology-item";
         li.dataset.name = s.name;
+        li.dataset.tags = (s.tags ?? []).join(" ");
 
         const nameSpan = document.createElement("span");
         nameSpan.className = "name";
@@ -1071,8 +1188,33 @@ export function initSidebar(
           if (!syncBadge.isConnected) return;
           const info = syncedMap.get(s.name);
           if (info) {
-            syncBadge.textContent = info.encrypted ? "\uD83D\uDD12 synced" : "synced";
-            syncBadge.title = info.encrypted ? "Synced (encrypted)" : "Synced (unencrypted)";
+            const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            svg.setAttribute("width", "12");
+            svg.setAttribute("height", "12");
+            svg.setAttribute("viewBox", "0 0 24 24");
+            svg.setAttribute("fill", "none");
+            svg.setAttribute("stroke", "currentColor");
+            svg.setAttribute("stroke-width", "2");
+            svg.setAttribute("stroke-linecap", "round");
+            svg.setAttribute("stroke-linejoin", "round");
+            if (info.encrypted) {
+              // Lock icon
+              const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+              rect.setAttribute("x", "3"); rect.setAttribute("y", "11");
+              rect.setAttribute("width", "18"); rect.setAttribute("height", "11");
+              rect.setAttribute("rx", "2");
+              const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+              path.setAttribute("d", "M7 11V7a5 5 0 0 1 10 0v4");
+              svg.appendChild(rect);
+              svg.appendChild(path);
+            } else {
+              // Cloud icon
+              const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+              path.setAttribute("d", "M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z");
+              svg.appendChild(path);
+            }
+            syncBadge.appendChild(svg);
+            syncBadge.title = info.encrypted ? "Synced to cloud (encrypted)" : "Synced to cloud";
             syncBadge.classList.add("active");
           }
         });
@@ -1097,7 +1239,7 @@ export function initSidebar(
           for (const tag of s.tags) {
             const pill = document.createElement("span");
             pill.className = "sidebar-tag-pill";
-            pill.textContent = tag;
+            pill.textContent = `#${tag}`;
             tagsContainer.appendChild(pill);
           }
         }
@@ -1388,6 +1530,112 @@ export function initSidebar(
         container.style.setProperty("--backpack-color", "#5b9bd5");
         pickerAllMode = false;
       }
+    },
+
+    setSignals(signals: { id: string; title: string; severity: string; kind: string; graphNames: string[]; tags: string[]; evidenceNodeIds: string[] }[]) {
+      signalsList.replaceChildren();
+      signalItems = [];
+
+      if (signals.length === 0) {
+        const empty = document.createElement("li");
+        empty.className = "signals-empty-item";
+        empty.textContent = "No signals. Run backpack_signal_detect via MCP.";
+        signalsList.appendChild(empty);
+        updateSelectionTray();
+        return;
+      }
+
+      for (const signal of signals) {
+        const li = document.createElement("li");
+        li.className = "ontology-item signal-sidebar-item";
+        if (selectedSignalIds.has(signal.id)) li.classList.add("signal-selected");
+        const searchParts = [signal.title, signal.kind, ...signal.graphNames, ...signal.tags].join(" ").toLowerCase();
+        li.dataset.searchText = searchParts;
+        li.dataset.signalId = signal.id;
+
+        // Checkbox + severity dot + title row
+        const row = document.createElement("div");
+        row.className = "signal-sidebar-row";
+
+        const checkbox = document.createElement("span");
+        checkbox.className = `signal-checkbox${selectedSignalIds.has(signal.id) ? " checked" : ""}`;
+        checkbox.addEventListener("click", (e) => {
+          e.stopPropagation();
+          toggleSignalSelection(signal.id);
+        });
+        row.appendChild(checkbox);
+
+        const dot = document.createElement("span");
+        dot.className = `sv-sev-dot sv-sev-bg-${signal.severity}`;
+        row.appendChild(dot);
+
+        const titleSpan = document.createElement("span");
+        titleSpan.className = "signal-sidebar-title";
+        titleSpan.textContent = signal.title;
+        row.appendChild(titleSpan);
+
+        li.appendChild(row);
+
+        // Tags row
+        if (signal.tags.length > 0) {
+          const tagsRow = document.createElement("div");
+          tagsRow.className = "signal-sidebar-tags";
+          for (const tag of signal.tags.slice(0, 6)) {
+            const tagEl = document.createElement("span");
+            tagEl.className = "signal-sidebar-tag";
+            tagEl.textContent = tag;
+            tagsRow.appendChild(tagEl);
+          }
+          if (signal.tags.length > 6) {
+            const more = document.createElement("span");
+            more.className = "signal-sidebar-tag-more";
+            more.textContent = `+${signal.tags.length - 6}`;
+            tagsRow.appendChild(more);
+          }
+          li.appendChild(tagsRow);
+        }
+
+        // Evidence count
+        if (signal.evidenceNodeIds.length > 0) {
+          const nodesRow = document.createElement("div");
+          nodesRow.className = "signal-sidebar-nodes";
+          const countSpan = document.createElement("span");
+          countSpan.className = "signal-sidebar-tag-more";
+          countSpan.textContent = `${signal.evidenceNodeIds.length} evidence node${signal.evidenceNodeIds.length > 1 ? "s" : ""}`;
+          nodesRow.appendChild(countSpan);
+          li.appendChild(nodesRow);
+        }
+
+        li.addEventListener("click", (e) => {
+          if ((e.target as HTMLElement).closest(".signal-checkbox")) return;
+          cbs.onSignalSelect?.(signal.id);
+        });
+
+        signalsList.appendChild(li);
+        signalItems.push(li);
+      }
+      filterSignalItems();
+      updateSelectionTray();
+    },
+
+    getSelectedSignalIds(): string[] {
+      return [...selectedSignalIds];
+    },
+
+    setSignalSelected(id: string, selected: boolean) {
+      if (selected) {
+        selectedSignalIds.add(id);
+      } else {
+        selectedSignalIds.delete(id);
+      }
+      for (const item of signalItems) {
+        if (item.dataset.signalId === id) {
+          item.classList.toggle("signal-selected", selected);
+          const cb = item.querySelector(".signal-checkbox") as HTMLElement | null;
+          if (cb) cb.classList.toggle("checked", selected);
+        }
+      }
+      updateSelectionTray();
     },
 
     toggle: toggleSidebar,

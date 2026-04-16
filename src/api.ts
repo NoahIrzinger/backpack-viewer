@@ -1,4 +1,4 @@
-import type { LearningGraphData, LearningGraphSummary, KBDocumentSummary, KBListResult, KBMountInfo, KBDocument } from "backpack-ontology";
+import type { LearningGraphData, LearningGraphSummary, KBDocumentSummary, KBListResult, KBMountInfo, KBDocument, SignalResult } from "backpack-ontology";
 
 export async function listOntologies(): Promise<LearningGraphSummary[]> {
   const res = await fetch("/api/ontologies");
@@ -254,4 +254,37 @@ export async function listKBMounts(): Promise<KBMountInfo[]> {
   const res = await fetch("/api/kb/mounts");
   if (!res.ok) return [];
   return res.json();
+}
+
+// --- Signals ---
+
+export async function listSignals(opts?: {
+  graph?: string;
+  kind?: string;
+  severity?: string;
+  query?: string;
+}): Promise<SignalResult> {
+  const params = new URLSearchParams();
+  if (opts?.graph) params.set("graph", opts.graph);
+  if (opts?.kind) params.set("kind", opts.kind);
+  if (opts?.severity) params.set("severity", opts.severity);
+  if (opts?.query) params.set("q", opts.query);
+  const qs = params.toString();
+  const res = await fetch(`/api/signals${qs ? `?${qs}` : ""}`);
+  if (!res.ok) return { signals: [], dismissed: 0, computedAt: "" };
+  return res.json();
+}
+
+export async function detectSignals(): Promise<SignalResult> {
+  const res = await fetch("/api/signals/detect", { method: "POST" });
+  if (!res.ok) return { signals: [], dismissed: 0, computedAt: "" };
+  return res.json();
+}
+
+export async function dismissSignal(signalId: string): Promise<void> {
+  await fetch("/api/signals/dismiss", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ signalId }),
+  });
 }

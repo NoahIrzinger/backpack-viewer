@@ -16,6 +16,7 @@ export interface ViewerState {
   graph: string;
   selection: string[];
   focus: { seedNodeIds: string[]; hops: number } | null;
+  selectedSignalIds?: string[];
 }
 
 const PUBLISH_DEBOUNCE_MS = 200;

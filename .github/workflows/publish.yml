@@ -38,7 +38,11 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
 
-      - run: rm -rf node_modules package-lock.json && npm install
+      # Swap file: dep for npm version since sibling dir doesn't exist in CI.
+      - run: |
+          rm -rf node_modules package-lock.json
+          node -e "const p=require('./package.json'); if(p.dependencies?.['backpack-ontology']?.startsWith('file:')) { p.dependencies['backpack-ontology']='latest'; require('fs').writeFileSync('package.json',JSON.stringify(p,null,2)+'\n'); }"
+          npm install
       - run: npx tsc --noEmit
 
   publish:
@@ -56,7 +60,10 @@ jobs:
           registry-url: https://registry.npmjs.org
           cache: npm
 
-      - run: rm -rf node_modules package-lock.json && npm install
+      - run: |
+          rm -rf node_modules package-lock.json
+          node -e "const p=require('./package.json'); if(p.dependencies?.['backpack-ontology']?.startsWith('file:')) { p.dependencies['backpack-ontology']='latest'; require('fs').writeFileSync('package.json',JSON.stringify(p,null,2)+'\n'); }"
+          npm install
       - run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

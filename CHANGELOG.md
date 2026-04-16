@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Signals — the third primitive
+- **Signals tab** — third sidebar tab alongside Graphs and Knowledge Base. Lists all detected signals with severity dots, tags, and evidence counts. Filter bar filters both sidebar and panel simultaneously.
+- **Signal card report** — scrollable panel with type-driven visualizations per signal kind: comparison blocks, progress bars, ring gauges, dot grids, chip rows, heatmaps. Cards grouped by severity.
+- **Multi-select** — checkboxes on sidebar items and panel cards. Shared selection state synced bidirectionally. Selection tray with count, "Select filtered", and "Clear" buttons.
+- **View in graph** — "View in" button constructs `#graph?node=id1,id2` URL, navigates via hash router to load graph and highlight evidence nodes. Closes the panel automatically.
+- **Signal API routes** — `GET /api/signals`, `POST /api/signals/detect`, `POST /api/signals/dismiss` for viewer-side signal access.
+- **Viewer state bridge** — `selectedSignalIds` published to viewer state for MCP tool access.
+- **CI fix** — workflows swap `file:` dependency for npm `latest` so CI resolves backpack-ontology without the sibling directory.
+
 ### Graph tags
 - **Tag pills in sidebar** — graphs with tags show small pill badges under the stats line.
 - **Edit tags** — three-dot menu "Edit tags" option opens a prompt for comma-separated tags.
