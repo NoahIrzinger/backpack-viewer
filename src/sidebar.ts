@@ -43,6 +43,7 @@ export interface SidebarCallbacks {
   onSyncKBDoc?: (docId: string, encrypted?: boolean) => Promise<boolean>;
   onSyncKBMount?: (mountName: string, encrypted?: boolean) => Promise<{ synced: number; failed: number; total: number }>;
   onKBDocDelete?: (docId: string) => Promise<void>;
+  onEditTags?: (name: string) => void;
 }
 
 export interface SyncResultItem { name: string; kind: "graph" | "kb"; status: "synced" | "failed" | "skipped"; error?: string }
@@ -379,6 +380,17 @@ export function initSidebar(
         if (nameEl) triggerInlineRename(graphName, nameEl);
       });
       itemMenu.appendChild(renameItem);
+    }
+
+    if (cbs.onEditTags) {
+      const tagsItem = document.createElement("button");
+      tagsItem.className = "sidebar-item-menu-action";
+      tagsItem.textContent = "Edit tags";
+      tagsItem.addEventListener("click", () => {
+        hideItemMenu();
+        cbs.onEditTags!(graphName);
+      });
+      itemMenu.appendChild(tagsItem);
     }
 
     if (isAuthenticated) {
@@ -1079,8 +1091,20 @@ export function initSidebar(
           }
         });
 
+        const tagsContainer = document.createElement("div");
+        tagsContainer.className = "sidebar-tags";
+        if (s.tags?.length) {
+          for (const tag of s.tags) {
+            const pill = document.createElement("span");
+            pill.className = "sidebar-tag-pill";
+            pill.textContent = tag;
+            tagsContainer.appendChild(pill);
+          }
+        }
+
         li.appendChild(nameSpan);
         li.appendChild(statsSpan);
+        li.appendChild(tagsContainer);
         li.appendChild(lockBadge);
         li.appendChild(syncBadge);
         li.appendChild(branchSpan);

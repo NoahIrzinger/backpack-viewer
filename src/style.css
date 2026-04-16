@@ -985,6 +985,22 @@ body {
   color: #c08c00;
 }
 
+.sidebar-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 2px;
+}
+
+.sidebar-tag-pill {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--chip-bg, rgba(0, 0, 0, 0.06));
+  color: var(--text-muted, #666);
+  line-height: 16px;
+}
+
 .sidebar-sync-badge {
   font-size: 10px;
   color: #5a9fd4;

@@ -677,6 +677,21 @@ async function main() {
           toolsPane.setData(currentData);
         }
       },
+      onEditTags: async (graphName) => {
+        const res = await fetch(`/api/ontologies/${encodeURIComponent(graphName)}/tags`);
+        const current: string[] = res.ok ? (await res.json()).tags ?? [] : [];
+        const input = prompt("Tags (comma-separated):", current.join(", "));
+        if (input === null) return; // cancelled
+        const tags = input.split(",").map(t => t.trim()).filter(Boolean);
+        await fetch(`/api/ontologies/${encodeURIComponent(graphName)}/tags`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tags }),
+        });
+        const updated = await listOntologies();
+        sidebar.setSummaries(updated);
+        sidebar.setActive(activeOntology);
+      },
       onBranchSwitch: async (graphName, branchName) => {
         await switchBranch(graphName, branchName);
         await refreshBranches(graphName);

@@ -932,6 +932,28 @@ export async function handleApiRequest(
       return true;
     }
 
+    // /api/ontologies/<name>/tags — get or set tags
+    const tagsMatch = url.match(/^\/api\/ontologies\/(.+)\/tags$/);
+    if (tagsMatch && (method === "GET" || method === "PUT")) {
+      const name = decodeURIComponent(tagsMatch[1]);
+      try {
+        if (method === "GET") {
+          const data = await ctx.storage.current.loadOntology(name);
+          sendJson(res, 200, { tags: data.metadata.tags ?? [] });
+        } else {
+          const body = JSON.parse(await readBody(req));
+          const tags: string[] = (body.tags ?? []).map((t: string) => t.trim().toLowerCase()).filter(Boolean);
+          const data = await ctx.storage.current.loadOntology(name);
+          data.metadata.tags = tags;
+          await ctx.storage.current.saveOntology(name, data);
+          sendJson(res, 200, { tags });
+        }
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
     // /api/ontologies/<name>/rename — must match before /api/ontologies/<name>
     const rename = url.match(/^\/api\/ontologies\/(.+)\/rename$/);
     if (rename && method === "POST") {

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Graph tags
+- **Tag pills in sidebar** — graphs with tags show small pill badges under the stats line.
+- **Edit tags** — three-dot menu "Edit tags" option opens a prompt for comma-separated tags.
+- **Tags API** — `GET/PUT /api/ontologies/<name>/tags` for reading and updating tags.
+
 ### Sync provenance
 - **Device identity in sync** — `syncGraphToRelay()` now sends `X-Backpack-Device-Id` (machine-id) and `X-Backpack-Source-Name` (active backpack name) headers. All sync paths (per-graph, bulk push, KB) include provenance.
 - **`getMachineId()` helper** — reusable machine-id read/generate extracted from `/api/device-info` handler.
