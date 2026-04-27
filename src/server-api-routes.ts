@@ -1044,7 +1044,9 @@ export async function handleApiRequest(
         });
         sendJson(res, 200, state);
       } catch (err) {
-        sendErr(res, 500, (err as Error).message);
+        const msg = (err as Error).message;
+        const status = /relay token rejected/i.test(msg) ? 401 : 500;
+        sendErr(res, status, msg);
       }
       return true;
     }
@@ -1077,7 +1079,9 @@ export async function handleApiRequest(
         else result = await client.sync();
         sendJson(res, 200, result);
       } catch (err) {
-        sendErr(res, 500, (err as Error).message);
+        const msg = (err as Error).message;
+        const status = /relay token rejected/i.test(msg) ? 401 : 500;
+        sendErr(res, status, msg);
       }
       return true;
     }
