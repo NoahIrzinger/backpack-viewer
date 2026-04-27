@@ -795,6 +795,40 @@ export async function handleApiRequest(
       return true;
     }
 
+    if (kbDocItem && method === "PUT") {
+      const id = decodeURIComponent(kbDocItem[1]);
+      const body = await readBody(req);
+      try {
+        if (isCloudActive) {
+          sendErr(res, 400, "Editing KB documents in a cloud backpack is not yet supported");
+          return true;
+        }
+        const payload = JSON.parse(body) as {
+          title?: string;
+          content?: string;
+          tags?: string[];
+          sourceGraphs?: string[];
+          sourceNodeIds?: string[];
+          collection?: string;
+        };
+        const docs = await getDocStore();
+        const existing = await docs.read(id);
+        const saved = await docs.save({
+          id,
+          title: payload.title ?? existing.title,
+          content: payload.content ?? existing.content,
+          tags: payload.tags ?? existing.tags,
+          sourceGraphs: payload.sourceGraphs ?? existing.sourceGraphs,
+          sourceNodeIds: payload.sourceNodeIds ?? existing.sourceNodeIds,
+          collection: payload.collection ?? existing.collection,
+        });
+        sendJson(res, 200, saved);
+      } catch (err) {
+        sendErr(res, 400, (err as Error).message);
+      }
+      return true;
+    }
+
     // --- /api/backpack/sync — bidirectional sync for graphs + KB ---
     if (url === "/api/backpack/sync" && method === "POST") {
       const body = await readBody(req);

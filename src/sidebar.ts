@@ -9,6 +9,14 @@ function formatTokenCount(n: number): string {
   return `${n} tokens`;
 }
 
+function truncateMiddle(s: string, maxLen: number): string {
+  if (s.length <= maxLen) return s;
+  const keep = maxLen - 1;
+  const head = Math.ceil(keep * 0.4);
+  const tail = keep - head;
+  return s.slice(0, head) + "…" + s.slice(s.length - tail);
+}
+
 function estimateTokensFromCounts(nodeCount: number, edgeCount: number): number {
   return nodeCount * 50 + edgeCount * 25 + 50; // rough: 50 tok/node, 25 tok/edge, 50 metadata
 }
@@ -171,11 +179,48 @@ export function initSidebar(
   pickerContainer.appendChild(pickerDropdown);
   container.appendChild(pickerContainer);
 
+  // Path tooltip — shows full backpack path on hover/focus of a picker item.
+  // Mounted on document.body so it can escape the narrow sidebar bounds.
+  const pathTooltip = document.createElement("div");
+  pathTooltip.className = "backpack-picker-path-tooltip";
+  pathTooltip.hidden = true;
+  document.body.appendChild(pathTooltip);
+
+  let pathTooltipTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  function showPathTooltip(target: HTMLElement, fullPath: string) {
+    if (pathTooltipTimeout) clearTimeout(pathTooltipTimeout);
+    pathTooltipTimeout = setTimeout(() => {
+      pathTooltip.textContent = fullPath;
+      pathTooltip.hidden = false;
+      const rect = target.getBoundingClientRect();
+      pathTooltip.style.left = `${rect.right + 8}px`;
+      pathTooltip.style.top = `${rect.top}px`;
+      const ttRect = pathTooltip.getBoundingClientRect();
+      if (ttRect.right > window.innerWidth - 8) {
+        const flippedLeft = rect.left - ttRect.width - 8;
+        pathTooltip.style.left = `${Math.max(8, flippedLeft)}px`;
+      }
+      if (ttRect.bottom > window.innerHeight - 8) {
+        pathTooltip.style.top = `${Math.max(8, window.innerHeight - ttRect.height - 8)}px`;
+      }
+    }, 200);
+  }
+
+  function hidePathTooltip() {
+    if (pathTooltipTimeout) {
+      clearTimeout(pathTooltipTimeout);
+      pathTooltipTimeout = null;
+    }
+    pathTooltip.hidden = true;
+  }
+
   let pickerOpen = false;
   function closePicker() {
     pickerOpen = false;
     pickerDropdown.hidden = true;
     backpackPicker.setAttribute("aria-expanded", "false");
+    hidePathTooltip();
   }
   function openPicker() {
     pickerOpen = true;
@@ -199,6 +244,7 @@ export function initSidebar(
   let hasCloudBackpack = false;
 
   function renderPickerDropdown() {
+    hidePathTooltip();
     pickerDropdown.replaceChildren();
 
     // "All" entry — shows content from all backpacks
@@ -242,11 +288,16 @@ export function initSidebar(
 
       const path = document.createElement("span");
       path.className = "backpack-picker-item-path";
-      path.textContent = b.path;
+      path.textContent = truncateMiddle(b.path, 32);
 
       item.appendChild(dot);
       item.appendChild(name);
       item.appendChild(path);
+
+      item.addEventListener("mouseenter", () => showPathTooltip(item, b.path));
+      item.addEventListener("mouseleave", hidePathTooltip);
+      item.addEventListener("focus", () => showPathTooltip(item, b.path));
+      item.addEventListener("blur", hidePathTooltip);
 
       item.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -279,11 +330,18 @@ export function initSidebar(
 
       const cloudPath = document.createElement("span");
       cloudPath.className = "backpack-picker-item-path";
-      cloudPath.textContent = "app.backpackontology.com";
+      const cloudPathText = "app.backpackontology.com";
+      cloudPath.textContent = truncateMiddle(cloudPathText, 32);
 
       cloudItem.appendChild(cloudIcon);
       cloudItem.appendChild(cloudNameEl);
       cloudItem.appendChild(cloudPath);
+
+      cloudItem.addEventListener("mouseenter", () => showPathTooltip(cloudItem, cloudPathText));
+      cloudItem.addEventListener("mouseleave", hidePathTooltip);
+      cloudItem.addEventListener("focus", () => showPathTooltip(cloudItem, cloudPathText));
+      cloudItem.addEventListener("blur", hidePathTooltip);
+
       cloudItem.addEventListener("click", (e) => {
         e.stopPropagation();
         closePicker();

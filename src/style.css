@@ -450,11 +450,58 @@ body {
   padding: 16px 20px;
 }
 
+.kb-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
 .kb-panel-title {
-  margin: 0 0 8px;
+  margin: 0;
+  flex: 1;
   font-size: 16px;
   font-weight: 600;
   color: var(--text-strong);
+  word-break: break-word;
+}
+
+.kb-copy-btn {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--chip-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.kb-copy-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.kb-copy-btn-ok {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.kb-copy-btn-err {
+  color: #d14343;
+  border-color: #d14343;
+}
+
+.kb-copy-stage {
+  position: absolute;
+  left: -99999px;
+  top: 0;
+  width: 800px;
+  white-space: pre-wrap;
+  pointer-events: none;
 }
 
 .kb-panel-meta {
@@ -508,9 +555,49 @@ body {
 
 .kb-content-toggle {
   display: flex;
+  align-items: center;
   gap: 0;
   margin: 8px 0 4px;
   border-bottom: 1px solid var(--border);
+}
+
+.kb-save-status {
+  margin-left: auto;
+  padding: 0 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.kb-save-status-saving { color: var(--text-muted); }
+.kb-save-status-saved { color: var(--accent); }
+.kb-save-status-error { color: #d14343; }
+
+.kb-panel-content-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.kb-panel-editor {
+  flex: 1;
+  width: 100%;
+  min-height: 240px;
+  box-sizing: border-box;
+  padding: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  resize: none;
+}
+
+.kb-panel-editor:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .kb-content-toggle-btn {
@@ -1520,6 +1607,23 @@ body {
   z-index: 20;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   opacity: 0.95;
+}
+
+.backpack-picker-path-tooltip {
+  position: fixed;
+  pointer-events: none;
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-all;
+  max-width: 360px;
+  z-index: 100;
+  box-shadow: 0 4px 12px var(--shadow);
+  opacity: 0.98;
 }
 
 /* --- Canvas --- */

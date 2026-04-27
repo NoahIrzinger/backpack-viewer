@@ -238,6 +238,22 @@ export async function deleteKBDocument(id: string): Promise<void> {
   if (!res.ok) throw new Error("Failed to delete document");
 }
 
+export async function updateKBDocument(
+  id: string,
+  patch: { content?: string; title?: string; tags?: string[] },
+): Promise<KBDocument> {
+  const res = await fetch(`/api/kb/documents/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "");
+    throw new Error(msg || `Failed to save document (${res.status})`);
+  }
+  return res.json();
+}
+
 export async function searchKBDocuments(query: string, opts?: {
   collection?: string;
   limit?: number;

@@ -1,8 +1,10 @@
 import type { KBDocument } from "backpack-ontology";
 import type { MountedPanel } from "./extensions/types";
 import type { PanelMount } from "./extensions/panel-mount";
-import { readKBDocument } from "./api";
+import { readKBDocument, updateKBDocument } from "./api";
 import { renderMarkdown } from "./markdown";
+
+const AUTOSAVE_DEBOUNCE_MS = 600;
 
 export function initKBPanel(panelMount: PanelMount) {
   const bodyEl = document.createElement("div");
@@ -20,11 +22,53 @@ export function initKBPanel(panelMount: PanelMount) {
   function renderDoc(doc: KBDocument) {
     bodyEl.replaceChildren();
 
-    // Title
+    // Title row (title + copy button)
+    const header = document.createElement("div");
+    header.className = "kb-panel-header";
+
     const title = document.createElement("h3");
     title.className = "kb-panel-title";
     title.textContent = doc.title;
-    bodyEl.appendChild(title);
+    header.appendChild(title);
+
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "kb-copy-btn";
+    copyBtn.type = "button";
+    copyBtn.textContent = "Copy";
+    copyBtn.title = "Copy contents";
+    let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
+    copyBtn.addEventListener("click", async () => {
+      let text: string;
+      if (viewMode === "raw") {
+        const ta = contentArea.querySelector<HTMLTextAreaElement>(".kb-panel-editor");
+        text = ta ? ta.value : doc.content;
+      } else {
+        // Render markdown and use innerText so block elements produce real
+        // line breaks. innerText needs the node attached to the document for
+        // layout-aware whitespace, so mount it off-screen via a CSS class.
+        const stage = renderMarkdown(doc.content);
+        stage.classList.add("kb-copy-stage");
+        document.body.appendChild(stage);
+        text = stage.innerText;
+        stage.remove();
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        copyBtn.textContent = "Copied";
+        copyBtn.classList.add("kb-copy-btn-ok");
+      } catch {
+        copyBtn.textContent = "Copy failed";
+        copyBtn.classList.add("kb-copy-btn-err");
+      }
+      if (copyResetTimer) clearTimeout(copyResetTimer);
+      copyResetTimer = setTimeout(() => {
+        copyBtn.textContent = "Copy";
+        copyBtn.classList.remove("kb-copy-btn-ok", "kb-copy-btn-err");
+      }, 1500);
+    });
+    header.appendChild(copyBtn);
+
+    bodyEl.appendChild(header);
 
     // Metadata row
     const meta = document.createElement("div");
@@ -79,26 +123,93 @@ export function initKBPanel(panelMount: PanelMount) {
     rawBtn.type = "button";
     rawBtn.textContent = "Raw";
 
+    const status = document.createElement("span");
+    status.className = "kb-save-status";
     toggle.appendChild(previewBtn);
     toggle.appendChild(rawBtn);
+    toggle.appendChild(status);
     bodyEl.appendChild(toggle);
 
     // Content area
     const contentArea = document.createElement("div");
+    contentArea.className = "kb-panel-content-area";
+
+    let saveTimer: ReturnType<typeof setTimeout> | null = null;
+    let savePending = false;
+    let saveInFlight = false;
+
+    function setStatus(text: string, kind: "" | "saving" | "saved" | "error" = "") {
+      status.textContent = text;
+      status.className = "kb-save-status" + (kind ? ` kb-save-status-${kind}` : "");
+    }
+
+    async function flushSave(content: string) {
+      if (saveInFlight) {
+        savePending = true;
+        return;
+      }
+      saveInFlight = true;
+      setStatus("Saving…", "saving");
+      try {
+        const updated = await updateKBDocument(doc.id, { content });
+        doc.content = updated.content;
+        doc.updatedAt = updated.updatedAt;
+        setStatus("Saved", "saved");
+      } catch (err) {
+        setStatus(`Save failed: ${(err as Error).message}`, "error");
+      } finally {
+        saveInFlight = false;
+        if (savePending) {
+          savePending = false;
+          // Re-flush with the latest textarea value
+          const ta = contentArea.querySelector<HTMLTextAreaElement>(".kb-panel-editor");
+          if (ta) flushSave(ta.value);
+        }
+      }
+    }
+
+    function scheduleSave(content: string) {
+      if (saveTimer) clearTimeout(saveTimer);
+      setStatus("Editing…");
+      saveTimer = setTimeout(() => {
+        saveTimer = null;
+        flushSave(content);
+      }, AUTOSAVE_DEBOUNCE_MS);
+    }
 
     function renderContent() {
       contentArea.replaceChildren();
       if (viewMode === "preview") {
         contentArea.appendChild(renderMarkdown(doc.content));
+        setStatus("");
       } else {
-        const raw = document.createElement("div");
-        raw.className = "kb-panel-body";
-        raw.textContent = doc.content;
-        contentArea.appendChild(raw);
+        const editor = document.createElement("textarea");
+        editor.className = "kb-panel-editor";
+        editor.spellcheck = false;
+        editor.value = doc.content;
+        editor.addEventListener("input", () => {
+          scheduleSave(editor.value);
+        });
+        editor.addEventListener("blur", () => {
+          if (saveTimer) {
+            clearTimeout(saveTimer);
+            saveTimer = null;
+            flushSave(editor.value);
+          }
+        });
+        contentArea.appendChild(editor);
+        setStatus("");
       }
     }
 
     previewBtn.addEventListener("click", () => {
+      // If switching away from raw with a pending save, flush it first.
+      if (viewMode === "raw" && saveTimer) {
+        const ta = contentArea.querySelector<HTMLTextAreaElement>(".kb-panel-editor");
+        clearTimeout(saveTimer);
+        saveTimer = null;
+        if (ta) flushSave(ta.value);
+      }
       viewMode = "preview";
       previewBtn.classList.add("active");
       rawBtn.classList.remove("active");
