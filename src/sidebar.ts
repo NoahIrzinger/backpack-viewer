@@ -179,6 +179,121 @@ export function initSidebar(
   pickerContainer.appendChild(pickerDropdown);
   container.appendChild(pickerContainer);
 
+  // Sync status row — shown only when the active backpack is registered for sync v0.1.
+  // Layout: [icon] last_sync_at  [Sync] [Register]
+  const syncRow = document.createElement("div");
+  syncRow.className = "backpack-sync-row";
+  syncRow.hidden = true;
+  const syncStatusText = document.createElement("span");
+  syncStatusText.className = "backpack-sync-status";
+  syncStatusText.textContent = "";
+  const syncBtn = document.createElement("button");
+  syncBtn.type = "button";
+  syncBtn.className = "backpack-sync-btn";
+  syncBtn.textContent = "Sync";
+  const syncRegisterBtn = document.createElement("button");
+  syncRegisterBtn.type = "button";
+  syncRegisterBtn.className = "backpack-sync-register-btn";
+  syncRegisterBtn.textContent = "Enable sync";
+  syncRow.appendChild(syncStatusText);
+  syncRow.appendChild(syncBtn);
+  syncRow.appendChild(syncRegisterBtn);
+  container.appendChild(syncRow);
+
+  async function refreshSyncStatus() {
+    try {
+      const res = await fetch("/api/backpack/v2-sync/status");
+      if (!res.ok) {
+        syncRow.hidden = true;
+        return;
+      }
+      const status = await res.json() as { registered: boolean; last_sync_at?: string | null; reason?: string };
+      if (status.reason === "no_local_active") {
+        syncRow.hidden = true;
+        return;
+      }
+      syncRow.hidden = false;
+      if (status.registered) {
+        syncBtn.hidden = false;
+        syncRegisterBtn.hidden = true;
+        const ts = status.last_sync_at
+          ? new Date(status.last_sync_at).toLocaleString()
+          : "never";
+        syncStatusText.textContent = `Last sync: ${ts}`;
+      } else {
+        syncBtn.hidden = true;
+        syncRegisterBtn.hidden = false;
+        syncStatusText.textContent = "Not registered";
+      }
+    } catch {
+      syncRow.hidden = true;
+    }
+  }
+
+  syncBtn.addEventListener("click", async () => {
+    const original = syncBtn.textContent;
+    syncBtn.disabled = true;
+    syncBtn.textContent = "Syncing…";
+    try {
+      const res = await fetch("/api/backpack/v2-sync/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ direction: "sync" }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        syncBtn.textContent = "Failed";
+        syncStatusText.textContent = err.error ?? `HTTP ${res.status}`;
+        return;
+      }
+      const result = await res.json() as {
+        pushed: string[]; pulled: string[]; conflicts: { artifact_id: string }[]; errors: { message: string }[];
+      };
+      const summary = `↑${result.pushed.length} ↓${result.pulled.length}` +
+        (result.conflicts.length ? ` !${result.conflicts.length}` : "") +
+        (result.errors.length ? ` ✗${result.errors.length}` : "");
+      syncBtn.textContent = "Synced";
+      syncStatusText.textContent = summary;
+      setTimeout(() => {
+        syncBtn.textContent = original ?? "Sync";
+        refreshSyncStatus();
+      }, 2000);
+    } catch (err) {
+      syncBtn.textContent = "Failed";
+      syncStatusText.textContent = (err as Error).message;
+    } finally {
+      syncBtn.disabled = false;
+    }
+  });
+
+  syncRegisterBtn.addEventListener("click", async () => {
+    const original = syncRegisterBtn.textContent;
+    syncRegisterBtn.disabled = true;
+    syncRegisterBtn.textContent = "Registering…";
+    try {
+      const res = await fetch("/api/backpack/v2-sync/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        syncStatusText.textContent = err.error ?? `HTTP ${res.status}`;
+        syncRegisterBtn.textContent = original ?? "Enable sync";
+        return;
+      }
+      await refreshSyncStatus();
+    } catch (err) {
+      syncStatusText.textContent = (err as Error).message;
+      syncRegisterBtn.textContent = original ?? "Enable sync";
+    } finally {
+      syncRegisterBtn.disabled = false;
+    }
+  });
+
+  // Initial fetch + refresh after backpack switch.
+  refreshSyncStatus();
+
   // Path tooltip — shows full backpack path on hover/focus of a picker item.
   // Mounted on document.body so it can escape the narrow sidebar bounds.
   const pathTooltip = document.createElement("div");
@@ -1177,6 +1292,7 @@ export function initSidebar(
       pickerDot.style.setProperty("--backpack-color", entry.color);
       container.style.setProperty("--backpack-color", entry.color);
       renderPickerDropdown();
+      refreshSyncStatus();
     },
     getActiveBackpack(): BackpackSummary | null {
       return currentActiveBackpack;

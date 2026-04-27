@@ -926,6 +926,52 @@ body {
   gap: 2px;
 }
 
+.backpack-sync-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -4px 0 10px 0;
+  padding: 4px 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}
+
+.backpack-sync-row[hidden] {
+  display: none;
+}
+
+.backpack-sync-status {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backpack-sync-btn,
+.backpack-sync-register-btn {
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.backpack-sync-btn:hover,
+.backpack-sync-register-btn:hover {
+  background: var(--bg-hover);
+}
+
+.backpack-sync-btn:disabled,
+.backpack-sync-register-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .backpack-picker-pill {
   display: flex;
   align-items: center;

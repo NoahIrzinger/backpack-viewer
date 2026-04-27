@@ -20,6 +20,9 @@ import {
   configDir,
   resolveAuthorName,
   CloudCacheBackend,
+  SyncClient,
+  SyncRelayClient,
+  readSyncState,
 } from "backpack-ontology";
 import type { ViewerConfig } from "./config.js";
 import { readExtensionSettings, writeExtensionSetting } from "./server-extensions.js";
@@ -983,6 +986,122 @@ export async function handleApiRequest(
           await ctx.storage.current.saveOntology(name, data);
           sendJson(res, 200, { tags });
         }
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    // --- /api/backpack/v2-sync — Sync Protocol v0.1 (artifact-versioned) ---
+    if (url === "/api/backpack/v2-sync/status" && method === "GET") {
+      try {
+        const active = ctx.storage.activeEntry;
+        if (!active || active.path.startsWith("cloud://")) {
+          sendJson(res, 200, { registered: false, reason: "no_local_active" });
+          return true;
+        }
+        const state = await readSyncState(active.path);
+        if (!state) {
+          sendJson(res, 200, { registered: false });
+          return true;
+        }
+        sendJson(res, 200, {
+          registered: true,
+          backpack_id: state.backpack_id,
+          name: state.name,
+          relay_url: state.relay_url,
+          last_sync_at: state.last_sync_at,
+          artifact_count: Object.keys(state.artifacts).length,
+        });
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    if (url === "/api/backpack/v2-sync/register" && method === "POST") {
+      try {
+        const active = ctx.storage.activeEntry;
+        if (!active || active.path.startsWith("cloud://")) {
+          sendErr(res, 400, "no local backpack active");
+          return true;
+        }
+        const settings = await readExtensionSettings("share");
+        const token = settings.relay_token as string | undefined;
+        if (!token) {
+          sendErr(res, 401, "Sign in via Share extension first to set relay token");
+          return true;
+        }
+        const relayUrl = (settings.relay_url as string) || "https://app.backpackontology.com";
+        const body = await readBody(req).catch(() => "{}");
+        const reqBody = JSON.parse(body || "{}") as { name?: string; color?: string; tags?: string[] };
+        const relay = new SyncRelayClient({ baseUrl: relayUrl, token });
+        const client = new SyncClient({ backpackPath: active.path, relay });
+        const state = await client.register({
+          name: reqBody.name ?? active.name,
+          color: reqBody.color ?? active.color,
+          tags: reqBody.tags ?? [],
+        });
+        sendJson(res, 200, state);
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    if (url === "/api/backpack/v2-sync/sync" && method === "POST") {
+      try {
+        const active = ctx.storage.activeEntry;
+        if (!active || active.path.startsWith("cloud://")) {
+          sendErr(res, 400, "no local backpack active");
+          return true;
+        }
+        const state = await readSyncState(active.path);
+        if (!state) {
+          sendErr(res, 400, "backpack is not registered for sync");
+          return true;
+        }
+        const settings = await readExtensionSettings("share");
+        const token = settings.relay_token as string | undefined;
+        if (!token) {
+          sendErr(res, 401, "Sign in via Share extension first to set relay token");
+          return true;
+        }
+        const relay = new SyncRelayClient({ baseUrl: state.relay_url, token });
+        const client = new SyncClient({ backpackPath: active.path, relay });
+        const body = await readBody(req).catch(() => "{}");
+        const { direction = "sync" } = JSON.parse(body || "{}") as { direction?: "push" | "pull" | "sync" };
+        let result;
+        if (direction === "push") result = await client.push();
+        else if (direction === "pull") result = await client.pull();
+        else result = await client.sync();
+        sendJson(res, 200, result);
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    if (url === "/api/backpack/v2-sync/conflicts" && method === "GET") {
+      try {
+        const active = ctx.storage.activeEntry;
+        if (!active || active.path.startsWith("cloud://")) {
+          sendJson(res, 200, { conflicts: [] });
+          return true;
+        }
+        const dir = path.join(active.path, ".sync", "conflicts");
+        let entries: string[] = [];
+        try {
+          entries = (await fs.readdir(dir)).filter((f) => f.endsWith(".json"));
+        } catch {
+          entries = [];
+        }
+        sendJson(res, 200, {
+          conflicts: entries.map((name) => ({
+            name,
+            path: path.join(dir, name),
+          })),
+        });
       } catch (err) {
         sendErr(res, 500, (err as Error).message);
       }
