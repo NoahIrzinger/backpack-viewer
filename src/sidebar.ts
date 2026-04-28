@@ -1,6 +1,6 @@
 import type { LearningGraphSummary, KBDocumentSummary } from "backpack-ontology";
 import type { RemoteSummary } from "./api.js";
-import { showConfirm, showPrompt, showBackpackAddDialog, showKBMountDialog } from "./dialog";
+import { showConfirm, showPrompt, showBackpackAddDialog, showKBMountDialog, showToast } from "./dialog";
 import { makeSvgIcon } from "./dom-utils";
 import type { KBMountInfo } from "backpack-ontology";
 
@@ -621,6 +621,108 @@ export function initSidebar(
       cbs.onBackpackRegister(result.path, result.activate);
     });
     pickerDropdown.appendChild(addItem);
+
+    // "Pull from cloud..." — only meaningful for the local viewer
+    // (cloud hosts already see all containers natively). The handler
+    // checks /api/cloud-sync-backpacks; if the user isn't signed in
+    // or has no cloud containers, the entry no-ops with a toast.
+    const pullItem = document.createElement("button");
+    pullItem.className = "backpack-picker-item backpack-picker-add";
+    pullItem.type = "button";
+    pullItem.textContent = "↓ Pull from cloud…";
+    pullItem.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      closePicker();
+      await openPullFromCloudDialog();
+    });
+    pickerDropdown.appendChild(pullItem);
+  }
+
+  // Lightweight inline list dialog for "Pull from cloud". Lists the
+  // user's cloud sync_backpacks, lets them pick one, and POSTs to
+  // /api/backpack/v2-sync/clone to download it as a new local folder.
+  async function openPullFromCloudDialog(): Promise<void> {
+    let listResp: Response;
+    try {
+      listResp = await fetch("/api/cloud-sync-backpacks");
+    } catch {
+      showToast("Could not reach cloud — try again", 3000);
+      return;
+    }
+    const data = await listResp.json().catch(() => ({})) as {
+      authenticated?: boolean;
+      backpacks?: Array<{ id: string; name: string; origin_kind: string; origin_device_name?: string }>;
+    };
+    if (!data.authenticated) {
+      showToast("Sign in to enable cloud sync first", 3000);
+      return;
+    }
+    const all = data.backpacks ?? [];
+    if (all.length === 0) {
+      showToast("No cloud backpacks to pull", 3000);
+      return;
+    }
+
+    // Filter out backpacks already registered locally — listed via
+    // setBackpacks earlier. We can read currentBackpacks via the
+    // closed-over picker state, but that's not exposed here; just let
+    // the server's clone endpoint decide via its alreadyExists check.
+    const overlay = document.createElement("div");
+    overlay.className = "backpack-pull-overlay";
+    const dialog = document.createElement("div");
+    dialog.className = "backpack-pull-dialog";
+    const title = document.createElement("div");
+    title.className = "backpack-pull-title";
+    title.textContent = "Pull a backpack from cloud";
+    dialog.appendChild(title);
+
+    const list = document.createElement("div");
+    list.className = "backpack-pull-list";
+    for (const bp of all) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "backpack-pull-row";
+      const label = bp.origin_kind === "cloud"
+        ? `${bp.name}  ·  cloud`
+        : `${bp.name}  ·  ${bp.origin_device_name ?? "device"}`;
+      row.textContent = label;
+      row.addEventListener("click", async () => {
+        row.disabled = true;
+        row.textContent = `${label}  ·  pulling…`;
+        try {
+          const res = await fetch("/api/backpack/v2-sync/clone", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ backpack_id: bp.id, activate: true }),
+          });
+          const body = await res.json().catch(() => ({})) as { path?: string; pulled?: number; error?: string };
+          if (!res.ok) {
+            row.textContent = body.error ?? `${label}  ·  failed (${res.status})`;
+            row.disabled = false;
+            return;
+          }
+          showToast(`Pulled ${body.pulled ?? 0} artifact(s) into ${body.path}`, 4000);
+          overlay.remove();
+          // Reload so the picker re-fetches the local backpack list.
+          window.location.reload();
+        } catch (err) {
+          row.textContent = (err as Error).message;
+          row.disabled = false;
+        }
+      });
+      list.appendChild(row);
+    }
+    dialog.appendChild(list);
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "backpack-pull-cancel";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => overlay.remove());
+    dialog.appendChild(cancel);
+
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
   }
 
   // Expand button — inserted into the canvas top-left bar when sidebar is collapsed

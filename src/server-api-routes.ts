@@ -1129,6 +1129,117 @@ export async function handleApiRequest(
       return true;
     }
 
+    // List cloud sync_backpacks (containers) the user owns. Different
+    // from /api/cloud-backpacks (which lists graphs); this surfaces
+    // the parent containers so the user can pick one to pull down.
+    if (url === "/api/cloud-sync-backpacks" && method === "GET") {
+      try {
+        const settings = await readExtensionSettings("share");
+        const token = settings.relay_token;
+        if (!token || typeof token !== "string") {
+          sendJson(res, 200, { authenticated: false, backpacks: [] });
+          return true;
+        }
+        const relayUrl = (settings.relay_url as string) || "https://app.backpackontology.com";
+        const relayRes = await fetch(`${relayUrl}/api/sync/backpacks`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!relayRes.ok) {
+          sendJson(res, 200, { authenticated: false, backpacks: [] });
+          return true;
+        }
+        const data = await relayRes.json() as { backpacks?: unknown[] };
+        sendJson(res, 200, { authenticated: true, backpacks: data.backpacks ?? [] });
+      } catch {
+        sendJson(res, 200, { authenticated: false, backpacks: [] });
+      }
+      return true;
+    }
+
+    // Clone a remote sync_backpack into a new local folder. The local
+    // folder is created under the parent of the currently-active
+    // backpack (so pulled backpacks land alongside existing ones), or
+    // ~/.local/share/backpack/<name> as a fallback. Idempotent: if the
+    // user already has this remote id locally, returns its path.
+    if (url === "/api/backpack/v2-sync/clone" && method === "POST") {
+      try {
+        const settings = await readExtensionSettings("share");
+        const token = settings.relay_token as string | undefined;
+        if (!token) {
+          sendErr(res, 401, "Sign in to enable cloud sync");
+          return true;
+        }
+        const relayUrl = (settings.relay_url as string) || "https://app.backpackontology.com";
+        const body = await readBody(req).catch(() => "{}");
+        const reqBody = JSON.parse(body || "{}") as { backpack_id?: string; name?: string; color?: string; parent_path?: string; activate?: boolean };
+        if (!reqBody.backpack_id) {
+          sendErr(res, 400, "backpack_id is required");
+          return true;
+        }
+
+        // Resolve remote metadata so we have the canonical name.
+        const relay = new SyncRelayClient({ baseUrl: relayUrl, token });
+        const manifest = await relay.manifest(reqBody.backpack_id) as { name: string; color?: string; tags?: string[] };
+        const remoteName = reqBody.name || manifest.name;
+
+        // Pick local path. Default = sibling of active backpack's
+        // folder if local; else ~/.local/share/backpack/<name>.
+        const safeName = remoteName.replace(/[^a-zA-Z0-9._-]/g, "_");
+        let parent = reqBody.parent_path;
+        if (!parent) {
+          const active = ctx.storage.activeEntry;
+          if (active && !active.path.startsWith("cloud://")) {
+            parent = path.dirname(active.path);
+          } else {
+            parent = path.join(os.homedir(), ".local", "share", "backpack");
+          }
+        }
+        const localPath = path.join(parent, safeName);
+
+        // Check if already registered locally — if so just return it.
+        const existing = await listBackpacks();
+        const already = existing.find((b) => b.path === localPath);
+        if (already) {
+          // Make sure remote state is attached even if folder existed already.
+          const state = await readSyncState(localPath);
+          if (state && state.backpack_id === reqBody.backpack_id) {
+            sendJson(res, 200, { path: localPath, name: already.name, alreadyExists: true });
+            return true;
+          }
+        }
+
+        // Create folder + clone.
+        await fs.mkdir(localPath, { recursive: true });
+        const client = new SyncClient({ backpackPath: localPath, relay });
+        const cloned = await client.clone(reqBody.backpack_id, remoteName, reqBody.color || manifest.color, manifest.tags);
+
+        // Register in the local backpack registry so it appears in pickers.
+        const registered = await registerBackpack(localPath);
+        if (reqBody.activate !== false) {
+          await setActiveBackpack(registered.path);
+          // Hot-swap server storage so subsequent reads/writes use the new path.
+          ctx.storage.current = new JsonFileBackend(undefined, { graphsDirOverride: registered.path });
+          await ctx.storage.current.initialize();
+          ctx.storage.activeEntry = registered;
+          if (ctx.onActiveBackpackChange) ctx.onActiveBackpackChange();
+        }
+
+        sendJson(res, 201, {
+          path: registered.path,
+          name: registered.name,
+          activated: reqBody.activate !== false,
+          pulled: cloned.pull.pulled.length,
+          skipped: (cloned.pull.skipped ?? []).length,
+          errors: cloned.pull.errors.length,
+        });
+      } catch (err) {
+        const msg = (err as Error).message;
+        const status = /\b401\b|relay token rejected/i.test(msg) ? 401 : 500;
+        sendErr(res, status, msg);
+      }
+      return true;
+    }
+
     if (url === "/api/backpack/v2-sync/conflicts" && method === "GET") {
       try {
         const active = ctx.storage.activeEntry;
