@@ -1109,6 +1109,26 @@ export async function handleApiRequest(
       return true;
     }
 
+    // Daemon status — sidebar polls this every few seconds while the
+    // sync row is visible to render the live state ("Auto-syncing", "↑3 ↓1
+    // 12 sec ago", etc).
+    if (url === "/api/backpack/v2-sync/daemon-status" && method === "GET") {
+      const daemon = (ctx as { syncDaemon?: { status: () => unknown } }).syncDaemon;
+      sendJson(res, 200, daemon ? daemon.status() : { enabled: false, state: "disabled" });
+      return true;
+    }
+
+    // Re-arm the daemon after the user signs in (or signs out and
+    // back in). Idempotent.
+    if (url === "/api/backpack/v2-sync/daemon-arm" && method === "POST") {
+      const daemon = (ctx as { syncDaemon?: { handleAuthChange: () => Promise<void> } }).syncDaemon;
+      if (daemon) {
+        daemon.handleAuthChange().catch(() => {});
+      }
+      sendJson(res, 200, { ok: true });
+      return true;
+    }
+
     if (url === "/api/backpack/v2-sync/conflicts" && method === "GET") {
       try {
         const active = ctx.storage.activeEntry;

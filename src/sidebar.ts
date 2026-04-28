@@ -209,24 +209,35 @@ export function initSidebar(
 
   async function refreshSyncStatus() {
     try {
-      const res = await fetch("/api/backpack/v2-sync/status");
-      if (!res.ok) {
+      const [statusRes, daemonRes] = await Promise.all([
+        fetch("/api/backpack/v2-sync/status"),
+        fetch("/api/backpack/v2-sync/daemon-status").catch(() => null),
+      ]);
+      if (!statusRes.ok) {
         syncRow.hidden = true;
         return;
       }
-      const status = await res.json() as {
+      const status = await statusRes.json() as {
         authenticated: boolean;
         registered: boolean;
         backpack_name?: string;
         last_sync_at?: string | null;
         reason?: string;
       };
+      const daemon = daemonRes && daemonRes.ok
+        ? (await daemonRes.json() as {
+            enabled: boolean;
+            state: "disabled" | "idle" | "syncing" | "backoff" | "auth_required";
+            last_run_at: string | null;
+          })
+        : null;
+
       if (status.reason === "no_local_active") {
         // Cloud-mode viewer; nothing to sync from here.
         syncRow.hidden = true;
         return;
       }
-      if (!status.authenticated) {
+      if (!status.authenticated || daemon?.state === "auth_required") {
         setSyncRow("signin", "Cloud sync is off", "Sign in to enable");
         return;
       }
@@ -238,14 +249,33 @@ export function initSidebar(
         );
         return;
       }
-      const when = status.last_sync_at
-        ? formatRelativeTime(new Date(status.last_sync_at))
-        : "never";
-      setSyncRow("sync", `Last sync: ${when}`, "Sync now");
+
+      // Daemon-aware status text. When the daemon is running the user
+      // doesn't need to think about syncing; the row just shows live
+      // state. The "Sync now" button stays as a force-sync escape hatch.
+      const lastRunIso = daemon?.last_run_at ?? status.last_sync_at ?? null;
+      const when = lastRunIso ? formatRelativeTime(new Date(lastRunIso)) : "never";
+      let statusLine: string;
+      if (daemon?.state === "syncing") {
+        statusLine = "Syncing…";
+      } else if (daemon?.state === "backoff") {
+        statusLine = `Retrying soon · last ${when}`;
+      } else if (daemon?.enabled) {
+        statusLine = `Auto-syncing · last ${when}`;
+      } else {
+        statusLine = `Last sync: ${when}`;
+      }
+      setSyncRow("sync", statusLine, "Sync now");
     } catch {
       syncRow.hidden = true;
     }
   }
+
+  // Light polling so the user sees daemon ticks without manual refresh.
+  // Only ticks while the row is visible to avoid pointless work.
+  setInterval(() => {
+    if (!syncRow.hidden) refreshSyncStatus();
+  }, 5_000);
 
   syncPrimaryBtn.addEventListener("click", async () => {
     if (syncMode === "signin") {

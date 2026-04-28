@@ -1471,7 +1471,12 @@ async function main() {
     refreshAuthAndCloud();
 
     // Re-check auth when the share extension signs in/out
-    window.addEventListener("backpack-auth-changed", () => refreshAuthAndCloud());
+    window.addEventListener("backpack-auth-changed", () => {
+      refreshAuthAndCloud();
+      // Tell the sync daemon the auth state may have changed so it
+      // re-evaluates whether to start polling. Best-effort.
+      fetch("/api/backpack/v2-sync/daemon-arm", { method: "POST" }).catch(() => {});
+    });
 
     // Auto-load from URL hash, or first graph
     const initialUrl = parseUrl();

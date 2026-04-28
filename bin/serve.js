@@ -194,6 +194,26 @@ if (hasDistBuild) {
       )
     : undefined;
 
+  // Auto-sync daemon — deterministic background worker that pushes
+  // local changes to the cloud and pulls cloud changes back without
+  // the user clicking "Sync now". Started below after listen() so we
+  // don't block server startup on a slow first-sync round-trip.
+  const { SyncDaemon } = await import("../dist/sync-daemon.js");
+  const syncDaemon = new SyncDaemon({
+    getActiveEntry: () => storageHolder.activeEntry,
+    readAuth: async () => {
+      try {
+        const settings = await readExtensionSettings("share");
+        const token = settings.relay_token;
+        if (!token || typeof token !== "string") return null;
+        const relayUrl = settings.relay_url || "https://app.backpackontology.com";
+        return { token, relayUrl };
+      } catch {
+        return null;
+      }
+    },
+  });
+
   // Context object passed to the shared API route handler.
   const apiContext = {
     storage: storageHolder,
@@ -202,6 +222,11 @@ if (hasDistBuild) {
     makeBackend,
     cloudCache,
     versionCheck: () => getCachedVersionCheck(currentVersion),
+    syncDaemon,
+    onActiveBackpackChange: () => {
+      // Fire-and-forget — the daemon coalesces concurrent calls.
+      syncDaemon.handleActiveBackpackSwitch().catch(() => {});
+    },
   };
 
   const MIME_TYPES = {
@@ -465,7 +490,22 @@ if (hasDistBuild) {
         console.warn("");
       }
     });
+
+    // Boot the auto-sync daemon. Errors here never block the server.
+    syncDaemon.start().catch((err) => {
+      console.warn("  sync daemon failed to start:", err?.message ?? err);
+    });
   });
+
+  // Clean shutdown — stop the daemon before exiting so a half-finished
+  // sync doesn't leave a stale lock.
+  const shutdown = async () => {
+    try { await syncDaemon.stop(); } catch { /* ignore */ }
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 2000).unref();
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 } else {
   // --- Development: use Vite for HMR + TypeScript compilation ---
   const { createServer } = await import("vite");
