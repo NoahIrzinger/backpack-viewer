@@ -1,4 +1,4 @@
-import type { LearningGraphData } from "backpack-ontology";
+import type { LearningGraphData, LearningGraphSummary } from "backpack-ontology";
 import {
   listOntologies, loadOntology, saveOntology, renameOntology,
   listBranches, createBranch, switchBranch, deleteBranch,
@@ -38,9 +38,16 @@ let currentData: LearningGraphData | null = null;
 let isCloudActive = false;
 let remoteNames = new Set<string>();
 let cloudNames = new Set<string>();
-let cachedCloudBackpacks: { name: string; encrypted: boolean; nodeCount?: number; edgeCount?: number }[] = [];
+type CloudGraphSummary = { name: string; description?: string; encrypted: boolean; nodeCount?: number; edgeCount?: number; sourceBackpack?: string; source?: string };
+let cachedCloudBackpacks: CloudGraphSummary[] = [];
+let cachedCloudContainers: { name: string; color?: string; origin_kind: string; graphCount: number }[] = [];
+let activeCloudContainer: string | null = null;
 let cachedCloudEmail: string | undefined;
 let activeIsRemote = false;
+// Monotonic token for in-flight backpack switches. Stale completions check
+// this before applying their UI state so a fast click sequence (A → B → A)
+// can't have B's network response land after A's and leave us looking at B.
+let backpackSwitchSeq = 0;
 
 function renderSharedKB(title: string, documents: { id: string; title: string; content: string; tags: string[]; sourceGraphs: string[] }[]) {
   const app = document.getElementById("app")!;
@@ -661,6 +668,96 @@ async function main() {
     kbPanel.show(docId);
   });
 
+  // Switch the visible backpack. Three modes:
+  //   "__all__"             → aggregate view across all registered backpacks
+  //   "__cloud__[:<name>]"  → cloud cache; optional :container filters the
+  //                            graph list to a single sync_backpack
+  //   any other name        → a specific local backpack
+  // The `mySeq` token guards against fast click sequences (A → B → A) where
+  // the first issued switch finishes after a later one and tries to apply
+  // its now-stale UI state.
+  const doBackpackSwitch = async (name: string) => {
+    const mySeq = ++backpackSwitchSeq;
+    const stale = () => mySeq !== backpackSwitchSeq;
+    if (name === "__all__") {
+      activeCloudContainer = null;
+      localStorage.removeItem("backpack-viewer-cloud-container");
+      try {
+        const allRes = await fetch("/api/backpacks/all-graphs");
+        if (stale()) return;
+        if (allRes.ok) {
+          const allGraphs = await allRes.json();
+          if (stale()) return;
+          sidebar.setSummaries(allGraphs);
+        } else {
+          sidebar.setSummaries(await listOntologies());
+        }
+      } catch {
+        sidebar.setSummaries(await listOntologies());
+      }
+      if (stale()) return;
+      sidebar.setCloudBackpacks(cachedCloudBackpacks, cachedCloudEmail);
+      refreshKB();
+      return;
+    }
+    if (name === "__cloud__" || name.startsWith("__cloud__:")) {
+      const container = name.startsWith("__cloud__:") ? name.slice("__cloud__:".length) : null;
+      activeCloudContainer = container;
+      if (container) localStorage.setItem("backpack-viewer-cloud-container", container);
+      else localStorage.removeItem("backpack-viewer-cloud-container");
+      await fetch("/api/backpacks/switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "__cloud__" }),
+      });
+      if (stale()) return;
+      isCloudActive = true;
+      const containerMeta = container ? cachedCloudContainers.find(c => c.name === container) : null;
+      sidebar.setCloudMode(true, container ?? "Cloud", containerMeta?.color);
+      sidebar.setCloudBackpacks([]);
+      try {
+        await fetch("/api/cloud-cache/refresh", { method: "POST" });
+      } catch { /* offline — fall back to stale cache */ }
+      if (stale()) return;
+      try {
+        // Refetch the live cloud graph list so soft-deletes and recent
+        // moves are reflected even when the local cache is stale.
+        const cloudResp = await fetch("/api/cloud-backpacks").then(r => r.ok ? r.json() : { backpacks: [] }) as { backpacks: CloudGraphSummary[] };
+        if (stale()) return;
+        cachedCloudBackpacks = cloudResp.backpacks ?? [];
+        const filtered = container
+          ? cachedCloudBackpacks.filter(g => (g.sourceBackpack ?? "cloud") === container)
+          : cachedCloudBackpacks;
+        const summaries: LearningGraphSummary[] = filtered.map(g => ({
+          name: g.name,
+          description: g.description ?? "",
+          tags: [],
+          nodeCount: g.nodeCount ?? 0,
+          edgeCount: g.edgeCount ?? 0,
+          nodeTypes: [],
+        }));
+        sidebar.setSummaries(summaries);
+      } catch {
+        sidebar.setSummaries([]);
+      }
+      refreshKB();
+      return;
+    }
+    activeCloudContainer = null;
+    localStorage.removeItem("backpack-viewer-cloud-container");
+    sidebar.setCloudBackpacks([]);
+    isCloudActive = false;
+    sidebar.setCloudMode(false);
+    await fetch("/api/backpacks/switch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (stale()) return;
+    await refreshBackpacksAndGraphs();
+    refreshKB();
+  };
+
   const sidebar = initSidebar(
     document.getElementById("sidebar")!,
     {
@@ -722,60 +819,7 @@ async function main() {
         await deleteSnippet(graphName, snippetId);
         await refreshSnippets(graphName);
       },
-      onBackpackSwitch: async (name) => {
-        if (name === "__all__") {
-          // Show graphs from ALL registered backpacks + cloud
-          try {
-            const allRes = await fetch("/api/backpacks/all-graphs");
-            if (allRes.ok) {
-              const allGraphs = await allRes.json();
-              sidebar.setSummaries(allGraphs);
-            } else {
-              // Fallback to active backpack only
-              sidebar.setSummaries(await listOntologies());
-            }
-          } catch {
-            sidebar.setSummaries(await listOntologies());
-          }
-          sidebar.setCloudBackpacks(cachedCloudBackpacks, cachedCloudEmail);
-          refreshKB();
-          return;
-        }
-        if (name === "__cloud__") {
-          // Switch server-side to cloud cache backend
-          await fetch("/api/backpacks/switch", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: "__cloud__" }),
-          });
-          isCloudActive = true;
-          sidebar.setCloudMode(true);
-          sidebar.setCloudBackpacks([]);
-          // Auto-refresh cache from relay so we show actual cloud state
-          try {
-            await fetch("/api/cloud-cache/refresh", { method: "POST" });
-          } catch { /* offline — fall back to stale cache */ }
-          try {
-            const summaries = await fetch("/api/ontologies").then(r => r.ok ? r.json() : []);
-            sidebar.setSummaries(summaries);
-          } catch {
-            sidebar.setSummaries([]);
-          }
-          refreshKB();
-          return;
-        }
-        // Specific local backpack — show only that backpack's graphs + KB, hide cloud
-        sidebar.setCloudBackpacks([]);
-        isCloudActive = false;
-        sidebar.setCloudMode(false);
-        await fetch("/api/backpacks/switch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name }),
-        });
-        await refreshBackpacksAndGraphs();
-        refreshKB();
-      },
+      onBackpackSwitch: (name) => doBackpackSwitch(name),
       onBackpackRegister: async (p, activate) => {
         await fetch("/api/backpacks", {
           method: "POST",
@@ -1430,7 +1474,26 @@ async function main() {
       emptyState.show();
     }
   } else {
-    // Normal mode — load from local/cloud API
+    // Normal mode — load from local/cloud API.
+    // The server-side storage backend persists across page reloads, so a
+    // page reload while in cloud mode would otherwise read /api/ontologies
+    // from a stale cloud-cache. Reconcile here: if a cloud container was
+    // saved last session, restore it; otherwise force a switch back to
+    // the active local backpack so the picker and graph list agree.
+    const savedCloudContainer = localStorage.getItem("backpack-viewer-cloud-container");
+    if (!savedCloudContainer) {
+      try {
+        const bps = await fetch("/api/backpacks").then(r => r.ok ? r.json() : []) as { name: string; active: boolean }[];
+        const active = Array.isArray(bps) ? bps.find(b => b.active) : null;
+        if (active) {
+          await fetch("/api/backpacks/switch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: active.name }),
+          });
+        }
+      } catch { /* if init switch fails, the existing flow still works for local-only users */ }
+    }
     const [summaries, remotes, kbResult, kbMounts] = await Promise.all([
       listOntologies(),
       listRemotes().catch(() => [] as RemoteSummary[]),
@@ -1449,26 +1512,68 @@ async function main() {
         const auth = await fetch("/api/auth/status").then(r => r.json()) as { authenticated: boolean; email?: string };
         sidebar.setAuthStatus(auth);
         if (auth.authenticated) {
-          const cloud = await fetch("/api/cloud-backpacks").then(r => r.json()) as { authenticated: boolean; email?: string; backpacks: { name: string; encrypted: boolean; source?: string; nodeCount?: number; edgeCount?: number }[] };
+          const [cloud, containersResp] = await Promise.all([
+            fetch("/api/cloud-backpacks").then(r => r.json()) as Promise<{ authenticated: boolean; email?: string; backpacks: CloudGraphSummary[] }>,
+            fetch("/api/cloud-sync-backpacks").then(r => r.json()).catch(() => ({ authenticated: false, backpacks: [] })) as Promise<{ authenticated?: boolean; backpacks?: { id: string; name: string; color?: string; origin_kind: string }[] }>,
+          ]);
           const localSet = new Set(summaries.map(s => s.name));
           // Show only cloud-native graphs (not synced from devices, not encrypted, not already local)
           const cloudOnly = cloud.backpacks.filter(bp => !localSet.has(bp.name) && !bp.encrypted && bp.source !== "local");
           cloudNames = new Set(cloudOnly.map(bp => bp.name));
-          cachedCloudBackpacks = cloudOnly;
+          cachedCloudBackpacks = cloud.backpacks;
           cachedCloudEmail = cloud.email;
-          // Always show Cloud entry in picker when authenticated (even if all graphs are encrypted)
-          const allCloudNames = cloud.backpacks.map(bp => bp.name);
-          sidebar.setCloudBackpacksInPicker(allCloudNames.length > 0 ? allCloudNames : ["__cloud__"]);
+
+          // Build per-container summary: prefer the explicit container list,
+          // fall back to grouping the graphs by sourceBackpack so a user with
+          // older accounts (no /api/cloud-sync-backpacks support) still sees
+          // their containers.
+          const graphsByContainer = new Map<string, number>();
+          for (const g of cloud.backpacks) {
+            const c = g.sourceBackpack ?? "cloud";
+            graphsByContainer.set(c, (graphsByContainer.get(c) ?? 0) + 1);
+          }
+          let containers: { name: string; color?: string; origin_kind: string; graphCount: number }[];
+          if (Array.isArray(containersResp.backpacks) && containersResp.backpacks.length > 0) {
+            containers = containersResp.backpacks.map(c => ({
+              name: c.name,
+              color: c.color,
+              origin_kind: c.origin_kind,
+              graphCount: graphsByContainer.get(c.name) ?? 0,
+            }));
+          } else {
+            containers = Array.from(graphsByContainer.entries()).map(([name, graphCount]) => ({
+              name, color: undefined, origin_kind: "cloud", graphCount,
+            }));
+          }
+          // Sort: cloud-native first, then device-synced, alphabetical within each.
+          containers.sort((a, b) => {
+            if (a.origin_kind !== b.origin_kind) return a.origin_kind === "cloud" ? -1 : 1;
+            return a.name.localeCompare(b.name);
+          });
+          cachedCloudContainers = containers;
+          sidebar.setCloudContainers(containers);
         } else {
           cloudNames = new Set();
           cachedCloudBackpacks = [];
+          cachedCloudContainers = [];
+          activeCloudContainer = null;
           cachedCloudEmail = undefined;
           sidebar.setCloudBackpacks([]);
-          sidebar.setCloudBackpacksInPicker([]);
+          sidebar.setCloudContainers([]);
         }
       } catch { /* auth check unavailable */ }
     }
-    refreshAuthAndCloud();
+    refreshAuthAndCloud().then(() => {
+      // If the prior session ended in cloud mode and the saved container
+      // still exists for this account, dispatch the same switch the user
+      // would have gotten from clicking it in the picker.
+      if (savedCloudContainer && cachedCloudContainers.some(c => c.name === savedCloudContainer)) {
+        doBackpackSwitch(`__cloud__:${savedCloudContainer}`);
+      } else if (savedCloudContainer) {
+        // Saved container no longer exists — clear so we don't keep retrying.
+        localStorage.removeItem("backpack-viewer-cloud-container");
+      }
+    });
 
     // Re-check auth when the share extension signs in/out
     window.addEventListener("backpack-auth-changed", () => {
