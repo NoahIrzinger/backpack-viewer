@@ -995,20 +995,32 @@ export async function handleApiRequest(
     // --- /api/backpack/v2-sync — Sync Protocol v0.1 (artifact-versioned) ---
     if (url === "/api/backpack/v2-sync/status" && method === "GET") {
       try {
+        const settings = await readExtensionSettings("share");
+        const authenticated = typeof settings.relay_token === "string" && settings.relay_token.length > 0;
+
         const active = ctx.storage.activeEntry;
         if (!active || active.path.startsWith("cloud://")) {
-          sendJson(res, 200, { registered: false, reason: "no_local_active" });
+          sendJson(res, 200, {
+            authenticated,
+            registered: false,
+            reason: "no_local_active",
+          });
           return true;
         }
         const state = await readSyncState(active.path);
         if (!state) {
-          sendJson(res, 200, { registered: false });
+          sendJson(res, 200, {
+            authenticated,
+            registered: false,
+            backpack_name: active.name,
+          });
           return true;
         }
         sendJson(res, 200, {
+          authenticated,
           registered: true,
           backpack_id: state.backpack_id,
-          name: state.name,
+          backpack_name: state.name,
           relay_url: state.relay_url,
           last_sync_at: state.last_sync_at,
           artifact_count: Object.keys(state.artifacts).length,
@@ -1029,12 +1041,15 @@ export async function handleApiRequest(
         const settings = await readExtensionSettings("share");
         const token = settings.relay_token as string | undefined;
         if (!token) {
-          sendErr(res, 401, "Sign in via Share extension first to set relay token");
+          sendErr(res, 401, "Sign in to enable cloud sync");
           return true;
         }
         const relayUrl = (settings.relay_url as string) || "https://app.backpackontology.com";
         const body = await readBody(req).catch(() => "{}");
-        const reqBody = JSON.parse(body || "{}") as { name?: string; color?: string; tags?: string[] };
+        const reqBody = JSON.parse(body || "{}") as {
+          name?: string; color?: string; tags?: string[];
+          autoPush?: boolean;
+        };
         const relay = new SyncRelayClient({ baseUrl: relayUrl, token });
         const client = new SyncClient({ backpackPath: active.path, relay });
         const state = await client.register({
@@ -1042,7 +1057,15 @@ export async function handleApiRequest(
           color: reqBody.color ?? active.color,
           tags: reqBody.tags ?? [],
         });
-        sendJson(res, 200, state);
+
+        // Auto-push: by default, register also pushes all local artifacts
+        // so the user's first click does the obvious thing. Pass
+        // autoPush=false to opt out.
+        let push;
+        if (reqBody.autoPush !== false) {
+          push = await client.push();
+        }
+        sendJson(res, 200, { state, push });
       } catch (err) {
         const msg = (err as Error).message;
         const status = /relay token rejected/i.test(msg) ? 401 : 500;
@@ -1154,8 +1177,26 @@ export async function handleApiRequest(
 
     // --- /oauth/callback (for Share extension OAuth popup or same-tab redirect) ---
     if (url.startsWith("/oauth/callback") && method === "GET") {
+      // The page emits an inline <script> to finish the OAuth handshake.
+      // The global CSP is strict (script-src 'self'), so override it for
+      // this route with a per-response nonce that authorizes only the
+      // single inline block we control. No external scripts allowed.
+      const nonce = crypto.randomBytes(16).toString("base64");
+      res.setHeader(
+        "Content-Security-Policy",
+        [
+          "default-src 'self'",
+          `script-src 'self' 'nonce-${nonce}'`,
+          "style-src 'self'",
+          "img-src 'self' data:",
+          "connect-src 'self' https://app.backpackontology.com https://*.ciamlogin.com",
+          "object-src 'none'",
+          "base-uri 'self'",
+          "frame-ancestors 'none'",
+        ].join("; "),
+      );
       res.writeHead(200, { "Content-Type": "text/html" });
-      res.end(`<!DOCTYPE html><html><body><script>
+      res.end(`<!DOCTYPE html><html><body><script nonce="${nonce}">
 (function() {
   var params = new URLSearchParams(window.location.search);
   var code = params.get("code");

@@ -179,26 +179,33 @@ export function initSidebar(
   pickerContainer.appendChild(pickerDropdown);
   container.appendChild(pickerContainer);
 
-  // Sync status row — shown only when the active backpack is registered for sync v0.1.
-  // Layout: [icon] last_sync_at  [Sync] [Register]
+  // Cloud sync section — single state-machine row that owns the entire
+  // sync flow: sign-in (when needed), enable (register + auto-push), and
+  // ongoing sync. Replaces the separate "Sign in to sync" auth widget
+  // entry point and the legacy per-graph sync popup.
   const syncRow = document.createElement("div");
   syncRow.className = "backpack-sync-row";
   syncRow.hidden = true;
   const syncStatusText = document.createElement("span");
   syncStatusText.className = "backpack-sync-status";
   syncStatusText.textContent = "";
-  const syncBtn = document.createElement("button");
-  syncBtn.type = "button";
-  syncBtn.className = "backpack-sync-btn";
-  syncBtn.textContent = "Sync";
-  const syncRegisterBtn = document.createElement("button");
-  syncRegisterBtn.type = "button";
-  syncRegisterBtn.className = "backpack-sync-register-btn";
-  syncRegisterBtn.textContent = "Enable sync";
+  const syncPrimaryBtn = document.createElement("button");
+  syncPrimaryBtn.type = "button";
+  syncPrimaryBtn.className = "backpack-sync-btn";
   syncRow.appendChild(syncStatusText);
-  syncRow.appendChild(syncBtn);
-  syncRow.appendChild(syncRegisterBtn);
+  syncRow.appendChild(syncPrimaryBtn);
   container.appendChild(syncRow);
+
+  type SyncMode = "signin" | "enable" | "sync";
+  let syncMode: SyncMode = "signin";
+
+  function setSyncRow(mode: SyncMode, statusText: string, btnLabel: string) {
+    syncMode = mode;
+    syncStatusText.textContent = statusText;
+    syncPrimaryBtn.textContent = btnLabel;
+    syncPrimaryBtn.disabled = false;
+    syncRow.hidden = false;
+  }
 
   async function refreshSyncStatus() {
     try {
@@ -207,89 +214,173 @@ export function initSidebar(
         syncRow.hidden = true;
         return;
       }
-      const status = await res.json() as { registered: boolean; last_sync_at?: string | null; reason?: string };
+      const status = await res.json() as {
+        authenticated: boolean;
+        registered: boolean;
+        backpack_name?: string;
+        last_sync_at?: string | null;
+        reason?: string;
+      };
       if (status.reason === "no_local_active") {
+        // Cloud-mode viewer; nothing to sync from here.
         syncRow.hidden = true;
         return;
       }
-      syncRow.hidden = false;
-      if (status.registered) {
-        syncBtn.hidden = false;
-        syncRegisterBtn.hidden = true;
-        const ts = status.last_sync_at
-          ? new Date(status.last_sync_at).toLocaleString()
-          : "never";
-        syncStatusText.textContent = `Last sync: ${ts}`;
-      } else {
-        syncBtn.hidden = true;
-        syncRegisterBtn.hidden = false;
-        syncStatusText.textContent = "Not registered";
+      if (!status.authenticated) {
+        setSyncRow("signin", "Cloud sync is off", "Sign in to enable");
+        return;
       }
+      if (!status.registered) {
+        setSyncRow(
+          "enable",
+          status.backpack_name ? `${status.backpack_name} not synced` : "Not synced",
+          "Enable cloud sync",
+        );
+        return;
+      }
+      const when = status.last_sync_at
+        ? formatRelativeTime(new Date(status.last_sync_at))
+        : "never";
+      setSyncRow("sync", `Last sync: ${when}`, "Sync now");
     } catch {
       syncRow.hidden = true;
     }
   }
 
-  syncBtn.addEventListener("click", async () => {
-    const original = syncBtn.textContent;
-    syncBtn.disabled = true;
-    syncBtn.textContent = "Syncing…";
-    try {
-      const res = await fetch("/api/backpack/v2-sync/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ direction: "sync" }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({})) as { error?: string };
-        syncBtn.textContent = "Failed";
-        syncStatusText.textContent = err.error ?? `HTTP ${res.status}`;
-        return;
+  syncPrimaryBtn.addEventListener("click", async () => {
+    if (syncMode === "signin") {
+      cbs.onSignIn?.();
+      return;
+    }
+
+    if (syncMode === "enable") {
+      const originalLabel = syncPrimaryBtn.textContent ?? "Enable cloud sync";
+      syncPrimaryBtn.disabled = true;
+      syncPrimaryBtn.textContent = "Enabling…";
+      syncStatusText.textContent = "Registering and pushing…";
+      try {
+        const res = await fetch("/api/backpack/v2-sync/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        const data = await res.json().catch(() => ({})) as {
+          state?: { backpack_id: string };
+          push?: { pushed: string[]; conflicts: { artifact_id: string }[]; skipped?: { artifact_id: string }[]; errors: { message: string }[] };
+          error?: string;
+        };
+        if (res.status === 401) {
+          await flipToSignIn(data.error);
+          return;
+        }
+        if (!res.ok) {
+          syncStatusText.textContent = friendlyError(data.error, res.status);
+          syncPrimaryBtn.textContent = originalLabel;
+          syncPrimaryBtn.disabled = false;
+          return;
+        }
+        const pushed = data.push?.pushed.length ?? 0;
+        const errors = data.push?.errors.length ?? 0;
+        const skipped = data.push?.skipped?.length ?? 0;
+        syncStatusText.textContent = `Synced ${pushed} artifact${pushed !== 1 ? "s" : ""}` +
+          (skipped ? ` (${skipped} skipped)` : "") +
+          (errors ? ` (${errors} error${errors !== 1 ? "s" : ""})` : "");
+        syncPrimaryBtn.textContent = "Done";
+        setTimeout(() => refreshSyncStatus(), 1500);
+      } catch (err) {
+        syncStatusText.textContent = friendlyError((err as Error).message);
+        syncPrimaryBtn.textContent = originalLabel;
+        syncPrimaryBtn.disabled = false;
       }
-      const result = await res.json() as {
-        pushed: string[]; pulled: string[]; conflicts: { artifact_id: string }[]; errors: { message: string }[];
-      };
-      const summary = `↑${result.pushed.length} ↓${result.pulled.length}` +
-        (result.conflicts.length ? ` !${result.conflicts.length}` : "") +
-        (result.errors.length ? ` ✗${result.errors.length}` : "");
-      syncBtn.textContent = "Synced";
-      syncStatusText.textContent = summary;
-      setTimeout(() => {
-        syncBtn.textContent = original ?? "Sync";
-        refreshSyncStatus();
-      }, 2000);
-    } catch (err) {
-      syncBtn.textContent = "Failed";
-      syncStatusText.textContent = (err as Error).message;
-    } finally {
-      syncBtn.disabled = false;
+      return;
+    }
+
+    if (syncMode === "sync") {
+      const originalLabel = syncPrimaryBtn.textContent ?? "Sync now";
+      syncPrimaryBtn.disabled = true;
+      syncPrimaryBtn.textContent = "Syncing…";
+      try {
+        const res = await fetch("/api/backpack/v2-sync/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ direction: "sync" }),
+        });
+        const data = await res.json().catch(() => ({})) as {
+          pushed?: string[];
+          pulled?: string[];
+          conflicts?: { artifact_id: string }[];
+          skipped?: { artifact_id: string }[];
+          errors?: { message: string }[];
+          error?: string;
+        };
+        if (res.status === 401) {
+          await flipToSignIn(data.error);
+          return;
+        }
+        if (!res.ok) {
+          syncStatusText.textContent = friendlyError(data.error, res.status);
+          syncPrimaryBtn.textContent = originalLabel;
+          syncPrimaryBtn.disabled = false;
+          return;
+        }
+        const pushed = data.pushed?.length ?? 0;
+        const pulled = data.pulled?.length ?? 0;
+        const conflicts = data.conflicts?.length ?? 0;
+        const skipped = data.skipped?.length ?? 0;
+        const errors = data.errors?.length ?? 0;
+        const summary =
+          (pushed === 0 && pulled === 0 && conflicts === 0 && skipped === 0 && errors === 0)
+            ? "Already in sync"
+            : `↑${pushed} ↓${pulled}` +
+              (conflicts ? ` !${conflicts}` : "") +
+              (skipped ? ` ⊘${skipped}` : "") +
+              (errors ? ` ✗${errors}` : "");
+        syncStatusText.textContent = summary;
+        syncPrimaryBtn.textContent = "Done";
+        setTimeout(() => refreshSyncStatus(), 1500);
+      } catch (err) {
+        syncStatusText.textContent = friendlyError((err as Error).message);
+        syncPrimaryBtn.textContent = originalLabel;
+        syncPrimaryBtn.disabled = false;
+      }
+      return;
     }
   });
 
-  syncRegisterBtn.addEventListener("click", async () => {
-    const original = syncRegisterBtn.textContent;
-    syncRegisterBtn.disabled = true;
-    syncRegisterBtn.textContent = "Registering…";
+  // Single source of truth for "expired/rejected token, drop to sign-in".
+  // Clears the cached token so the next click hits a clean sign-in flow,
+  // updates the row to a friendly call-to-action, and reports the cause
+  // without leaking raw HTTP error strings into the UI.
+  async function flipToSignIn(reason?: string) {
     try {
-      const res = await fetch("/api/backpack/v2-sync/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({})) as { error?: string };
-        syncStatusText.textContent = err.error ?? `HTTP ${res.status}`;
-        syncRegisterBtn.textContent = original ?? "Enable sync";
-        return;
-      }
-      await refreshSyncStatus();
-    } catch (err) {
-      syncStatusText.textContent = (err as Error).message;
-      syncRegisterBtn.textContent = original ?? "Enable sync";
-    } finally {
-      syncRegisterBtn.disabled = false;
-    }
-  });
+      await fetch("/api/extensions/share/settings/relay_token", { method: "DELETE" });
+    } catch { /* clearing the token is best-effort */ }
+    setSyncRow(
+      "signin",
+      reason && reason.length < 60 ? reason : "Cloud sync is off — please sign in",
+      "Sign in to enable",
+    );
+    window.dispatchEvent(new CustomEvent("backpack-auth-changed"));
+  }
+
+  function friendlyError(raw: string | undefined, status?: number): string {
+    if (raw && raw.length > 0 && raw.length < 80) return raw;
+    if (status === 502 || status === 503 || status === 504) return "Cloud is unreachable — try again";
+    if (status === 500) return "Cloud error — try again";
+    if (raw && /failed to fetch/i.test(raw)) return "Network unreachable";
+    return raw ?? "Something went wrong";
+  }
+
+  function formatRelativeTime(d: Date): string {
+    const diffMs = Date.now() - d.getTime();
+    const diffSec = Math.floor(diffMs / 1000);
+    if (diffSec < 60) return "just now";
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin} min ago`;
+    const diffHour = Math.floor(diffMin / 60);
+    if (diffHour < 24) return `${diffHour} hr ago`;
+    return d.toLocaleDateString();
+  }
 
   // Initial fetch + refresh after backpack switch.
   refreshSyncStatus();
@@ -525,15 +616,16 @@ export function initSidebar(
       authContent.appendChild(signOutBtn);
       bpMenuBtn.hidden = false;
     } else {
-      const signInBtn = document.createElement("button");
-      signInBtn.className = "sidebar-auth-link sidebar-auth-signin";
-      signInBtn.textContent = "Sign in to sync";
-      signInBtn.addEventListener("click", () => cbs.onSignIn?.());
-      authContent.appendChild(signInBtn);
+      // The "Sign in" entry point lives in the cloud-sync row beneath the
+      // backpack picker. Hide the auth widget entirely so we don't show
+      // two competing sign-in calls-to-action.
+      authWidget.hidden = true;
       bpMenuBtn.hidden = true;
       syncStatus.hidden = true;
       syncPopup.hidden = true;
     }
+    // Pick up auth state changes in the cloud-sync row.
+    refreshSyncStatus();
   }
 
   // --- Shared context menu for graph items ---
