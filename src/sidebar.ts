@@ -38,6 +38,14 @@ export interface SidebarCallbacks {
   onSnippetDelete?: (graphName: string, snippetId: string) => void;
   onBackpackSwitch?: (pathOrName: string) => void;
   onBackpackRegister?: (path: string, activate: boolean) => void;
+  /**
+   * Optional override for the "+ Add new backpack…" click. When set, the
+   * sidebar fires this instead of opening its built-in path dialog. Cloud
+   * hosts use this to ask the user for a backpack *name* (not a folder
+   * path) and call POST /api/sync/register, since cloud-native backpacks
+   * have no filesystem to point at.
+   */
+  onAddBackpackClick?: () => void;
   onKBDocSelect?: (docId: string) => void;
   onSignalsTabSelect?: () => void;
   onSignalsFilter?: (query: string) => void;
@@ -600,6 +608,13 @@ export function initSidebar(
     addItem.addEventListener("click", async (e) => {
       e.stopPropagation();
       closePicker();
+      // Cloud host provides its own name-based prompt and registers
+      // via /api/sync/register. Falls back to the local path-dialog
+      // flow if the host didn't override.
+      if (cbs.onAddBackpackClick) {
+        cbs.onAddBackpackClick();
+        return;
+      }
       if (!cbs.onBackpackRegister) return;
       const result = await showBackpackAddDialog();
       if (!result) return;
