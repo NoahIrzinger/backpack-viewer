@@ -64,6 +64,21 @@ export interface SidebarCallbacks {
   onSyncKBMount?: (mountName: string, encrypted?: boolean) => Promise<{ synced: number; failed: number; total: number }>;
   onKBDocDelete?: (docId: string) => Promise<void>;
   onEditTags?: (name: string) => void;
+  /**
+   * Cloud-mode operations. When the host wires these the matching menu
+   * items appear in the sidebar's per-graph 3-dot menu. Implementations
+   * are expected to handle confirmations and reload the sidebar via
+   * setSummaries() on success.
+   */
+  onShare?: (graphName: string) => void | Promise<void>;
+  onDelete?: (graphName: string) => void | Promise<void>;
+  onSetVisibility?: (graphName: string, nextVisibility: "public" | "private") => void | Promise<void>;
+  /**
+   * Returns the current visibility for a graph so the menu label can
+   * read "Make public" or "Make private". Defaults to "private" when
+   * not provided.
+   */
+  getVisibility?: (graphName: string) => "public" | "private" | undefined;
 }
 
 export interface SyncResultItem { name: string; kind: "graph" | "kb"; status: "synced" | "failed" | "skipped"; error?: string }
@@ -826,7 +841,31 @@ export function initSidebar(
       itemMenu.appendChild(tagsItem);
     }
 
-    if (isAuthenticated) {
+    if (cbs.onShare) {
+      const shareItem = document.createElement("button");
+      shareItem.className = "sidebar-item-menu-action";
+      shareItem.textContent = "Share";
+      shareItem.addEventListener("click", () => {
+        hideItemMenu();
+        void cbs.onShare!(graphName);
+      });
+      itemMenu.appendChild(shareItem);
+    }
+
+    if (cbs.onSetVisibility) {
+      const current = cbs.getVisibility?.(graphName) ?? "private";
+      const next: "public" | "private" = current === "public" ? "private" : "public";
+      const visItem = document.createElement("button");
+      visItem.className = "sidebar-item-menu-action";
+      visItem.textContent = next === "public" ? "Make public" : "Make private";
+      visItem.addEventListener("click", () => {
+        hideItemMenu();
+        void cbs.onSetVisibility!(graphName, next);
+      });
+      itemMenu.appendChild(visItem);
+    }
+
+    if (isAuthenticated && cbs.onSyncGraph) {
       const syncItem = document.createElement("button");
       syncItem.className = "sidebar-item-menu-action";
       syncItem.textContent = "Sync to cloud";
@@ -844,6 +883,17 @@ export function initSidebar(
         cbs.onSyncGraph?.(graphName, false);
       });
       itemMenu.appendChild(syncUnencItem);
+    }
+
+    if (cbs.onDelete) {
+      const deleteItem = document.createElement("button");
+      deleteItem.className = "sidebar-item-menu-action sidebar-item-menu-danger";
+      deleteItem.textContent = "Delete";
+      deleteItem.addEventListener("click", () => {
+        hideItemMenu();
+        void cbs.onDelete!(graphName);
+      });
+      itemMenu.appendChild(deleteItem);
     }
 
     const rect = btn.getBoundingClientRect();

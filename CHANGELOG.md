@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Sidebar operations
+- **Per-graph 3-dot menu gains Share, Delete, Make public/private** — new optional callbacks `onShare`, `onDelete`, `onSetVisibility`, `getVisibility` on `SidebarCallbacks`. The host wires the ones it supports; menu items appear only for the wired ones. Cloud-mode hosts (e.g. backpack-app) can now expose the full operation set from the navigator without leaving for the dashboard.
+- **Sync items are now also gated on `onSyncGraph`** so they no longer phantom-appear when a host is authenticated but doesn't actually wire sync.
+- **Cloud-mode sync-status** — `/api/sync-status` now treats every graph the active backend returns as synced when running on `CloudCacheBackend`, so the cloud badge renders on the sidebar in cloud mode.
+
 ### Mobile viewer
 - **Floating action button** — on viewports below 768px the sidebar is hidden by default. A small FAB at bottom-right opens a popup menu with "Sidebar", "Search", and "Close panels" actions. The sidebar slides in as a full-height overlay over the canvas instead of competing for vertical space.
 - **Mobile orientation chip** — thin top-left chip shows the active backpack name so users know what they're looking at when the sidebar is closed.

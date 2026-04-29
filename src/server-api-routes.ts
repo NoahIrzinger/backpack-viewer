@@ -654,14 +654,27 @@ export async function handleApiRequest(
     // --- /api/sync-status ---
     if (url === "/api/sync-status" && method === "GET") {
       try {
+        const synced: Record<string, { encrypted: boolean }> = {};
         const settings = await readExtensionSettings("share");
         const syncedMap = settings.synced;
         const keys = (settings.keys as Record<string, string>) || {};
-        const synced: Record<string, { encrypted: boolean }> = {};
         if (syncedMap && typeof syncedMap === "object" && !Array.isArray(syncedMap)) {
           for (const name of Object.keys(syncedMap as Record<string, unknown>)) {
             synced[name] = { encrypted: !!keys[name] };
           }
+        }
+        // In cloud mode, every graph the active backend returns is by
+        // definition synced. CloudCacheBackend filters out encrypted
+        // graphs (it can't cache without keys), so anything visible
+        // here is plaintext. Mark them synced so the sidebar renders
+        // a cloud badge instead of nothing.
+        if (ctx.storage.current instanceof CloudCacheBackend) {
+          try {
+            const summaries = await ctx.storage.current.listOntologies();
+            for (const s of summaries) {
+              if (!(s.name in synced)) synced[s.name] = { encrypted: false };
+            }
+          } catch { /* fall through */ }
         }
         sendJson(res, 200, { synced });
       } catch {
