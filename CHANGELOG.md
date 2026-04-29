@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Mobile viewer
+- **Floating action button** — on viewports below 768px the sidebar is hidden by default. A small FAB at bottom-right opens a popup menu with "Sidebar", "Search", and "Close panels" actions. The sidebar slides in as a full-height overlay over the canvas instead of competing for vertical space.
+- **Mobile orientation chip** — thin top-left chip shows the active backpack name so users know what they're looking at when the sidebar is closed.
+
 ### Signals — the third primitive
 - **Signals tab** — third sidebar tab alongside Graphs and Knowledge Base. Lists all detected signals with severity dots, tags, and evidence counts. Filter bar filters both sidebar and panel simultaneously.
 - **Signal card report** — scrollable panel with type-driven visualizations per signal kind: comparison blocks, progress bars, ring gauges, dot grids, chip rows, heatmaps. Cards grouped by severity.

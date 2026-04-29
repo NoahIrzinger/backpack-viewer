@@ -23,6 +23,7 @@ import { initShortcuts } from "./shortcuts";
 import { initEmptyState } from "./empty-state";
 import { showToast } from "./dialog";
 import { createHistory } from "./history";
+import { initMobileFab } from "./mobile-fab";
 import { matchKey, type KeybindingMap } from "./keybindings";
 import { initContextMenu } from "./context-menu";
 import { initCopyPromptButton } from "./copy-prompt";
@@ -1813,6 +1814,8 @@ async function main() {
       }
     });
   }
+
+  initMobileFab({ getActiveBackpackName: () => activeOntology || null });
 }
 
 main();
