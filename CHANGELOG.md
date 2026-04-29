@@ -2,7 +2,12 @@
 
 ## Unreleased
 
-### Mobile polish
+### Mobile polish (round two)
+- **Chip is now a full-width subheader** flush to the top with no side margin, no border-radius, weightier text — reads as a continuation of the host nav (or a standalone header in OSS) instead of a floating pill.
+- **Info-panel covers the full canvas on mobile** with `inset: 0` and `z-index: 56` so nothing — search bar, chat button, chip, host controls — obstructs node info while it's open. The `.info-panel-maximized` distinction collapses on mobile because there's no useful minimized state on a phone screen.
+- **Fullscreen toggle button hidden on mobile** for all panels (`.extension-panel-btn-fullscreen { display: none }`). Panels are full-bleed via @media already; the toggle was a no-op that just took up header space. Only the close (×) remains.
+
+### Mobile polish (round one)
 - **FAB moved bottom-left** so it no longer overlays the minimap or any host-rendered controls in the bottom-right.
 - **FAB menu accepts host-supplied extras** via `MobileFabOptions.extraItems` (array or function returning an array). Lets hosts surface their own actions (rename, share, delete, etc.) inside the popup so they don't have to render their own bottom bar that fights for canvas space.
 - **Bottom canvas bar hidden on mobile** since hosts are expected to expose those operations through the FAB extras instead.
