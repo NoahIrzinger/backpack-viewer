@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Mobile polish
+- **FAB moved bottom-left** so it no longer overlays the minimap or any host-rendered controls in the bottom-right.
+- **FAB menu accepts host-supplied extras** via `MobileFabOptions.extraItems` (array or function returning an array). Lets hosts surface their own actions (rename, share, delete, etc.) inside the popup so they don't have to render their own bottom bar that fights for canvas space.
+- **Bottom canvas bar hidden on mobile** since hosts are expected to expose those operations through the FAB extras instead.
+- **Mobile chip is a full-width banner** at the top of the viewport so the active-backpack name reads as a header line rather than a corner pill. Hosts with their own nav can override `.bp-mobile-chip { top: ... }` to push it below.
+- **Maximized info-panel z-index bumped to 56** so it covers the search bar (z=50) when the user opens a node on mobile. The panel now starts from the top of the viewport.
+
 ### Sidebar operations
 - **Per-graph 3-dot menu gains Share, Delete, Make public/private** — new optional callbacks `onShare`, `onDelete`, `onSetVisibility`, `getVisibility` on `SidebarCallbacks`. The host wires the ones it supports; menu items appear only for the wired ones. Cloud-mode hosts (e.g. backpack-app) can now expose the full operation set from the navigator without leaving for the dashboard.
 - **Sync items are now also gated on `onSyncGraph`** so they no longer phantom-appear when a host is authenticated but doesn't actually wire sync.
