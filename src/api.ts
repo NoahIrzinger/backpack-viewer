@@ -304,3 +304,21 @@ export async function dismissSignal(signalId: string): Promise<void> {
     body: JSON.stringify({ signalId }),
   });
 }
+
+export async function getDashboard(): Promise<{ spec: import("./dashboard-spec.js").DashboardSpec | null; version: string } | null> {
+  try {
+    const res = await fetch("/api/dashboard");
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function putDashboard(spec: import("./dashboard-spec.js").DashboardSpec): Promise<void> {
+  await fetch("/api/dashboard", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(spec),
+  });
+}

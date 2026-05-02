@@ -3718,7 +3718,34 @@ body {
    Warmer, less saturated — sits inside the viewer's terracotta palette.
    ============================================================ */
 
-/* --- Severity palette (used across all signal UI) --- */
+/* --- Severity + dashboard semantic tokens ---
+   Single source of truth for all severity and dashboard colors.
+   Referenced by signal dots, signal cards, ECharts charts, and
+   dashboard widgets. Change here, everything updates.
+   ============================================================ */
+
+:root {
+  --sev-critical: #c9463d;
+  --sev-high:     #c47a3a;
+  --sev-medium:   #b5a036;
+  --sev-low:      var(--text-dim);
+
+  /* Dashboard widget chrome */
+  --dash-widget-bg:       var(--bg-surface);
+  --dash-widget-border:   var(--border);
+  --dash-widget-radius:   8px;
+  --dash-widget-shadow:   0 1px 3px var(--shadow);
+  --dash-widget-header:   var(--text-muted);
+
+  /* Stat card accent variants */
+  --dash-stat-accent:     var(--accent);
+  --dash-stat-high:       var(--sev-high);
+  --dash-stat-medium:     var(--sev-medium);
+  --dash-stat-critical:   var(--sev-critical);
+  --dash-stat-neutral:    var(--text-dim);
+}
+
+/* Severity palette (used across all signal UI) */
 
 .sv-sev-dot {
   flex-shrink: 0;
@@ -3728,15 +3755,15 @@ body {
   margin-top: 5px;
 }
 
-.sv-sev-bg-critical { background: #c9463d; }
-.sv-sev-bg-high { background: #c47a3a; }
-.sv-sev-bg-medium { background: #b5a036; }
-.sv-sev-bg-low { background: var(--text-dim); }
+.sv-sev-bg-critical { background: var(--sev-critical); }
+.sv-sev-bg-high     { background: var(--sev-high); }
+.sv-sev-bg-medium   { background: var(--sev-medium); }
+.sv-sev-bg-low      { background: var(--sev-low); }
 
-.sv-sev-critical { stroke: #c9463d; }
-.sv-sev-high { stroke: #c47a3a; }
-.sv-sev-medium { stroke: #b5a036; }
-.sv-sev-low { stroke: var(--text-dim); }
+.sv-sev-critical { stroke: var(--sev-critical); }
+.sv-sev-high     { stroke: var(--sev-high); }
+.sv-sev-medium   { stroke: var(--sev-medium); }
+.sv-sev-low      { stroke: var(--sev-low); }
 
 /* --- Sidebar --- */
 
@@ -4332,4 +4359,214 @@ body {
   height: 1px;
   background: var(--border);
   margin: 6px auto;
+}
+
+/* ============================================================
+   Dashboard — widget canvas replacing the signals panel.
+   All colors via CSS variables — dark/light theme for free.
+   ============================================================ */
+
+.dash-panel-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 600px;
+  background: var(--bg);
+}
+
+.dash-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.dash-toolbar-btn {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 5px 11px;
+}
+
+.dash-toolbar-btn:hover { background: var(--bg-hover); }
+.dash-toolbar-btn:disabled { opacity: 0.45; cursor: default; }
+
+.dash-grid {
+  display: grid;
+  padding: 12px;
+  overflow-y: auto;
+  flex: 1;
+  align-content: start;
+}
+
+/* Widget shell */
+
+.dash-widget {
+  background: var(--dash-widget-bg);
+  border: 1px solid var(--dash-widget-border);
+  border-left: 3px solid var(--dash-widget-border);
+  border-radius: var(--dash-widget-radius);
+  box-shadow: var(--dash-widget-shadow);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 160px;
+}
+
+.dash-widget-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px 6px;
+  flex-shrink: 0;
+}
+
+.dash-widget-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--dash-widget-header);
+}
+
+.dash-widget-body {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Stat card */
+
+.dash-stat-body {
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  gap: 4px;
+}
+
+.dash-stat-number {
+  font-size: 40px;
+  font-weight: 300;
+  color: var(--text-strong);
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.dash-stat-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* Chart body */
+
+.dash-chart-body {
+  padding: 4px 8px 8px;
+}
+
+.dash-chart-empty {
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 24px;
+  text-align: center;
+}
+
+/* Signal cards widget */
+
+.dash-signals-body {
+  overflow: hidden;
+}
+
+.dash-signals-search {
+  margin: 0 10px 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-inset);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  width: calc(100% - 20px);
+  flex-shrink: 0;
+}
+
+.dash-signals-search:focus { border-color: var(--accent); }
+
+.dash-signals-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 4px 4px;
+}
+
+.dash-signals-empty {
+  padding: 20px 12px;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+/* Dashboard tab pane in sidebar */
+
+.dash-sidebar-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.dash-sidebar-stat-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.dash-sidebar-stat {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dash-sidebar-stat-number {
+  font-size: 20px;
+  font-weight: 300;
+  color: var(--text-strong);
+  line-height: 1;
+}
+
+.dash-sidebar-stat-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dash-open-btn {
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  color: var(--badge-text, #141414);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 14px;
+  width: 100%;
+  text-align: center;
+}
+
+.dash-open-btn:hover { opacity: 0.88; }
+
+.dash-sidebar-last-scan {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-align: center;
 }

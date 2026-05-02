@@ -1608,6 +1608,41 @@ export async function handleApiRequest(
       return true;
     }
 
+    // --- /api/dashboard ---
+
+    if (url === "/api/dashboard" && method === "GET") {
+      try {
+        const active = ctx.storage.activeEntry;
+        if (!active) { sendJson(res, 200, { spec: null, version: "" }); return true; }
+        const dashPath = path.join(active.path, "dashboard.json");
+        try {
+          const raw = await fs.readFile(dashPath, "utf8");
+          const version = crypto.createHash("md5").update(raw).digest("hex").slice(0, 8);
+          sendJson(res, 200, { spec: JSON.parse(raw), version });
+        } catch {
+          sendJson(res, 200, { spec: null, version: "" });
+        }
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    if (url === "/api/dashboard" && method === "PUT") {
+      try {
+        const active = ctx.storage.activeEntry;
+        if (!active) { sendErr(res, 400, "No active backpack"); return true; }
+        const body = await readBody(req);
+        const spec = JSON.parse(body);
+        const dashPath = path.join(active.path, "dashboard.json");
+        await fs.writeFile(dashPath, JSON.stringify(spec, null, 2), "utf8");
+        sendJson(res, 200, { ok: true });
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
     return false;
   } catch (err) {
     if (!res.headersSent) {

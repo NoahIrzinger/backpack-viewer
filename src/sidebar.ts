@@ -47,10 +47,7 @@ export interface SidebarCallbacks {
    */
   onAddBackpackClick?: () => void;
   onKBDocSelect?: (docId: string) => void;
-  onSignalsTabSelect?: () => void;
-  onSignalsFilter?: (query: string) => void;
-  onSignalSelect?: (signalId: string) => void;
-  onSignalSelectionChange?: (selectedIds: string[]) => void;
+  onDashboardTabSelect?: () => void;
   onKBMountAdd?: (name: string, path: string, writable: boolean) => void;
   onKBMountRemove?: (name: string) => void;
   onKBMountEdit?: (name: string, newPath: string) => void;
@@ -1175,7 +1172,7 @@ export function initSidebar(
   const signalsTab = document.createElement("button");
   signalsTab.className = "sidebar-tab";
   signalsTab.type = "button";
-  signalsTab.textContent = "Signals";
+  signalsTab.textContent = "Dashboard";
 
   tabBar.appendChild(graphsTab);
   tabBar.appendChild(kbTab);
@@ -1408,109 +1405,51 @@ export function initSidebar(
   kbList.hidden = false;
   container.appendChild(kbPane);
 
-  // --- Signals tab content ---
+  // --- Dashboard tab content ---
   const signalsPane = document.createElement("div");
   signalsPane.className = "sidebar-tab-pane hidden";
 
-  const signalsFilter = document.createElement("input");
-  signalsFilter.className = "sidebar-search";
-  signalsFilter.type = "text";
-  signalsFilter.placeholder = "Filter signals…";
-  signalsPane.appendChild(signalsFilter);
+  const dashContent = document.createElement("div");
+  dashContent.className = "dash-sidebar-pane";
 
-  const signalsList = document.createElement("ul");
-  signalsList.className = "signals-sidebar-list";
-  signalsPane.appendChild(signalsList);
+  const statsRow = document.createElement("div");
+  statsRow.className = "dash-sidebar-stat-row";
 
-  // Selection tray (sticky bottom)
-  const signalsTray = document.createElement("div");
-  signalsTray.className = "signals-selection-tray";
-  signalsTray.hidden = true;
+  const totalStat = document.createElement("div");
+  totalStat.className = "dash-sidebar-stat";
+  const totalNum = document.createElement("div");
+  totalNum.className = "dash-sidebar-stat-number";
+  totalNum.textContent = "—";
+  const totalLabel = document.createElement("div");
+  totalLabel.className = "dash-sidebar-stat-label";
+  totalLabel.textContent = "Signals";
+  totalStat.append(totalNum, totalLabel);
 
-  const trayCount = document.createElement("span");
-  trayCount.className = "signals-tray-count";
+  const highStat = document.createElement("div");
+  highStat.className = "dash-sidebar-stat";
+  highStat.style.borderLeftColor = "var(--sev-high)";
+  const highNum = document.createElement("div");
+  highNum.className = "dash-sidebar-stat-number";
+  highNum.textContent = "—";
+  const highLabel = document.createElement("div");
+  highLabel.className = "dash-sidebar-stat-label";
+  highLabel.textContent = "High";
+  highStat.append(highNum, highLabel);
 
-  const traySelectAll = document.createElement("button");
-  traySelectAll.className = "signals-tray-btn";
-  traySelectAll.type = "button";
-  traySelectAll.textContent = "Select filtered";
+  statsRow.append(totalStat, highStat);
 
-  const trayClear = document.createElement("button");
-  trayClear.className = "signals-tray-btn";
-  trayClear.type = "button";
-  trayClear.textContent = "Clear";
+  const openBtn = document.createElement("button");
+  openBtn.type = "button";
+  openBtn.className = "dash-open-btn";
+  openBtn.textContent = "Open Dashboard";
+  openBtn.addEventListener("click", () => cbs.onDashboardTabSelect?.());
 
-  signalsTray.appendChild(trayCount);
-  signalsTray.appendChild(traySelectAll);
-  signalsTray.appendChild(trayClear);
-  signalsPane.appendChild(signalsTray);
+  const lastScanEl = document.createElement("div");
+  lastScanEl.className = "dash-sidebar-last-scan";
 
+  dashContent.append(statsRow, openBtn, lastScanEl);
+  signalsPane.appendChild(dashContent);
   container.appendChild(signalsPane);
-
-  // Selection state
-  const selectedSignalIds = new Set<string>();
-  let signalItems: HTMLLIElement[] = [];
-
-  function updateSelectionTray() {
-    const count = selectedSignalIds.size;
-    signalsTray.hidden = count === 0 && signalItems.length === 0;
-    trayCount.textContent = count > 0 ? `${count} selected` : "";
-    trayClear.hidden = count === 0;
-    cbs.onSignalSelectionChange?.([...selectedSignalIds]);
-  }
-
-  function toggleSignalSelection(id: string) {
-    if (selectedSignalIds.has(id)) {
-      selectedSignalIds.delete(id);
-    } else {
-      selectedSignalIds.add(id);
-    }
-    // Update visual state
-    for (const item of signalItems) {
-      if (item.dataset.signalId === id) {
-        item.classList.toggle("signal-selected", selectedSignalIds.has(id));
-        const cb = item.querySelector(".signal-checkbox") as HTMLElement | null;
-        if (cb) cb.classList.toggle("checked", selectedSignalIds.has(id));
-      }
-    }
-    updateSelectionTray();
-  }
-
-  traySelectAll.addEventListener("click", () => {
-    // Select all currently visible (not hidden) signal items
-    for (const item of signalItems) {
-      if (!item.classList.contains("hidden") && item.dataset.signalId) {
-        selectedSignalIds.add(item.dataset.signalId);
-        item.classList.add("signal-selected");
-        const cb = item.querySelector(".signal-checkbox") as HTMLElement | null;
-        if (cb) cb.classList.add("checked");
-      }
-    }
-    updateSelectionTray();
-  });
-
-  trayClear.addEventListener("click", () => {
-    selectedSignalIds.clear();
-    for (const item of signalItems) {
-      item.classList.remove("signal-selected");
-      const cb = item.querySelector(".signal-checkbox") as HTMLElement | null;
-      if (cb) cb.classList.remove("checked");
-    }
-    updateSelectionTray();
-  });
-
-  function filterSignalItems() {
-    const q = signalsFilter.value.toLowerCase();
-    for (const item of signalItems) {
-      const text = item.dataset.searchText ?? "";
-      item.classList.toggle("hidden", q.length > 0 && !text.includes(q));
-    }
-    cbs.onSignalsFilter?.(q);
-  }
-  signalsFilter.addEventListener("input", () => filterSignalItems());
-
-  // Remove the standalone KB heading — no longer needed in tabbed layout
-  // (kbHeading was created earlier but we don't add it to the DOM)
 
   container.appendChild(footer);
 
@@ -1524,7 +1463,7 @@ export function initSidebar(
     graphsPane.classList.toggle("hidden", tab !== "graphs");
     kbPane.classList.toggle("hidden", tab !== "kb");
     signalsPane.classList.toggle("hidden", tab !== "signals");
-    if (tab === "signals") cbs.onSignalsTabSelect?.();
+    if (tab === "signals") cbs.onDashboardTabSelect?.();
   }
   graphsTab.addEventListener("click", () => switchTab("graphs"));
   kbTab.addEventListener("click", () => switchTab("kb"));
@@ -2014,110 +1953,10 @@ export function initSidebar(
       }
     },
 
-    setSignals(signals: { id: string; title: string; severity: string; kind: string; graphNames: string[]; tags: string[]; evidenceNodeIds: string[] }[]) {
-      signalsList.replaceChildren();
-      signalItems = [];
-
-      if (signals.length === 0) {
-        const empty = document.createElement("li");
-        empty.className = "signals-empty-item";
-        empty.textContent = "No signals. Run backpack_signal_detect via MCP.";
-        signalsList.appendChild(empty);
-        updateSelectionTray();
-        return;
-      }
-
-      for (const signal of signals) {
-        const li = document.createElement("li");
-        li.className = "ontology-item signal-sidebar-item";
-        if (selectedSignalIds.has(signal.id)) li.classList.add("signal-selected");
-        const searchParts = [signal.title, signal.kind, ...signal.graphNames, ...signal.tags].join(" ").toLowerCase();
-        li.dataset.searchText = searchParts;
-        li.dataset.signalId = signal.id;
-
-        // Checkbox + severity dot + title row
-        const row = document.createElement("div");
-        row.className = "signal-sidebar-row";
-
-        const checkbox = document.createElement("span");
-        checkbox.className = `signal-checkbox${selectedSignalIds.has(signal.id) ? " checked" : ""}`;
-        checkbox.addEventListener("click", (e) => {
-          e.stopPropagation();
-          toggleSignalSelection(signal.id);
-        });
-        row.appendChild(checkbox);
-
-        const dot = document.createElement("span");
-        dot.className = `sv-sev-dot sv-sev-bg-${signal.severity}`;
-        row.appendChild(dot);
-
-        const titleSpan = document.createElement("span");
-        titleSpan.className = "signal-sidebar-title";
-        titleSpan.textContent = signal.title;
-        row.appendChild(titleSpan);
-
-        li.appendChild(row);
-
-        // Tags row
-        if (signal.tags.length > 0) {
-          const tagsRow = document.createElement("div");
-          tagsRow.className = "signal-sidebar-tags";
-          for (const tag of signal.tags.slice(0, 6)) {
-            const tagEl = document.createElement("span");
-            tagEl.className = "signal-sidebar-tag";
-            tagEl.textContent = tag;
-            tagsRow.appendChild(tagEl);
-          }
-          if (signal.tags.length > 6) {
-            const more = document.createElement("span");
-            more.className = "signal-sidebar-tag-more";
-            more.textContent = `+${signal.tags.length - 6}`;
-            tagsRow.appendChild(more);
-          }
-          li.appendChild(tagsRow);
-        }
-
-        // Evidence count
-        if (signal.evidenceNodeIds.length > 0) {
-          const nodesRow = document.createElement("div");
-          nodesRow.className = "signal-sidebar-nodes";
-          const countSpan = document.createElement("span");
-          countSpan.className = "signal-sidebar-tag-more";
-          countSpan.textContent = `${signal.evidenceNodeIds.length} evidence node${signal.evidenceNodeIds.length > 1 ? "s" : ""}`;
-          nodesRow.appendChild(countSpan);
-          li.appendChild(nodesRow);
-        }
-
-        li.addEventListener("click", (e) => {
-          if ((e.target as HTMLElement).closest(".signal-checkbox")) return;
-          cbs.onSignalSelect?.(signal.id);
-        });
-
-        signalsList.appendChild(li);
-        signalItems.push(li);
-      }
-      filterSignalItems();
-      updateSelectionTray();
-    },
-
-    getSelectedSignalIds(): string[] {
-      return [...selectedSignalIds];
-    },
-
-    setSignalSelected(id: string, selected: boolean) {
-      if (selected) {
-        selectedSignalIds.add(id);
-      } else {
-        selectedSignalIds.delete(id);
-      }
-      for (const item of signalItems) {
-        if (item.dataset.signalId === id) {
-          item.classList.toggle("signal-selected", selected);
-          const cb = item.querySelector(".signal-checkbox") as HTMLElement | null;
-          if (cb) cb.classList.toggle("checked", selected);
-        }
-      }
-      updateSelectionTray();
+    setDashboardStats(total: number, high: number, lastScan?: string) {
+      totalNum.textContent = String(total);
+      highNum.textContent = String(high);
+      lastScanEl.textContent = lastScan ? `Last scan: ${lastScan.slice(0, 16).replace("T", " ")}` : "";
     },
 
     toggle: toggleSidebar,

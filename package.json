@@ -27,7 +27,8 @@
   },
   "dependencies": {
     "age-encryption": "^0.3.0",
-    "backpack-ontology": "file:../backpack-ontology"
+    "backpack-ontology": "file:../backpack-ontology",
+    "echarts": "^6.0.0"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
