@@ -249,12 +249,28 @@ export function getThemeValues(): ThemeValues {
 
 function applyThemeToAll(): void {
   const v = readThemeValues();
-  const themeOption = buildEChartsTheme(v);
-  echarts.registerTheme(ECHARTS_THEME_NAME, themeOption);
+  echarts.registerTheme(ECHARTS_THEME_NAME, buildEChartsTheme(v));
+
+  // Re-apply all theme-sensitive options to existing chart instances.
+  // Re-registering the theme only affects NEW charts; existing ones need
+  // explicit setOption to pick up axis/tooltip/legend color changes.
+  const axisUpdate = {
+    axisLine:  { lineStyle: { color: v.border } },
+    axisTick:  { lineStyle: { color: v.border } },
+    axisLabel: { color: v.textMuted },
+    splitLine: { lineStyle: { color: v.border } },
+  };
   for (const chart of activeCharts) {
-    if (!chart.isDisposed()) {
-      chart.setOption({ textStyle: { color: v.text } });
-    }
+    if (chart.isDisposed()) continue;
+    chart.setOption({
+      textStyle:    { color: v.text },
+      legend:       { textStyle: { color: v.textMuted }, inactiveColor: v.textDim },
+      tooltip:      { backgroundColor: v.bgElevated, borderColor: v.border, textStyle: { color: v.text } },
+      xAxis:        axisUpdate,
+      yAxis:        axisUpdate,
+      categoryAxis: axisUpdate,
+      valueAxis:    { ...axisUpdate, axisLine: { lineStyle: { color: "transparent" } }, axisTick: { show: false } },
+    });
   }
 }
 

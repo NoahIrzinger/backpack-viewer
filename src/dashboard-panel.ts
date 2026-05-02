@@ -86,8 +86,8 @@ export function initDashboardPanel(panelMount: PanelMount): {
       detectBtn.disabled = true;
       detectBtn.textContent = "Detecting…";
       try {
-        const result = await detectSignals();
-        signals = result.signals;
+        await detectSignals();
+        await loadData(); // reload both signals and graph summaries
         renderWidgets();
       } finally {
         detectBtn.disabled = false;
@@ -118,12 +118,12 @@ export function initDashboardPanel(panelMount: PanelMount): {
   }
 
   async function loadData() {
-    const [signalResult, summaries] = await Promise.all([
-      listSignals().catch(() => ({ signals: [], dismissed: 0, computedAt: "" })),
+    const [signalRes, graphRes] = await Promise.allSettled([
+      listSignals(),
       loadGraphSummaries(),
     ]);
-    signals = signalResult.signals;
-    graphSummaries = summaries;
+    if (signalRes.status === "fulfilled") signals = signalRes.value.signals;
+    if (graphRes.status === "fulfilled") graphSummaries = graphRes.value;
   }
 
   async function loadSpec() {
