@@ -23,6 +23,8 @@ import {
   SyncClient,
   SyncRelayClient,
   readSyncState,
+  GRAPH_DETECTORS,
+  CROSS_CUTTING_DETECTORS,
 } from "backpack-ontology";
 import type { ViewerConfig } from "./config.js";
 import { readExtensionSettings, writeExtensionSetting } from "./server-extensions.js";
@@ -1608,13 +1610,52 @@ export async function handleApiRequest(
       return true;
     }
 
-    // --- /api/dashboard ---
+    // --- /api/signals/config (detector enable/disable) ---
 
-    if (url === "/api/dashboard" && method === "GET") {
+    if (url === "/api/signals/config" && method === "GET") {
+      try {
+        const active = ctx.storage.activeEntry;
+        if (!active) { sendErr(res, 400, "No active backpack"); return true; }
+        const store = new SignalStore(active.path);
+        const globalCfg = await store.loadGlobalConfig();
+        const builtIn = [
+          ...GRAPH_DETECTORS.map((d) => ({ kind: String(d.kind), category: "structural", requiresConnector: false })),
+          ...CROSS_CUTTING_DETECTORS.map((d) => ({ kind: String(d.kind), category: "structural", requiresConnector: false })),
+        ].map((d) => ({
+          ...d,
+          enabled: globalCfg.detectors?.[d.kind]?.enabled !== false,
+          displayName: d.kind.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+        }));
+        sendJson(res, 200, { detectors: builtIn, global: globalCfg.global ?? {} });
+      } catch (err) { sendErr(res, 500, (err as Error).message); }
+      return true;
+    }
+
+    if (url === "/api/signals/config" && method === "PUT") {
+      try {
+        const active = ctx.storage.activeEntry;
+        if (!active) { sendErr(res, 400, "No active backpack"); return true; }
+        const store = new SignalStore(active.path);
+        const body = await readBody(req);
+        const update = JSON.parse(body) as { detectors?: Record<string, { enabled: boolean }> };
+        const existing = await store.loadGlobalConfig();
+        for (const [kind, cfg] of Object.entries(update.detectors ?? {})) {
+          if (!existing.detectors) existing.detectors = {};
+          existing.detectors[kind] = { ...(existing.detectors[kind] ?? {}), ...cfg };
+        }
+        await store.saveGlobalConfig(existing);
+        sendJson(res, 200, { ok: true });
+      } catch (err) { sendErr(res, 500, (err as Error).message); }
+      return true;
+    }
+
+    // --- /api/signals/view (signals panel widget layout) ---
+
+    if (url === "/api/signals/view" && method === "GET") {
       try {
         const active = ctx.storage.activeEntry;
         if (!active) { sendJson(res, 200, { spec: null, version: "" }); return true; }
-        const dashPath = path.join(active.path, "dashboard.json");
+        const dashPath = path.join(active.path, "signals-view.json");
         try {
           const raw = await fs.readFile(dashPath, "utf8");
           const version = crypto.createHash("md5").update(raw).digest("hex").slice(0, 8);
@@ -1628,13 +1669,13 @@ export async function handleApiRequest(
       return true;
     }
 
-    if (url === "/api/dashboard" && method === "PUT") {
+    if (url === "/api/signals/view" && method === "PUT") {
       try {
         const active = ctx.storage.activeEntry;
         if (!active) { sendErr(res, 400, "No active backpack"); return true; }
         const body = await readBody(req);
         const spec = JSON.parse(body);
-        const dashPath = path.join(active.path, "dashboard.json");
+        const dashPath = path.join(active.path, "signals-view.json");
         await fs.writeFile(dashPath, JSON.stringify(spec, null, 2), "utf8");
         sendJson(res, 200, { ok: true });
       } catch (err) {

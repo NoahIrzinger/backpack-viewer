@@ -1,10 +1,10 @@
 import type { Signal, LearningGraphSummary } from "backpack-ontology";
-import type { DashboardSpec } from "./dashboard-spec.js";
-import { DEFAULT_DASHBOARD } from "./dashboard-spec.js";
-import { mountWidget } from "./dashboard-widgets.js";
-import type { DashboardBridge, WidgetTeardown } from "./dashboard-widgets.js";
+import type { SignalsViewSpec } from "./signals-spec.js";
+import { DEFAULT_SIGNALS_VIEW } from "./signals-spec.js";
+import { mountWidget } from "./signals-widgets.js";
+import type { SignalsBridge, SignalsWidgetTeardown } from "./signals-widgets.js";
 import type { PanelMount } from "./extensions/panel-mount.js";
-import { listSignals, detectSignals, dismissSignal, getDashboard } from "./api.js";
+import { listSignals, detectSignals, dismissSignal, getSignalsView } from "./api.js";
 
 async function loadGraphSummaries(): Promise<LearningGraphSummary[]> {
   try {
@@ -16,31 +16,31 @@ async function loadGraphSummaries(): Promise<LearningGraphSummary[]> {
   }
 }
 
-export function initDashboardPanel(panelMount: PanelMount): {
+export function initSignalsPanel(panelMount: PanelMount): {
   show(): Promise<void>;
   hide(): void;
   reload(): Promise<void>;
 } {
   const bodyEl = document.createElement("div");
-  bodyEl.className = "dash-panel-root";
+  bodyEl.className = "sv-panel-root";
 
-  const handle = panelMount.mount("dashboard", bodyEl, {
-    title: "Dashboard",
-    persistKey: "dashboard-panel",
+  const handle = panelMount.mount("signals", bodyEl, {
+    title: "Signals",
+    persistKey: "signals-panel",
     hideOnClose: true,
   });
   handle.setVisible(false);
 
   let signals: Signal[] = [];
   let graphSummaries: LearningGraphSummary[] = [];
-  let spec: DashboardSpec = DEFAULT_DASHBOARD;
+  let spec: SignalsViewSpec = DEFAULT_SIGNALS_VIEW;
   let specVersion = "";
-  let teardowns: WidgetTeardown[] = [];
+  let teardowns: SignalsWidgetTeardown[] = [];
   let pollTimer: ReturnType<typeof setInterval> | undefined;
 
-  const bridge: DashboardBridge = {
+  const bridge: SignalsBridge = {
     focusNodes(nodeIds, hops = 2) {
-      window.dispatchEvent(new CustomEvent("backpack-dashboard-focus-nodes", { detail: { nodeIds, hops } }));
+      window.dispatchEvent(new CustomEvent("backpack-signals-focus-nodes", { detail: { nodeIds, hops } }));
     },
     async dismissSignal(id) {
       await dismissSignal(id);
@@ -50,7 +50,7 @@ export function initDashboardPanel(panelMount: PanelMount): {
       renderWidgets();
     },
     panToNode(nodeId) {
-      window.dispatchEvent(new CustomEvent("backpack-dashboard-pan-to-node", { detail: { nodeId } }));
+      window.dispatchEvent(new CustomEvent("backpack-signals-pan-to-node", { detail: { nodeId } }));
     },
   };
 
@@ -58,7 +58,7 @@ export function initDashboardPanel(panelMount: PanelMount): {
     teardowns.forEach((t) => t());
     teardowns = [];
 
-    const grid = bodyEl.querySelector(".dash-grid") as HTMLElement | null;
+    const grid = bodyEl.querySelector(".sv-grid") as HTMLElement | null;
     if (!grid) return;
 
     grid.replaceChildren();
@@ -76,11 +76,11 @@ export function initDashboardPanel(panelMount: PanelMount): {
     bodyEl.replaceChildren();
 
     const toolbar = document.createElement("div");
-    toolbar.className = "dash-toolbar";
+    toolbar.className = "sv-toolbar";
 
     const detectBtn = document.createElement("button");
     detectBtn.type = "button";
-    detectBtn.className = "dash-toolbar-btn";
+    detectBtn.className = "sv-toolbar-btn";
     detectBtn.textContent = "Detect signals";
     detectBtn.addEventListener("click", async () => {
       detectBtn.disabled = true;
@@ -97,7 +97,7 @@ export function initDashboardPanel(panelMount: PanelMount): {
 
     const refreshBtn = document.createElement("button");
     refreshBtn.type = "button";
-    refreshBtn.className = "dash-toolbar-btn";
+    refreshBtn.className = "sv-toolbar-btn";
     refreshBtn.textContent = "Refresh";
     refreshBtn.addEventListener("click", async () => {
       refreshBtn.disabled = true;
@@ -109,7 +109,7 @@ export function initDashboardPanel(panelMount: PanelMount): {
     bodyEl.appendChild(toolbar);
 
     const grid = document.createElement("div");
-    grid.className = "dash-grid";
+    grid.className = "sv-grid";
     grid.style.gridTemplateColumns = `repeat(${spec.grid.columns}, 1fr)`;
     grid.style.gap = `${spec.grid.gap}px`;
     bodyEl.appendChild(grid);
@@ -128,14 +128,14 @@ export function initDashboardPanel(panelMount: PanelMount): {
 
   async function loadSpec() {
     try {
-      const result = await getDashboard();
+      const result = await getSignalsView();
       if (result && result.version !== specVersion) {
         specVersion = result.version;
-        spec = result.spec ?? DEFAULT_DASHBOARD;
+        spec = result.spec ?? DEFAULT_SIGNALS_VIEW;
         return true;
       }
     } catch {
-      spec = DEFAULT_DASHBOARD;
+      spec = DEFAULT_SIGNALS_VIEW;
     }
     return false;
   }

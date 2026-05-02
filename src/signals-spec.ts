@@ -108,13 +108,13 @@ export interface WidgetSpec {
   config: WidgetConfig;
 }
 
-export interface DashboardSpec {
+export interface SignalsViewSpec {
   version: 1;
   grid: GridConfig;
   widgets: WidgetSpec[];
 }
 
-export const DEFAULT_DASHBOARD: DashboardSpec = {
+export const DEFAULT_SIGNALS_VIEW: SignalsViewSpec = {
   version: 1,
   grid: { columns: 3, rowHeight: 200, gap: 12 },
   widgets: [

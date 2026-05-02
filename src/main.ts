@@ -9,7 +9,7 @@ import {
   type RemoteSummary,
 } from "./api";
 import { initKBPanel } from "./kb-panel";
-import { initDashboardPanel } from "./dashboard-panel.js";
+import { initSignalsPanel } from "./signals-panel.js";
 import { startThemeWatcher } from "./dashboard-theme.js";
 import { renderMarkdown } from "./markdown";
 import { initSidebar } from "./sidebar";
@@ -193,7 +193,7 @@ async function main() {
   const panelMount = createPanelMount(canvasContainer);
 
   const kbPanel = initKBPanel(panelMount);
-  const dashboardPanel = initDashboardPanel(panelMount);
+  const signalsPanel = initSignalsPanel(panelMount);
   startThemeWatcher();
 
   const infoPanel = initInfoPanel(canvasContainer, panelMount, {
@@ -834,8 +834,8 @@ async function main() {
       onKBDocSelect: (docId) => {
         kbPanel.show(docId);
       },
-      onDashboardTabSelect: async () => {
-        await dashboardPanel.show();
+      onSignalsTabSelect: async () => {
+        await signalsPanel.show();
       },
       onKBMountAdd: async (name, mountPath, writable) => {
         const res = await fetch("/api/kb/mounts", {
@@ -1095,13 +1095,13 @@ async function main() {
   // Signals: the "View in" button navigates via hash URL, which the
   // existing hash router handles (loads graph + focuses nodes).
   // Dashboard: wire focus-nodes events from dashboard bridge to canvas
-  window.addEventListener("backpack-dashboard-focus-nodes", (e) => {
+  window.addEventListener("backpack-signals-focus-nodes", (e) => {
     const { nodeIds, hops } = (e as CustomEvent<{ nodeIds: string[]; hops: number }>).detail;
     if (nodeIds.length > 0 && activeOntology) {
       canvas.enterFocus(nodeIds, hops ?? 2);
     }
   });
-  window.addEventListener("backpack-dashboard-pan-to-node", (e) => {
+  window.addEventListener("backpack-signals-pan-to-node", (e) => {
     const { nodeId } = (e as CustomEvent<{ nodeId: string }>).detail;
     canvas.panToNode(nodeId);
   });

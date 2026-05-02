@@ -305,9 +305,9 @@ export async function dismissSignal(signalId: string): Promise<void> {
   });
 }
 
-export async function getDashboard(): Promise<{ spec: import("./dashboard-spec.js").DashboardSpec | null; version: string } | null> {
+export async function getSignalsView(): Promise<{ spec: import("./signals-spec.js").SignalsViewSpec | null; version: string } | null> {
   try {
-    const res = await fetch("/api/dashboard");
+    const res = await fetch("/api/signals/view");
     if (!res.ok) return null;
     return res.json();
   } catch {
@@ -315,8 +315,8 @@ export async function getDashboard(): Promise<{ spec: import("./dashboard-spec.j
   }
 }
 
-export async function putDashboard(spec: import("./dashboard-spec.js").DashboardSpec): Promise<void> {
-  await fetch("/api/dashboard", {
+export async function putSignalsView(spec: import("./signals-spec.js").SignalsViewSpec): Promise<void> {
+  await fetch("/api/signals/view", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(spec),

@@ -4372,7 +4372,7 @@ body {
    All colors via CSS variables — dark/light theme for free.
    ============================================================ */
 
-.dash-panel-root {
+.sv-panel-root {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -4380,7 +4380,7 @@ body {
   background: var(--bg);
 }
 
-.dash-toolbar {
+.sv-toolbar {
   display: flex;
   gap: 8px;
   padding: 10px 14px;
@@ -4388,7 +4388,7 @@ body {
   flex-shrink: 0;
 }
 
-.dash-toolbar-btn {
+.sv-toolbar-btn {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -4398,10 +4398,10 @@ body {
   padding: 5px 11px;
 }
 
-.dash-toolbar-btn:hover { background: var(--bg-hover); }
-.dash-toolbar-btn:disabled { opacity: 0.45; cursor: default; }
+.sv-toolbar-btn:hover { background: var(--bg-hover); }
+.sv-toolbar-btn:disabled { opacity: 0.45; cursor: default; }
 
-.dash-grid {
+.sv-grid {
   display: grid;
   padding: 12px;
   overflow-y: auto;
@@ -4411,7 +4411,7 @@ body {
 
 /* Widget shell */
 
-.dash-widget {
+.sv-widget {
   background: var(--dash-widget-bg);
   border: 1px solid var(--dash-widget-border);
   border-left: 3px solid var(--dash-widget-border);
@@ -4423,7 +4423,7 @@ body {
   min-height: 160px;
 }
 
-.dash-widget-header {
+.sv-widget-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -4431,7 +4431,7 @@ body {
   flex-shrink: 0;
 }
 
-.dash-widget-title {
+.sv-widget-title {
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -4439,7 +4439,7 @@ body {
   color: var(--dash-widget-header);
 }
 
-.dash-widget-body {
+.sv-widget-body {
   flex: 1;
   overflow: hidden;
   display: flex;
@@ -4448,14 +4448,14 @@ body {
 
 /* Stat card */
 
-.dash-stat-body {
+.sv-stat-body {
   align-items: center;
   justify-content: center;
   padding: 12px;
   gap: 4px;
 }
 
-.dash-stat-number {
+.sv-stat-number {
   font-size: 40px;
   font-weight: 300;
   color: var(--text-strong);
@@ -4463,7 +4463,7 @@ body {
   letter-spacing: -0.02em;
 }
 
-.dash-stat-subtitle {
+.sv-stat-subtitle {
   font-size: 11px;
   color: var(--text-muted);
   text-align: center;
@@ -4471,11 +4471,11 @@ body {
 
 /* Chart body */
 
-.dash-chart-body {
+.sv-chart-body {
   padding: 4px 8px 8px;
 }
 
-.dash-chart-empty {
+.sv-chart-empty {
   color: var(--text-dim);
   font-size: 11px;
   padding: 24px;
@@ -4484,11 +4484,11 @@ body {
 
 /* Signal cards widget */
 
-.dash-signals-body {
+.sv-signals-body {
   overflow: hidden;
 }
 
-.dash-signals-search {
+.sv-signals-search {
   margin: 0 10px 6px;
   padding: 5px 10px;
   border: 1px solid var(--border);
@@ -4501,15 +4501,15 @@ body {
   flex-shrink: 0;
 }
 
-.dash-signals-search:focus { border-color: var(--accent); }
+.sv-signals-search:focus { border-color: var(--accent); }
 
-.dash-signals-list {
+.sv-signals-list {
   flex: 1;
   overflow-y: auto;
   padding: 0 4px 4px;
 }
 
-.dash-signals-empty {
+.sv-signals-empty {
   padding: 20px 12px;
   color: var(--text-dim);
   font-size: 12px;
@@ -4519,20 +4519,20 @@ body {
 
 /* Dashboard tab pane in sidebar */
 
-.dash-sidebar-pane {
+.sv-sidebar-pane {
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 4px 0;
 }
 
-.dash-sidebar-stat-row {
+.sv-sidebar-stat-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
-.dash-sidebar-stat {
+.sv-sidebar-stat {
   background: var(--bg-inset);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -4542,21 +4542,21 @@ body {
   gap: 2px;
 }
 
-.dash-sidebar-stat-number {
+.sv-sidebar-stat-number {
   font-size: 20px;
   font-weight: 300;
   color: var(--text-strong);
   line-height: 1;
 }
 
-.dash-sidebar-stat-label {
+.sv-sidebar-stat-label {
   font-size: 10px;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
-.dash-open-btn {
+.sv-open-btn {
   background: var(--accent);
   border: none;
   border-radius: 6px;
@@ -4569,10 +4569,143 @@ body {
   text-align: center;
 }
 
-.dash-open-btn:hover { opacity: 0.88; }
+.sv-open-btn:hover { opacity: 0.88; }
 
-.dash-sidebar-last-scan {
+.sv-sidebar-last-scan {
   font-size: 10px;
   color: var(--text-dim);
   text-align: center;
 }
+
+/* Signal config overlay */
+
+.sv-gear-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 4px 8px;
+  width: 100%;
+  text-align: left;
+}
+
+.sv-gear-btn:hover { color: var(--text); border-color: var(--text-muted); }
+
+.sv-config-overlay {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  margin-top: 6px;
+  padding: 10px;
+  position: relative;
+}
+
+.sv-config-overlay.hidden { display: none; }
+
+.sv-config-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.sv-config-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 3px;
+  line-height: 1;
+}
+
+.sv-config-close:hover { color: var(--text); }
+
+.sv-config-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.sv-config-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.sv-config-toggle {
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.sv-config-label {
+  font-size: 11px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+}
+
+.sv-config-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg-active);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Table widget */
+
+.sv-table-body {
+  overflow: hidden;
+}
+
+.sv-table-wrap {
+  overflow: auto;
+  flex: 1;
+  padding: 4px 8px 8px;
+}
+
+.sv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.sv-table th {
+  text-align: left;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  background: var(--sv-widget-bg, var(--bg-surface));
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sv-table td {
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--bg-active);
+  color: var(--text);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sv-table tr:hover td { background: var(--bg-hover); }

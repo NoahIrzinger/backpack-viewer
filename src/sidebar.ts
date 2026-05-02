@@ -47,7 +47,7 @@ export interface SidebarCallbacks {
    */
   onAddBackpackClick?: () => void;
   onKBDocSelect?: (docId: string) => void;
-  onDashboardTabSelect?: () => void;
+  onSignalsTabSelect?: () => void;
   onKBMountAdd?: (name: string, path: string, writable: boolean) => void;
   onKBMountRemove?: (name: string) => void;
   onKBMountEdit?: (name: string, newPath: string) => void;
@@ -1172,7 +1172,7 @@ export function initSidebar(
   const signalsTab = document.createElement("button");
   signalsTab.className = "sidebar-tab";
   signalsTab.type = "button";
-  signalsTab.textContent = "Dashboard";
+  signalsTab.textContent = "Signals";
 
   tabBar.appendChild(graphsTab);
   tabBar.appendChild(kbTab);
@@ -1410,29 +1410,29 @@ export function initSidebar(
   signalsPane.className = "sidebar-tab-pane hidden";
 
   const dashContent = document.createElement("div");
-  dashContent.className = "dash-sidebar-pane";
+  dashContent.className = "sv-sidebar-pane";
 
   const statsRow = document.createElement("div");
-  statsRow.className = "dash-sidebar-stat-row";
+  statsRow.className = "sv-sidebar-stat-row";
 
   const totalStat = document.createElement("div");
-  totalStat.className = "dash-sidebar-stat";
+  totalStat.className = "sv-sidebar-stat";
   const totalNum = document.createElement("div");
-  totalNum.className = "dash-sidebar-stat-number";
+  totalNum.className = "sv-sidebar-stat-number";
   totalNum.textContent = "—";
   const totalLabel = document.createElement("div");
-  totalLabel.className = "dash-sidebar-stat-label";
+  totalLabel.className = "sv-sidebar-stat-label";
   totalLabel.textContent = "Signals";
   totalStat.append(totalNum, totalLabel);
 
   const highStat = document.createElement("div");
-  highStat.className = "dash-sidebar-stat";
+  highStat.className = "sv-sidebar-stat";
   highStat.style.borderLeftColor = "var(--sev-high)";
   const highNum = document.createElement("div");
-  highNum.className = "dash-sidebar-stat-number";
+  highNum.className = "sv-sidebar-stat-number";
   highNum.textContent = "—";
   const highLabel = document.createElement("div");
-  highLabel.className = "dash-sidebar-stat-label";
+  highLabel.className = "sv-sidebar-stat-label";
   highLabel.textContent = "High";
   highStat.append(highNum, highLabel);
 
@@ -1440,14 +1440,83 @@ export function initSidebar(
 
   const openBtn = document.createElement("button");
   openBtn.type = "button";
-  openBtn.className = "dash-open-btn";
-  openBtn.textContent = "Open Dashboard";
-  openBtn.addEventListener("click", () => cbs.onDashboardTabSelect?.());
+  openBtn.className = "sv-open-btn";
+  openBtn.textContent = "Open Signals";
+  openBtn.addEventListener("click", () => cbs.onSignalsTabSelect?.());
 
   const lastScanEl = document.createElement("div");
-  lastScanEl.className = "dash-sidebar-last-scan";
+  lastScanEl.className = "sv-sidebar-last-scan";
 
-  dashContent.append(statsRow, openBtn, lastScanEl);
+  // Gear button → signal detector config overlay
+  const gearBtn = document.createElement("button");
+  gearBtn.type = "button";
+  gearBtn.className = "sv-gear-btn";
+  gearBtn.title = "Configure signal detectors";
+  gearBtn.textContent = "⚙ Detectors";
+
+  const configOverlay = document.createElement("div");
+  configOverlay.className = "sv-config-overlay hidden";
+
+  const configTitle = document.createElement("div");
+  configTitle.className = "sv-config-title";
+  configTitle.textContent = "Signal Detectors";
+
+  const configCloseBtn = document.createElement("button");
+  configCloseBtn.type = "button";
+  configCloseBtn.className = "sv-config-close";
+  configCloseBtn.textContent = "×";
+  configCloseBtn.addEventListener("click", () => configOverlay.classList.add("hidden"));
+
+  const configList = document.createElement("div");
+  configList.className = "sv-config-list";
+
+  configOverlay.append(configTitle, configCloseBtn, configList);
+
+  async function loadDetectorConfig() {
+    try {
+      const res = await fetch("/api/signals/config");
+      if (!res.ok) return;
+      const data = await res.json() as { detectors: { kind: string; displayName: string; enabled: boolean; requiresConnector: boolean }[] };
+      configList.replaceChildren();
+      for (const det of data.detectors) {
+        const row = document.createElement("div");
+        row.className = "sv-config-row";
+
+        const toggle = document.createElement("input");
+        toggle.type = "checkbox";
+        toggle.className = "sv-config-toggle";
+        toggle.checked = det.enabled;
+        toggle.addEventListener("change", async () => {
+          await fetch("/api/signals/config", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ detectors: { [det.kind]: { enabled: toggle.checked } } }),
+          });
+        });
+
+        const label = document.createElement("label");
+        label.className = "sv-config-label";
+        label.textContent = det.displayName;
+
+        if (det.requiresConnector) {
+          const badge = document.createElement("span");
+          badge.className = "sv-config-badge";
+          badge.textContent = "connector";
+          label.appendChild(badge);
+        }
+
+        row.append(toggle, label);
+        configList.appendChild(row);
+      }
+    } catch { /* ignore */ }
+  }
+
+  gearBtn.addEventListener("click", () => {
+    const hidden = configOverlay.classList.toggle("hidden");
+    if (!hidden) loadDetectorConfig();
+  });
+
+  dashContent.append(statsRow, openBtn, lastScanEl, gearBtn, configOverlay);
   signalsPane.appendChild(dashContent);
   container.appendChild(signalsPane);
 
@@ -1463,7 +1532,7 @@ export function initSidebar(
     graphsPane.classList.toggle("hidden", tab !== "graphs");
     kbPane.classList.toggle("hidden", tab !== "kb");
     signalsPane.classList.toggle("hidden", tab !== "signals");
-    if (tab === "signals") cbs.onDashboardTabSelect?.();
+    if (tab === "signals") cbs.onSignalsTabSelect?.();
   }
   graphsTab.addEventListener("click", () => switchTab("graphs"));
   kbTab.addEventListener("click", () => switchTab("kb"));
@@ -1953,7 +2022,7 @@ export function initSidebar(
       }
     },
 
-    setDashboardStats(total: number, high: number, lastScan?: string) {
+    setSignalsStats(total: number, high: number, lastScan?: string) {
       totalNum.textContent = String(total);
       highNum.textContent = String(high);
       lastScanEl.textContent = lastScan ? `Last scan: ${lastScan.slice(0, 16).replace("T", " ")}` : "";

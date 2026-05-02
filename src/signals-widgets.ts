@@ -1,12 +1,12 @@
 import type { Signal } from "backpack-ontology";
 import type { LearningGraphSummary } from "backpack-ontology";
-import type { WidgetSpec, StatCardConfig, SignalCardsConfig, BarChartConfig, PieChartConfig, StackedBarConfig } from "./dashboard-spec.js";
-import { resolveQuery, filterSignals, sortSignals } from "./dashboard-query-engine.js";
+import type { WidgetSpec, StatCardConfig, SignalCardsConfig, BarChartConfig, PieChartConfig, StackedBarConfig, LineChartConfig, TableConfig } from "./signals-spec.js";
+import { resolveQuery, filterSignals, sortSignals } from "./signals-query-engine.js";
 import { createChart, baseChartOption, buildSeriesColors, SEVERITY_COLORS, getThemeValues } from "./dashboard-theme.js";
 import type { ECharts } from "echarts/core";
 import { renderSignalCard } from "./signal-renderers.js";
 
-export interface DashboardBridge {
+export interface SignalsBridge {
   focusNodes(nodeIds: string[], hops?: number): void;
   dismissSignal(signalId: string): Promise<void>;
   reloadSignals(): Promise<void>;
@@ -16,55 +16,55 @@ export interface DashboardBridge {
 export interface WidgetContext {
   signals: Signal[];
   graphSummaries: LearningGraphSummary[];
-  bridge: DashboardBridge;
+  bridge: SignalsBridge;
 }
 
-export type WidgetTeardown = () => void;
+export type SignalsWidgetTeardown = () => void;
 
 function makeWidgetShell(spec: WidgetSpec): HTMLElement {
   const el = document.createElement("div");
-  el.className = "dash-widget";
+  el.className = "sv-widget";
   el.dataset.widgetId = spec.id;
   el.dataset.widgetType = spec.type;
 
   const header = document.createElement("div");
-  header.className = "dash-widget-header";
+  header.className = "sv-widget-header";
   const title = document.createElement("span");
-  title.className = "dash-widget-title";
+  title.className = "sv-widget-title";
   title.textContent = spec.title;
   header.appendChild(title);
   el.appendChild(header);
 
   const body = document.createElement("div");
-  body.className = "dash-widget-body";
+  body.className = "sv-widget-body";
   el.appendChild(body);
 
   return el;
 }
 
 function getBody(el: HTMLElement): HTMLElement {
-  return el.querySelector(".dash-widget-body") as HTMLElement;
+  return el.querySelector(".sv-widget-body") as HTMLElement;
 }
 
 function getHeader(el: HTMLElement): HTMLElement {
-  return el.querySelector(".dash-widget-header") as HTMLElement;
+  return el.querySelector(".sv-widget-header") as HTMLElement;
 }
 
 // ─── Stat Card ───────────────────────────────────────────────────────────────
 
-function mountStatCard(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext): WidgetTeardown {
+function mountStatCard(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext): SignalsWidgetTeardown {
   const cfg = spec.config as StatCardConfig;
   const body = getBody(el);
-  body.className = "dash-widget-body dash-stat-body";
+  body.className = "sv-widget-body sv-stat-body";
 
   const result = resolveQuery(cfg.query, ctx.signals, ctx.graphSummaries) as { value: number; label: string };
 
   const numEl = document.createElement("div");
-  numEl.className = "dash-stat-number";
+  numEl.className = "sv-stat-number";
   numEl.textContent = String(result.value);
 
   const subtitleEl = document.createElement("div");
-  subtitleEl.className = "dash-stat-subtitle";
+  subtitleEl.className = "sv-stat-subtitle";
   subtitleEl.textContent = cfg.query.source === "signals" && (cfg.query as { filter?: { severity?: string[] } }).filter?.severity?.length
     ? ((cfg.query as { filter: { severity: string[] } }).filter.severity.join(" + "))
     : cfg.query.source === "graphs" ? "in active backpack" : "";
@@ -73,33 +73,33 @@ function mountStatCard(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext): W
   body.appendChild(subtitleEl);
 
   const accentMap: Record<string, string> = {
-    accent: "var(--dash-stat-accent)",
-    high: "var(--dash-stat-high)",
-    medium: "var(--dash-stat-medium)",
-    critical: "var(--dash-stat-critical)",
-    neutral: "var(--dash-stat-neutral)",
+    accent: "var(--sv-stat-accent)",
+    high: "var(--sv-stat-high)",
+    medium: "var(--sv-stat-medium)",
+    critical: "var(--sv-stat-critical)",
+    neutral: "var(--sv-stat-neutral)",
   };
-  el.style.borderLeftColor = accentMap[cfg.accentColor ?? "neutral"] ?? "var(--dash-stat-neutral)";
+  el.style.borderLeftColor = accentMap[cfg.accentColor ?? "neutral"] ?? "var(--sv-stat-neutral)";
 
   return () => {};
 }
 
 // ─── Signal Cards ─────────────────────────────────────────────────────────────
 
-function mountSignalCards(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext): WidgetTeardown {
+function mountSignalCards(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext): SignalsWidgetTeardown {
   const cfg = spec.config as SignalCardsConfig;
   const body = getBody(el);
-  body.className = "dash-widget-body dash-signals-body";
+  body.className = "sv-widget-body sv-signals-body";
   const header = getHeader(el);
 
   const searchInput = document.createElement("input");
   searchInput.type = "text";
-  searchInput.className = "dash-signals-search";
+  searchInput.className = "sv-signals-search";
   searchInput.placeholder = "Filter…";
   header.appendChild(searchInput);
 
   const list = document.createElement("div");
-  list.className = "dash-signals-list";
+  list.className = "sv-signals-list";
   body.appendChild(list);
 
   const selectedIds = new Set<string>();
@@ -113,7 +113,7 @@ function mountSignalCards(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext)
 
     if (visible.length === 0) {
       const empty = document.createElement("div");
-      empty.className = "dash-signals-empty";
+      empty.className = "sv-signals-empty";
       empty.textContent = ctx.signals.length === 0
         ? "No signals detected. Run backpack_signal_detect via MCP to scan."
         : "No signals match the current filter.";
@@ -163,10 +163,10 @@ function mountSignalCards(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext)
 
 // ─── Bar Chart ────────────────────────────────────────────────────────────────
 
-function mountBarChart(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext): WidgetTeardown {
+function mountBarChart(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext): SignalsWidgetTeardown {
   const cfg = spec.config as BarChartConfig;
   const body = getBody(el);
-  body.className = "dash-widget-body dash-chart-body";
+  body.className = "sv-widget-body sv-chart-body";
 
   let chart: ECharts | null = null;
 
@@ -175,7 +175,7 @@ function mountBarChart(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext): W
     if (!result.labels?.length) {
       body.replaceChildren();
       const empty = document.createElement("div");
-      empty.className = "dash-chart-empty";
+      empty.className = "sv-chart-empty";
       empty.textContent = "No data";
       body.appendChild(empty);
       return;
@@ -219,10 +219,10 @@ function mountBarChart(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext): W
 
 // ─── Pie / Donut Chart ────────────────────────────────────────────────────────
 
-function mountPieChart(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext): WidgetTeardown {
+function mountPieChart(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext): SignalsWidgetTeardown {
   const cfg = spec.config as PieChartConfig;
   const body = getBody(el);
-  body.className = "dash-widget-body dash-chart-body";
+  body.className = "sv-widget-body sv-chart-body";
 
   let chart: ECharts | null = null;
 
@@ -278,10 +278,10 @@ function mountPieChart(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext): W
 
 // ─── Stacked Bar ──────────────────────────────────────────────────────────────
 
-function mountStackedBar(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext): WidgetTeardown {
+function mountStackedBar(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext): SignalsWidgetTeardown {
   const cfg = spec.config as StackedBarConfig;
   const body = getBody(el);
-  body.className = "dash-widget-body dash-chart-body";
+  body.className = "sv-widget-body sv-chart-body";
 
   let chart: ECharts | null = null;
 
@@ -317,13 +317,109 @@ function mountStackedBar(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext):
   return () => { chart?.dispose(); ro.disconnect(); };
 }
 
+// ─── Line Chart ──────────────────────────────────────────────────────────────
+
+function mountLineChart(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext): SignalsWidgetTeardown {
+  const cfg = spec.config as LineChartConfig;
+  const body = getBody(el);
+  body.className = "sv-widget-body sv-chart-body";
+
+  let chart: ECharts | null = null;
+
+  function render() {
+    const result = resolveQuery(cfg.query, ctx.signals, ctx.graphSummaries) as { labels: string[]; series: { name: string; data: number[] }[]; _perItemColors?: string[] };
+    if (!result.labels?.length) return;
+    if (!chart) chart = createChart(body);
+
+    const v = getThemeValues();
+    const colors = buildSeriesColors(result.labels, "auto", cfg.colorScheme);
+
+    chart.setOption({
+      ...baseChartOption(),
+      grid: { left: 8, right: 8, top: 8, bottom: 28, containLabel: true },
+      xAxis: { type: "category", data: result.labels, axisLabel: { color: v.textMuted, fontSize: 10, rotate: result.labels.length > 6 ? 30 : 0 } },
+      yAxis: { type: "value", axisLabel: { color: v.textMuted, fontSize: 10 }, splitLine: { lineStyle: { color: v.border, type: "dashed" } } },
+      series: result.series.map((s, i) => ({
+        name: s.name,
+        type: "line",
+        data: s.data,
+        smooth: cfg.smooth !== false ? 0.3 : false,
+        lineStyle: { color: colors[i % colors.length], width: 2 },
+        itemStyle: { color: colors[i % colors.length] },
+        areaStyle: result.series.length === 1 ? { color: colors[0], opacity: 0.08 } : undefined,
+        symbol: "circle",
+        symbolSize: 5,
+      })),
+    }, true);
+  }
+
+  render();
+  const ro = new ResizeObserver(() => chart?.resize());
+  ro.observe(body);
+  return () => { chart?.dispose(); ro.disconnect(); };
+}
+
+// ─── Table ────────────────────────────────────────────────────────────────────
+
+function mountTable(el: HTMLElement, spec: WidgetSpec, ctx: WidgetContext): SignalsWidgetTeardown {
+  const cfg = spec.config as TableConfig;
+  const body = getBody(el);
+  body.className = "sv-widget-body sv-table-body";
+
+  const result = resolveQuery(cfg.query, ctx.signals, ctx.graphSummaries);
+  if (!("labels" in result) || !result.labels?.length) {
+    const empty = document.createElement("div");
+    empty.className = "sv-chart-empty";
+    empty.textContent = "No data";
+    body.appendChild(empty);
+    return () => {};
+  }
+
+  const colNames = cfg.columns ?? ["label", ...result.series.map((s) => s.name)];
+  const rowCount = Math.min(result.labels.length, cfg.limit ?? 50);
+
+  const wrap = document.createElement("div");
+  wrap.className = "sv-table-wrap";
+
+  const table = document.createElement("table");
+  table.className = "sv-table";
+
+  const thead = document.createElement("thead");
+  const headerRow = document.createElement("tr");
+  for (const col of colNames) {
+    const th = document.createElement("th");
+    th.textContent = col.charAt(0).toUpperCase() + col.slice(1);
+    headerRow.appendChild(th);
+  }
+  thead.appendChild(headerRow);
+
+  const tbody = document.createElement("tbody");
+  for (let i = 0; i < rowCount; i++) {
+    const tr = document.createElement("tr");
+    const labelCell = document.createElement("td");
+    labelCell.textContent = result.labels[i];
+    tr.appendChild(labelCell);
+    for (const s of result.series) {
+      const td = document.createElement("td");
+      td.textContent = String(s.data[i] ?? 0);
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+
+  table.append(thead, tbody);
+  wrap.appendChild(table);
+  body.appendChild(wrap);
+  return () => {};
+}
+
 // ─── Registry + mount dispatcher ─────────────────────────────────────────────
 
 export function mountWidget(
   container: HTMLElement,
   spec: WidgetSpec,
   ctx: WidgetContext,
-): WidgetTeardown {
+): SignalsWidgetTeardown {
   const el = makeWidgetShell(spec);
 
   // Apply grid position via CSSOM property assignments
@@ -332,13 +428,15 @@ export function mountWidget(
 
   container.appendChild(el);
 
-  let teardown: WidgetTeardown;
+  let teardown: SignalsWidgetTeardown;
   switch (spec.type) {
     case "stat-card":    teardown = mountStatCard(el, spec, ctx); break;
     case "signal-cards": teardown = mountSignalCards(el, spec, ctx); break;
     case "bar-chart":   teardown = mountBarChart(el, spec, ctx); break;
     case "pie-chart":   teardown = mountPieChart(el, spec, ctx); break;
-    case "stacked-bar": teardown = mountStackedBar(el, spec, ctx); break;
+    case "stacked-bar":  teardown = mountStackedBar(el, spec, ctx); break;
+    case "line-chart":   teardown = mountLineChart(el, spec, ctx); break;
+    case "table":        teardown = mountTable(el, spec, ctx); break;
     default:
       getBody(el).textContent = `Unknown widget type: ${spec.type}`;
       teardown = () => {};

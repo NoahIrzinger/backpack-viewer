@@ -1,6 +1,6 @@
 import type { Signal } from "backpack-ontology";
 import type { LearningGraphSummary } from "backpack-ontology";
-import type { WidgetQuery, SignalFilter, GraphGroupBy, CompositeGroupBy } from "./dashboard-spec.js";
+import type { WidgetQuery, SignalFilter, GraphGroupBy, CompositeGroupBy } from "./signals-spec.js";
 import { buildSeriesColors, SEVERITY_COLORS, getSeriesColor, getThemeValues } from "./dashboard-theme.js";
 
 export interface SeriesData {
