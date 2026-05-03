@@ -4709,3 +4709,19 @@ body {
 }
 
 .sv-table tr:hover td { background: var(--bg-hover); }
+
+.sv-unify-btn {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 7px 10px;
+  width: 100%;
+  text-align: left;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.sv-unify-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--accent); }
+.sv-unify-btn:disabled { opacity: 0.45; cursor: default; }

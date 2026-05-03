@@ -1516,7 +1516,33 @@ export function initSidebar(
     if (!hidden) loadDetectorConfig();
   });
 
-  dashContent.append(statsRow, openBtn, lastScanEl, gearBtn, configOverlay);
+  // "View all graphs together" — synthesizes all graphs and navigates to the unified canvas
+  const unifyBtn = document.createElement("button");
+  unifyBtn.type = "button";
+  unifyBtn.className = "sv-unify-btn";
+  unifyBtn.textContent = "⊕ View all graphs together";
+  unifyBtn.title = "Synthesize all learning graphs into one unified canvas view";
+
+  unifyBtn.addEventListener("click", async () => {
+    unifyBtn.disabled = true;
+    unifyBtn.textContent = "Synthesizing…";
+    try {
+      const res = await fetch("/api/connector/synthesize-all", { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Failed" }));
+        throw new Error((err as { error: string }).error ?? `HTTP ${res.status}`);
+      }
+      const { graphName } = await res.json() as { graphName: string };
+      window.location.hash = graphName;
+    } catch (e) {
+      showToast(`Synthesis failed: ${e instanceof Error ? e.message : String(e)}`, 5000);
+    } finally {
+      unifyBtn.disabled = false;
+      unifyBtn.textContent = "⊕ View all graphs together";
+    }
+  });
+
+  dashContent.append(statsRow, openBtn, lastScanEl, unifyBtn, gearBtn, configOverlay);
   signalsPane.appendChild(dashContent);
   container.appendChild(signalsPane);
 

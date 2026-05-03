@@ -1610,6 +1610,54 @@ export async function handleApiRequest(
       return true;
     }
 
+    // --- /api/connector/synthesize-all ---
+
+    if (url === "/api/connector/synthesize-all" && method === "POST") {
+      try {
+        const active = ctx.storage.activeEntry;
+        if (!active) { sendErr(res, 400, "No active backpack"); return true; }
+
+        // Dynamically import connector — optional, only available when backpack-connector is installed.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let connectorMod: any = null;
+        try {
+          // @ts-ignore — backpack-connector is an optional peer, not in viewer's deps
+          connectorMod = await import("backpack-connector");
+        } catch {
+          sendErr(res, 503, "backpack-connector is not installed. Run: npm install -g backpack-connector");
+          return true;
+        }
+
+        const backend = ctx.storage.current;
+        const summaries = await backend.listOntologies();
+        if (summaries.length === 0) { sendErr(res, 400, "No graphs in active backpack"); return true; }
+
+        const graphNames = summaries.map((s: { name: string }) => s.name);
+        const outputName = "all-graphs";
+
+        // @ts-ignore
+        const { ArcadeDBAdapter, ArcadeDBClient } = await import("backpack-connector");
+        const adapter = new ArcadeDBAdapter(new ArcadeDBClient({
+          url: process.env.ARCADEDB_URL ?? "http://localhost:2480",
+          username: process.env.ARCADEDB_USERNAME ?? "root",
+          password: process.env.ARCADEDB_PASSWORD ?? "arcadedb",
+        }));
+
+        await connectorMod.synthesize(adapter, {
+          backpackPath: active.path,
+          graphs: graphNames,
+          into: outputName,
+          projectFirst: true,
+          reset: true,
+        });
+
+        sendJson(res, 200, { graphName: outputName, graphCount: graphNames.length });
+      } catch (err) {
+        sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
     // --- /api/signals/config (detector enable/disable) ---
 
     if (url === "/api/signals/config" && method === "GET") {
