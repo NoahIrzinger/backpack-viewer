@@ -190,11 +190,11 @@ body {
   margin-bottom: 12px;
 }
 
-#sidebar input:focus {
+#sidebar input:not([type="checkbox"]):not([type="radio"]):focus {
   border-color: var(--accent);
 }
 
-#sidebar input::placeholder {
+#sidebar input:not([type="checkbox"]):not([type="radio"])::placeholder {
   color: var(--text-dim);
 }
 
