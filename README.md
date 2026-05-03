@@ -52,6 +52,43 @@ Opens http://localhost:5173. Click any learning graph in the sidebar to visualiz
 - **Write-through cache** — CloudCacheBackend stores graphs locally and syncs to BackpackApp cloud
 - **Sync controls** — push (encrypted BPAK upload) and pull (cache refresh) with per-item status results
 
+### Knowledge Graph (requires backpack-connector)
+
+The sidebar's **Knowledge Graph** section shows a live, unified view of every learning graph you have projected into ArcadeDB — all backpacks, all graphs, all nodes in one canvas. This is the cross-graph resolution layer: you can see connections that span graphs and backpacks that would be invisible inside any single graph.
+
+To enable it:
+
+```bash
+# 1. Install the connector
+npm install -g backpack-connector
+
+# 2. Start ArcadeDB (Java 21 required)
+cd ~/arcadedb-26.4.2
+JAVA_OPTS="-Darcadedb.server.rootPassword=arcadedb" ./bin/server.sh
+
+# 3. Project your graphs (run once; incremental on subsequent runs)
+backpack-connector project --graph my-graph
+
+# 4. Start the viewer — the Knowledge Graph section becomes active
+npx backpack-viewer
+```
+
+When ArcadeDB is running and graphs have been projected, the Knowledge Graph entry at the top of the Graphs tab shows live node and graph counts. Click it to load the unified graph into the canvas.
+
+**Scope selector** — if you have multiple backpacks projected, a scope pill appears: "All" loads every projected node across every backpack; picking a specific backpack name scopes the view to that backpack's slice. The scope is sticky and independent of the backpack picker.
+
+**Query panel** — clicking the Knowledge Graph entry also opens the Graph Query panel (⚙ for settings, then execute Cypher directly against ArcadeDB). The panel shows a connection indicator and has query templates for common traversals.
+
+The viewer connects to ArcadeDB using these environment variables (or their defaults):
+
+| Variable | Default |
+|---|---|
+| `ARCADEDB_URL` | `http://localhost:2480` |
+| `ARCADEDB_USERNAME` | `root` |
+| `ARCADEDB_PASSWORD` | `arcadedb` |
+
+See [backpack-connector](https://github.com/NoahIrzinger/backpack-connector) for the full connector documentation, ArcadeDB setup, and the unified MCP server that combines graph management with Cypher query tools.
+
 ### Extensions
 - **Extension system** — third-party extensions with sandboxed API (graph reads/writes, events, UI panels, network proxy)
 - **kb-local** — local document storage mount for the KB panel

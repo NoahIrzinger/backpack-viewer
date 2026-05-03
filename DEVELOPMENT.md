@@ -25,6 +25,31 @@ cd /path/to/backpack-viewer && npm link backpack-ontology
 
 Changes to the ontology source will be reflected after running `npm run build` in the ontology directory.
 
+### Local Development with backpack-connector
+
+The Knowledge Graph feature uses backpack-connector as an optional runtime dependency. In production the viewer loads it via dynamic `import("backpack-connector")` and degrades gracefully (503) when it is not installed. In dev, install it as a local file dep so the import resolves:
+
+```bash
+cd /path/to/backpack-viewer
+npm install /path/to/backpack-connector
+```
+
+Then start ArcadeDB and project at least one graph before starting the viewer:
+
+```bash
+cd ~/arcadedb-26.4.2
+JAVA_OPTS="-Darcadedb.server.rootPassword=arcadedb" ./bin/server.sh &
+
+backpack-connector project --graph my-graph
+npm run dev
+```
+
+The Knowledge Graph section in the sidebar will be active. To restore production behavior (no connector), remove it:
+
+```bash
+npm uninstall backpack-connector
+```
+
 ## Commands
 
 | Command | Description |
@@ -45,12 +70,14 @@ backpack-viewer/
 └── src/
     ├── main.ts             # Entry point — wires sidebar, canvas, info panel, live reload
     ├── api.ts              # fetch() wrappers returning backpack-ontology types
-    ├── sidebar.ts          # Ontology list with text filter and click-to-load
+    ├── sidebar.ts          # Graph list, KG section, KB tab, Signals tab
     ├── canvas.ts           # Canvas 2D rendering, camera transform, pan/zoom/pinch, hit testing
     ├── info-panel.ts       # Node detail panel (properties, connections, timestamps)
     ├── layout.ts           # Force-directed graph layout (repulsion, spring, gravity, cooling)
     ├── colors.ts           # Deterministic type → color hash mapping
-    └── style.css           # Dark theme with earth-tone accents
+    ├── signals-panel.ts    # Signals tab: configurable widget canvas
+    ├── server-api-routes.ts# All HTTP API route handlers shared by dev + prod servers
+    └── style.css           # Light/dark theme via CSS custom properties
 ```
 
 ## Architecture
@@ -59,15 +86,12 @@ backpack-viewer/
 
 The custom Vite plugin serves two purposes:
 
-1. **API middleware** — Exposes two HTTP endpoints backed by `JsonFileBackend`:
-   - `GET /api/ontologies` → `storage.listOntologies()`
-   - `GET /api/ontologies/:name` → `storage.loadOntology(name)`
-
-2. **File watcher** — Monitors the ontologies directory for changes and pushes events to the browser via Vite's WebSocket, triggering automatic re-renders.
+1. **API middleware** — mounts all routes from `src/server-api-routes.ts` so the dev server and production `bin/serve.js` share identical behavior.
+2. **File watcher** — monitors the backpack data directory for changes and pushes events to the browser via Vite's WebSocket, triggering automatic graph re-renders.
 
 ### Rendering Pipeline
 
-1. `loadOntology()` fetches the full `OntologyData` from the API
+1. `loadGraph()` fetches the full `LearningGraphData` from the API
 2. `createLayout()` initializes a force-directed simulation with nodes in a circle
 3. `tick()` runs per animation frame — applies repulsion, attraction, and gravity forces
 4. `render()` draws edges, arrowheads, nodes, labels, and type badges to Canvas 2D
@@ -75,7 +99,7 @@ The custom Vite plugin serves two purposes:
 
 ### Data Handling
 
-Ontology schemas are freeform — LLMs generate arbitrary node types and property shapes. The viewer handles this defensively:
+Graph schemas are freeform — LLMs generate arbitrary node types and property shapes. The viewer handles this defensively:
 
 - Labels are the first string value in `node.properties`, falling back to `node.id`
 - Colors are a deterministic hash of `node.type` into a 16-color palette
@@ -84,10 +108,31 @@ Ontology schemas are freeform — LLMs generate arbitrary node types and propert
 
 ## API Endpoints
 
-| Endpoint | Returns |
-|----------|---------|
-| `GET /api/ontologies` | `OntologySummary[]` — name, description, nodeCount, edgeCount |
-| `GET /api/ontologies/:name` | `OntologyData` — full graph with all nodes and edges |
+| Endpoint | Method | Returns |
+|----------|--------|---------|
+| `/api/graphs` | GET | `LearningGraphSummary[]` — name, nodeCount, edgeCount, tags |
+| `/api/graphs/:name` | GET | `LearningGraphData` — full graph with nodes and edges |
+| `/api/graphs/:name` | PUT | Save graph |
+| `/api/graphs/:name` | DELETE | Delete graph |
+| `/api/graphs/:name/rename` | POST | Rename graph |
+| `/api/graphs/:name/tags` | GET/PUT | Read/write tags |
+| `/api/graphs/:name/branches` | GET/POST | List or create branches |
+| `/api/graphs/:name/branches/switch` | POST | Switch active branch |
+| `/api/graphs/:name/branches/:branch` | DELETE | Delete branch |
+| `/api/graphs/:name/snapshots` | GET/POST | List or create snapshots |
+| `/api/graphs/:name/rollback` | POST | Roll back to a snapshot |
+| `/api/graphs/:name/snippets` | GET/POST | List or save snippets |
+| `/api/graphs/:name/snippets/:id` | GET/DELETE | Load or delete a snippet |
+| `/api/connector/knowledge-graph` | GET | Live graph from ArcadeDB (`?backpack=<name>` to scope) |
+| `/api/connector/knowledge-graph/status` | GET | ArcadeDB status + per-backpack breakdown |
+| `/api/signals` | GET | Signal list |
+| `/api/signals/detect` | POST | Run signal detectors |
+| `/api/signals/view` | GET/PUT | Signals panel widget layout |
+| `/api/signals/config` | GET/PUT | Signal detector enable state |
+| `/api/kb/documents` | GET | List KB documents |
+| `/api/kb/documents/:id` | GET/PUT/DELETE | Read, update, or delete a document |
+| `/api/kb/search` | GET | Full-text search across documents |
+| `/api/kb/mounts` | GET/POST | List or manage KB mounts |
 
 ## Releasing
 
@@ -102,7 +147,8 @@ The `v*` tag triggers the GitHub Actions publish workflow, which validates the t
 
 ## Dependencies
 
-- **Runtime**: `backpack-ontology` (JsonFileBackend + types), `vite` (dev server + bundler)
-- **Dev**: `typescript`, `@types/node`
+- **Runtime**: `backpack-ontology` (JsonFileBackend + types), `age-encryption` (graph encryption), `echarts` (Signals panel charts)
+- **Optional runtime**: `backpack-connector` (Knowledge Graph / ArcadeDB integration — not in package.json; loaded via dynamic import at runtime)
+- **Dev**: `typescript`, `@types/node`, `vite`
 
 No frameworks. No UI libraries. Pure TypeScript + Canvas 2D.
