@@ -8,7 +8,7 @@ import { listSignals, detectSignals, dismissSignal, getSignalsView } from "./api
 
 async function loadGraphSummaries(): Promise<LearningGraphSummary[]> {
   try {
-    const res = await fetch("/api/ontologies");
+    const res = await fetch("/api/graphs");
     if (!res.ok) return [];
     return res.json();
   } catch {

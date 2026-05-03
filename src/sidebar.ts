@@ -48,6 +48,7 @@ export interface SidebarCallbacks {
   onAddBackpackClick?: () => void;
   onKBDocSelect?: (docId: string) => void;
   onSignalsTabSelect?: () => void;
+  onKnowledgeGraphSelect?: (scope?: string) => void;
   onKBMountAdd?: (name: string, path: string, writable: boolean) => void;
   onKBMountRemove?: (name: string) => void;
   onKBMountEdit?: (name: string, newPath: string) => void;
@@ -99,7 +100,7 @@ export function initSidebar(
   input.id = "filter";
 
   const list = document.createElement("ul");
-  list.id = "ontology-list";
+  list.id = "graph-list";
 
   const kbHeading = document.createElement("h3");
   kbHeading.className = "sidebar-section-heading";
@@ -821,7 +822,7 @@ export function initSidebar(
       renameItem.addEventListener("click", () => {
         hideItemMenu();
         // Trigger inline rename on the graph item
-        const nameEl = list.querySelector(`.ontology-item[data-name="${CSS.escape(graphName)}"] .name`) as HTMLElement | null;
+        const nameEl = list.querySelector(`.graph-item[data-name="${CSS.escape(graphName)}"] .name`) as HTMLElement | null;
         if (nameEl) triggerInlineRename(graphName, nameEl);
       });
       itemMenu.appendChild(renameItem);
@@ -1180,8 +1181,142 @@ export function initSidebar(
   container.appendChild(tabBar);
 
   // --- Graphs tab content ---
+  // --- Knowledge Graph sticky section ---
+  const kgSection = document.createElement("div");
+  kgSection.className = "kg-section";
+
+  const kgEntry = document.createElement("div");
+  kgEntry.className = "kg-entry kg-entry--offline";
+  kgEntry.title = "View all projected graphs as one knowledge graph";
+
+  const kgIcon = document.createElement("span");
+  kgIcon.className = "kg-icon";
+  kgIcon.textContent = "⬡";
+
+  const kgInfo = document.createElement("div");
+  kgInfo.className = "kg-info";
+
+  const kgName = document.createElement("span");
+  kgName.className = "kg-name";
+  kgName.textContent = "Knowledge Graph";
+
+  const kgMeta = document.createElement("span");
+  kgMeta.className = "kg-meta";
+  kgMeta.textContent = "Connect ArcadeDB to enable";
+
+  // Scope selector — only visible when 2+ backpacks are projected in ArcadeDB
+  const kgScopeSelect = document.createElement("select");
+  kgScopeSelect.className = "kg-scope-select";
+  kgScopeSelect.hidden = true;
+  kgScopeSelect.title = "Filter knowledge graph to a specific backpack";
+  kgScopeSelect.addEventListener("click", (e) => e.stopPropagation());
+  kgScopeSelect.addEventListener("change", () => { renderKgMeta(); });
+
+  const kgDotTarget = document.createElement("span");
+  kgDotTarget.className = "kg-conn-dot-target";
+
+  kgInfo.append(kgName, kgMeta);
+  kgEntry.append(kgIcon, kgInfo, kgScopeSelect, kgDotTarget);
+  kgSection.appendChild(kgEntry);
+
+  let kgOnline = false;
+  type KGStatusCache = {
+    available: boolean;
+    nodeCount: number;
+    graphCount: number;
+    backpacks: Array<{ name: string; nodeCount: number; graphCount: number }>;
+  };
+  let kgStatusCache: KGStatusCache | null = null;
+
+  function renderKgMeta() {
+    if (!kgStatusCache || !kgStatusCache.available) {
+      kgOnline = false;
+      kgEntry.className = "kg-entry kg-entry--offline";
+      kgMeta.textContent = "Connect ArcadeDB to enable";
+      kgScopeSelect.hidden = true;
+      return;
+    }
+
+    const scope = kgScopeSelect.value || "all";
+    let nodeCount: number;
+    let graphCount: number;
+
+    if (scope === "all") {
+      nodeCount = kgStatusCache.nodeCount;
+      graphCount = kgStatusCache.graphCount;
+    } else {
+      const bp = (kgStatusCache.backpacks ?? []).find((b) => b.name === scope);
+      nodeCount = bp?.nodeCount ?? 0;
+      graphCount = bp?.graphCount ?? 0;
+    }
+
+    if (nodeCount > 0) {
+      kgOnline = true;
+      kgEntry.className = "kg-entry kg-entry--online";
+      const scopeLabel = scope === "all" ? "live" : scope;
+      kgMeta.textContent = `${nodeCount} nodes · ${graphCount} graph${graphCount !== 1 ? "s" : ""} · ${scopeLabel}`;
+    } else {
+      kgOnline = kgStatusCache.available;
+      kgEntry.className = "kg-entry kg-entry--empty";
+      kgMeta.textContent = scope === "all"
+        ? "No graphs projected yet — run connector project"
+        : `Nothing projected from "${scope}" yet`;
+    }
+
+    // Show scope selector only when multiple backpacks are projected
+    const backpacks = kgStatusCache.backpacks ?? [];
+    if (backpacks.length >= 2) {
+      // Rebuild options, preserving current selection
+      const current = kgScopeSelect.value;
+      kgScopeSelect.replaceChildren();
+      const allOpt = document.createElement("option");
+      allOpt.value = "all";
+      allOpt.textContent = "All";
+      kgScopeSelect.appendChild(allOpt);
+      for (const bp of backpacks) {
+        const opt = document.createElement("option");
+        opt.value = bp.name;
+        opt.textContent = bp.name;
+        kgScopeSelect.appendChild(opt);
+      }
+      const stillValid = [...kgScopeSelect.options].some((o) => o.value === current);
+      kgScopeSelect.value = stillValid ? current : "all";
+      kgScopeSelect.hidden = false;
+    } else {
+      kgScopeSelect.hidden = true;
+      kgScopeSelect.value = "all";
+    }
+  }
+
+  kgEntry.addEventListener("click", () => {
+    const scope = kgScopeSelect.value === "all" ? undefined : kgScopeSelect.value;
+    if (kgOnline) {
+      cbs.onKnowledgeGraphSelect?.(scope);
+    }
+    window.dispatchEvent(new CustomEvent("backpack-kg-open", { detail: { openSettings: !kgOnline, scope } }));
+  });
+
+  async function refreshKgStatus() {
+    try {
+      const res = await fetch("/api/connector/knowledge-graph/status");
+      if (!res.ok) throw new Error("unavailable");
+      kgStatusCache = await res.json() as KGStatusCache;
+      renderKgMeta();
+    } catch {
+      kgStatusCache = null;
+      kgOnline = false;
+      kgEntry.className = "kg-entry kg-entry--offline";
+      kgMeta.textContent = "Connect ArcadeDB to enable";
+      kgScopeSelect.hidden = true;
+    }
+  }
+
+  refreshKgStatus();
+  setInterval(refreshKgStatus, 15000);
+
   const graphsPane = document.createElement("div");
   graphsPane.className = "sidebar-tab-pane";
+  graphsPane.appendChild(kgSection);
   graphsPane.appendChild(input);
   graphsPane.appendChild(list);
   graphsPane.appendChild(remoteHeading);
@@ -1663,7 +1798,7 @@ export function initSidebar(
 
       items = summaries.map((s) => {
         const li = document.createElement("li");
-        li.className = "ontology-item";
+        li.className = "graph-item";
         li.dataset.name = s.name;
         li.dataset.tags = (s.tags ?? []).join(" ");
 
@@ -1792,7 +1927,7 @@ export function initSidebar(
       remoteList.replaceChildren();
       remoteItems = remotes.map((r) => {
         const li = document.createElement("li");
-        li.className = "ontology-item ontology-item-remote";
+        li.className = "graph-item graph-item-remote";
         li.dataset.name = r.name;
 
         const nameRow = document.createElement("div");
@@ -1847,7 +1982,7 @@ export function initSidebar(
       }
       for (const bp of backpacks) {
         const li = document.createElement("li");
-        li.className = "ontology-item ontology-item-cloud";
+        li.className = "graph-item graph-item-cloud";
         li.dataset.name = bp.name;
 
         const nameRow = document.createElement("div");
@@ -1892,7 +2027,7 @@ export function initSidebar(
 
       for (const doc of documents) {
         const li = document.createElement("li");
-        li.className = "ontology-item kb-item";
+        li.className = "graph-item kb-item";
         li.dataset.id = doc.id;
         li.dataset.title = doc.title.toLowerCase();
         li.dataset.mount = doc.collection || "";
@@ -2029,7 +2164,7 @@ export function initSidebar(
     },
 
     setSyncResult(graphName: string, success: boolean) {
-      const badge = list.querySelector(`.ontology-item[data-name="${CSS.escape(graphName)}"] .sidebar-sync-badge`) as HTMLElement | null;
+      const badge = list.querySelector(`.graph-item[data-name="${CSS.escape(graphName)}"] .sidebar-sync-badge`) as HTMLElement | null;
       if (badge && success) {
         badge.textContent = "synced";
         badge.title = "This graph has been synced";

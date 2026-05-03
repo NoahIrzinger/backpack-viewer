@@ -974,8 +974,8 @@ export async function handleApiRequest(
       return true;
     }
 
-    // --- /api/ontologies/* ---
-    if (url === "/api/ontologies" && method === "GET") {
+    // --- /api/graphs/* ---
+    if (url === "/api/graphs" && method === "GET") {
       try {
         const summaries = await ctx.storage.current.listOntologies();
         sendJson(res, 200, summaries);
@@ -985,8 +985,8 @@ export async function handleApiRequest(
       return true;
     }
 
-    // /api/ontologies/<name>/tags — get or set tags
-    const tagsMatch = url.match(/^\/api\/ontologies\/(.+)\/tags$/);
+    // /api/graphs/<name>/tags — get or set tags
+    const tagsMatch = url.match(/^\/api\/graphs\/(.+)\/tags$/);
     if (tagsMatch && (method === "GET" || method === "PUT")) {
       const name = decodeURIComponent(tagsMatch[1]);
       try {
@@ -1281,8 +1281,8 @@ export async function handleApiRequest(
       return true;
     }
 
-    // /api/ontologies/<name>/rename — must match before /api/ontologies/<name>
-    const rename = url.match(/^\/api\/ontologies\/(.+)\/rename$/);
+    // /api/graphs/<name>/rename — must match before /api/graphs/<name>
+    const rename = url.match(/^\/api\/graphs\/(.+)\/rename$/);
     if (rename && method === "POST") {
       const oldName = decodeURIComponent(rename[1]);
       const body = await readBody(req);
@@ -1296,8 +1296,8 @@ export async function handleApiRequest(
       return true;
     }
 
-    if (url.startsWith("/api/ontologies/")) {
-      const name = decodeURIComponent(url.replace("/api/ontologies/", ""));
+    if (url.startsWith("/api/graphs/")) {
+      const name = decodeURIComponent(url.replace("/api/graphs/", ""));
       if (!name) return false;
       if (method === "PUT") {
         const body = await readBody(req);
@@ -1315,7 +1315,16 @@ export async function handleApiRequest(
           const data = await ctx.storage.current.loadOntology(name);
           sendJson(res, 200, data);
         } catch {
-          sendErr(res, 404, "Ontology not found");
+          sendErr(res, 404, "Graph not found");
+        }
+        return true;
+      }
+      if (method === "DELETE") {
+        try {
+          await ctx.storage.current.deleteOntology(name);
+          sendJson(res, 200, { ok: true });
+        } catch (err) {
+          sendErr(res, 500, (err as Error).message);
         }
         return true;
       }
@@ -1606,6 +1615,140 @@ export async function handleApiRequest(
         sendJson(res, 200, { ok: true });
       } catch (err) {
         sendErr(res, 500, (err as Error).message);
+      }
+      return true;
+    }
+
+    // --- /api/connector/knowledge-graph (live read from ArcadeDB backpack database) ---
+
+    if (url === "/api/connector/knowledge-graph" && method === "GET") {
+      try {
+        // @ts-ignore — backpack-connector is optional
+        const { ArcadeDBClient, ArcadeDBAdapter } = await import("backpack-connector");
+
+        const adapter = new ArcadeDBAdapter(new ArcadeDBClient({
+          url: process.env.ARCADEDB_URL ?? "http://localhost:2480",
+          username: process.env.ARCADEDB_USERNAME ?? "root",
+          password: process.env.ARCADEDB_PASSWORD ?? "arcadedb",
+        }));
+
+        const qp = new URLSearchParams((req.url ?? "").replace(/^[^?]*/, ""));
+        const bpParam = qp.get("backpack");
+        const bpFilter = bpParam && /^[a-zA-Z0-9_-]+$/.test(bpParam) ? bpParam : null;
+        const whereClause = bpFilter
+          ? `n.bk_id IS NOT NULL AND n.bk_backpack = '${bpFilter}'`
+          : "n.bk_id IS NOT NULL";
+
+        const database = "backpack";
+        const nodeRows = await adapter.execute(database, "opencypher",
+          `MATCH (n) WHERE ${whereClause} RETURN n LIMIT 10000`);
+
+        const edgeRows = await adapter.execute(database, "opencypher",
+          `MATCH (a)-[r]->(b)
+           WHERE r.bk_id IS NOT NULL AND a.bk_id IS NOT NULL AND b.bk_id IS NOT NULL
+           RETURN r.bk_id AS bk_id, r.bk_type AS bk_type,
+                  r.bk_created_at AS bk_created_at,
+                  a.bk_id AS sourceId, b.bk_id AS targetId`);
+
+        const nodes: { id: string; type: string; properties: Record<string, unknown>; createdAt: string; updatedAt: string }[] = [];
+        for (const row of nodeRows) {
+          const n = ((row as Record<string, unknown>).n ?? row) as Record<string, unknown>;
+          const bkId = String(n.bk_id ?? "");
+          if (!bkId) continue;
+          const type = String(n.bk_type ?? n["@type"] ?? "Unknown");
+          const createdAt = String(n.bk_created_at ?? new Date().toISOString());
+          // User-defined properties first — label extraction takes first string value
+          const properties: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(n)) {
+            if (k.startsWith("@") || k.startsWith("_") || k.startsWith("bk_")) continue;
+            if (v !== null && v !== undefined) properties[k] = v;
+          }
+          if (n.bk_graph) properties.bk_graph = n.bk_graph;
+          nodes.push({ id: bkId, type, properties, createdAt, updatedAt: createdAt });
+        }
+
+        const nodeIds = new Set(nodes.map(n => n.id));
+        const edges: { id: string; type: string; sourceId: string; targetId: string; properties: Record<string, unknown>; createdAt: string; updatedAt: string }[] = [];
+        for (const row of edgeRows) {
+          const r = row as Record<string, unknown>;
+          const bkId = String(r.bk_id ?? "");
+          const sourceId = String(r.sourceId ?? "");
+          const targetId = String(r.targetId ?? "");
+          if (!bkId || !nodeIds.has(sourceId) || !nodeIds.has(targetId)) continue;
+          edges.push({
+            id: bkId,
+            type: String(r.bk_type ?? "RELATED_TO"),
+            sourceId, targetId,
+            properties: {},
+            createdAt: String(r.bk_created_at ?? new Date().toISOString()),
+            updatedAt: String(r.bk_created_at ?? new Date().toISOString()),
+          });
+        }
+
+        const graphCount = new Set(nodes.map(n => n.properties.bk_graph).filter(Boolean)).size;
+        sendJson(res, 200, {
+          metadata: {
+            name: "Knowledge Graph",
+            description: `Live view from ArcadeDB — ${nodes.length} nodes from ${graphCount} graphs`,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+          nodes,
+          edges,
+        });
+      } catch (err) {
+        sendErr(res, 503, `ArcadeDB not available: ${(err as Error).message}`);
+      }
+      return true;
+    }
+
+    if (url === "/api/connector/knowledge-graph/status" && method === "GET") {
+      try {
+        // @ts-ignore
+        const { ArcadeDBClient } = await import("backpack-connector");
+        const client = new ArcadeDBClient({
+          url: process.env.ARCADEDB_URL ?? "http://localhost:2480",
+          username: process.env.ARCADEDB_USERNAME ?? "root",
+          password: process.env.ARCADEDB_PASSWORD ?? "arcadedb",
+        });
+        const exists = await client.databaseExists("backpack");
+        if (!exists) { sendJson(res, 200, { available: false, nodeCount: 0, graphCount: 0, backpacks: [] }); return true; }
+
+        // @ts-ignore
+        const { ArcadeDBAdapter } = await import("backpack-connector");
+        const adapter = new ArcadeDBAdapter(client);
+        const rows = await adapter.execute("backpack", "opencypher",
+          "MATCH (n) WHERE n.bk_id IS NOT NULL WITH n.bk_backpack AS bp, n.bk_graph AS g, count(n) AS c RETURN bp, g, c");
+
+        // Aggregate by backpack
+        const bpMap = new Map<string, { nodeCount: number; graphs: Set<string> }>();
+        const graphSet = new Set<string>();
+        let totalNodes = 0;
+        for (const row of rows) {
+          const r = row as Record<string, unknown>;
+          const bp = String(r.bp ?? "unknown");
+          const g = String(r.g ?? "");
+          const c = Number(r.c ?? 0);
+          if (!bpMap.has(bp)) bpMap.set(bp, { nodeCount: 0, graphs: new Set() });
+          const entry = bpMap.get(bp)!;
+          entry.nodeCount += c;
+          if (g) entry.graphs.add(g);
+          totalNodes += c;
+          if (g) graphSet.add(g);
+        }
+        const backpacks = Array.from(bpMap.entries()).map(([name, d]) => ({
+          name,
+          nodeCount: d.nodeCount,
+          graphCount: d.graphs.size,
+        }));
+        sendJson(res, 200, {
+          available: true,
+          nodeCount: totalNodes,
+          graphCount: graphSet.size,
+          backpacks,
+        });
+      } catch {
+        sendJson(res, 200, { available: false, nodeCount: 0, graphCount: 0, backpacks: [] });
       }
       return true;
     }

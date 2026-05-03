@@ -198,14 +198,14 @@ body {
   color: var(--text-dim);
 }
 
-#ontology-list {
+#graph-list {
   list-style: none;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.ontology-item {
+.graph-item {
   padding: 10px 12px;
   border-radius: 6px;
   cursor: pointer;
@@ -213,22 +213,22 @@ body {
   transition: background 0.15s;
 }
 
-.ontology-item:hover {
+.graph-item:hover {
   background: var(--bg-hover);
 }
 
-.ontology-item.active {
+.graph-item.active {
   background: var(--bg-active);
 }
 
-.ontology-item .name {
+.graph-item .name {
   display: block;
   font-size: 13px;
   font-weight: 500;
   color: var(--text);
 }
 
-.ontology-item .stats {
+.graph-item .stats {
   display: block;
   font-size: 11px;
   color: var(--text-dim);
@@ -251,7 +251,7 @@ body {
   transition: opacity 0.1s;
 }
 
-.ontology-item:hover .sidebar-item-menu-btn {
+.graph-item:hover .sidebar-item-menu-btn {
   opacity: 0.7;
 }
 
@@ -765,7 +765,7 @@ body {
   margin: 0;
 }
 
-.ontology-item-remote .name {
+.graph-item-remote .name {
   display: inline;
 }
 
@@ -4827,3 +4827,104 @@ body {
 
 .sv-unify-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--accent); }
 .sv-unify-btn:disabled { opacity: 0.45; cursor: default; }
+
+/* Knowledge Graph sticky section — appears at top of Graphs pane */
+
+.kg-section {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-surface);
+  padding-bottom: 10px;
+  margin-bottom: 4px;
+}
+
+.kg-entry {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border-radius: 7px;
+  border: 1.5px solid var(--border);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.kg-entry--online {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-surface));
+}
+
+.kg-entry--online:hover {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-surface));
+}
+
+.kg-entry--empty {
+  border-color: var(--border);
+  cursor: default;
+}
+
+.kg-entry--offline {
+  border-color: var(--border);
+  opacity: 0.55;
+  cursor: default;
+}
+
+.kg-icon {
+  font-size: 18px;
+  line-height: 1;
+  color: var(--accent);
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.kg-entry--offline .kg-icon,
+.kg-entry--empty .kg-icon {
+  color: var(--text-dim);
+}
+
+.kg-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.kg-scope-select {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 4px;
+  padding: 2px 4px;
+  cursor: pointer;
+  max-width: 80px;
+  outline: none;
+}
+
+.kg-scope-select:focus {
+  border-color: var(--accent);
+}
+
+.kg-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kg-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kg-entry--online .kg-meta {
+  color: var(--accent);
+}

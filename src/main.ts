@@ -1,11 +1,12 @@
 import type { LearningGraphData, LearningGraphSummary } from "backpack-ontology";
 import {
-  listOntologies, loadOntology, saveOntology, renameOntology,
+  listGraphs, loadGraph, saveGraph, renameGraph,
   listBranches, createBranch, switchBranch, deleteBranch,
   listSnapshots, createSnapshot, rollbackSnapshot,
   listSnippets, saveSnippet, loadSnippet, deleteSnippet,
   listRemotes, loadRemote,
   listKBDocuments, searchKBDocuments, listKBMounts,
+  getKnowledgeGraph,
   type RemoteSummary,
 } from "./api";
 import { initKBPanel } from "./kb-panel";
@@ -22,7 +23,7 @@ import { initToolsPane } from "./tools-pane";
 import { setLayoutParams, getLayoutParams, autoLayoutParams } from "./layout";
 import { initShortcuts } from "./shortcuts";
 import { initEmptyState } from "./empty-state";
-import { showToast } from "./dialog";
+import { showToast, showDangerConfirm } from "./dialog";
 import { createHistory } from "./history";
 import { initMobileFab } from "./mobile-fab";
 import { matchKey, type KeybindingMap } from "./keybindings";
@@ -36,7 +37,7 @@ import type { ViewerHost, ViewerFocusSnapshot } from "./extensions/types";
 import defaultConfig from "./default-config.json";
 import "./style.css";
 
-let activeOntology = "";
+let activeGraph = "";
 let currentData: LearningGraphData | null = null;
 let isCloudActive = false;
 let remoteNames = new Set<string>();
@@ -155,14 +156,14 @@ async function main() {
 
   // --- Save and re-render helper ---
   async function save() {
-    if (!activeOntology || !currentData) return;
+    if (!activeGraph || !currentData) return;
     currentData.metadata.updatedAt = new Date().toISOString();
-    await saveOntology(activeOntology, currentData);
+    await saveGraph(activeGraph, currentData);
     canvas.loadGraph(currentData);
     search.setLearningGraphData(currentData);
     toolsPane.setData(currentData);
     // Refresh sidebar counts
-    const updated = await listOntologies();
+    const updated = await listGraphs();
     sidebar.setSummaries(updated);
     eventBus.emit("graph-changed");
   }
@@ -175,11 +176,11 @@ async function main() {
 
   async function applyState(data: LearningGraphData) {
     currentData = data;
-    await saveOntology(activeOntology, currentData);
+    await saveGraph(activeGraph, currentData);
     canvas.loadGraph(currentData);
     search.setLearningGraphData(currentData);
     toolsPane.setData(currentData);
-    const updated = await listOntologies();
+    const updated = await listGraphs();
     sidebar.setSummaries(updated);
   }
 
@@ -384,9 +385,9 @@ async function main() {
   const eventBus = createEventBus();
 
   function publishBridgeState() {
-    if (!activeOntology) return;
+    if (!activeGraph) return;
     publishViewerState({
-      graph: activeOntology,
+      graph: activeGraph,
       selection: currentSelection,
       focus: canvas?.getFocusInfo() ?? null,
       selectedSignalIds: [],
@@ -415,23 +416,23 @@ async function main() {
     if (nodeIds && nodeIds.length > 0 && currentData) {
       infoPanel.show(nodeIds, currentData);
       if (mobileQuery.matches) toolsPane.collapse();
-      updateUrl(activeOntology, nodeIds);
+      updateUrl(activeGraph, nodeIds);
     } else {
       infoPanel.hide();
-      if (activeOntology) updateUrl(activeOntology);
+      if (activeGraph) updateUrl(activeGraph);
     }
   }, (focus) => {
     if (focus) {
       buildFocusIndicator(focus);
       const topLeft = canvasContainer.querySelector(".canvas-top-left");
       if (topLeft && focusIndicator) topLeft.appendChild(focusIndicator);
-      updateUrl(activeOntology, focus.seedNodeIds);
+      updateUrl(activeGraph, focus.seedNodeIds);
       infoPanel.setFocusDisabled(focus.hops === 0);
       syncWalkTrail();
     } else {
       removeFocusIndicator();
       infoPanel.setFocusDisabled(false);
-      if (activeOntology) updateUrl(activeOntology);
+      if (activeGraph) updateUrl(activeGraph);
       syncWalkTrail();
     }
     publishBridgeState();
@@ -471,24 +472,24 @@ async function main() {
       canvas.enterFocus(trail, 0);
     },
     async onWalkSaveSnippet(label) {
-      if (!activeOntology || !currentData) return;
+      if (!activeGraph || !currentData) return;
       const trail = canvas.getWalkTrail();
       if (trail.length < 2) return;
       const nodeSet = new Set(trail);
       const edgeIds = currentData.edges
         .filter((e) => nodeSet.has(e.sourceId) && nodeSet.has(e.targetId))
         .map((e) => e.id);
-      await saveSnippet(activeOntology, label, trail, edgeIds);
-      await refreshSnippets(activeOntology);
+      await saveSnippet(activeGraph, label, trail, edgeIds);
+      await refreshSnippets(activeGraph);
     },
     async onStarredSaveSnippet(label, nodeIds) {
-      if (!activeOntology || !currentData) return;
+      if (!activeGraph || !currentData) return;
       const nodeSet = new Set(nodeIds);
       const edgeIds = currentData.edges
         .filter((e) => nodeSet.has(e.sourceId) && nodeSet.has(e.targetId))
         .map((e) => e.id);
-      await saveSnippet(activeOntology, label, nodeIds, edgeIds);
-      await refreshSnippets(activeOntology);
+      await saveSnippet(activeGraph, label, nodeIds, edgeIds);
+      await refreshSnippets(activeGraph);
     },
     onFocusChange(seedNodeIds) {
       if (seedNodeIds && seedNodeIds.length > 0) {
@@ -538,23 +539,23 @@ async function main() {
       const dataUrl = canvas.exportImage(format);
       if (!dataUrl) return;
       const link = document.createElement("a");
-      link.download = `${activeOntology || "graph"}.${format}`;
+      link.download = `${activeGraph || "graph"}.${format}`;
       link.href = dataUrl;
       link.click();
     },
     onSnapshot: async (label) => {
-      if (!activeOntology) return;
-      await createSnapshot(activeOntology, label);
-      await refreshSnapshots(activeOntology);
+      if (!activeGraph) return;
+      await createSnapshot(activeGraph, label);
+      await refreshSnapshots(activeGraph);
     },
     onRollback: async (version) => {
-      if (!activeOntology) return;
-      await rollbackSnapshot(activeOntology, version);
-      currentData = await loadOntology(activeOntology);
+      if (!activeGraph) return;
+      await rollbackSnapshot(activeGraph, version);
+      currentData = await loadGraph(activeGraph);
       canvas.loadGraph(currentData);
       search.setLearningGraphData(currentData);
       toolsPane.setData(currentData);
-      await refreshSnapshots(activeOntology);
+      await refreshSnapshots(activeGraph);
     },
     onOpen() {
       if (mobileQuery.matches) infoPanel.hide();
@@ -609,7 +610,7 @@ async function main() {
   // the top-center group so any registered ext-right icons (like
   // chat) appear immediately to its left.
   const copyPromptBtn = initCopyPromptButton(() => ({
-    graphName: activeOntology,
+    graphName: activeGraph,
     data: currentData,
     selection: currentSelection,
     focus: canvas.getFocusInfo(),
@@ -694,10 +695,10 @@ async function main() {
           if (stale()) return;
           sidebar.setSummaries(allGraphs);
         } else {
-          sidebar.setSummaries(await listOntologies());
+          sidebar.setSummaries(await listGraphs());
         }
       } catch {
-        sidebar.setSummaries(await listOntologies());
+        sidebar.setSummaries(await listGraphs());
       }
       if (stale()) return;
       sidebar.setCloudBackpacks(cachedCloudBackpacks, cachedCloudEmail);
@@ -767,39 +768,39 @@ async function main() {
     {
       onSelect: (name) => selectGraph(name),
       onRename: async (oldName, newName) => {
-        await renameOntology(oldName, newName);
-        if (activeOntology === oldName) {
-          activeOntology = newName;
+        await renameGraph(oldName, newName);
+        if (activeGraph === oldName) {
+          activeGraph = newName;
         }
-        const updated = await listOntologies();
+        const updated = await listGraphs();
         sidebar.setSummaries(updated);
-        sidebar.setActive(activeOntology);
-        if (activeOntology === newName) {
-          currentData = await loadOntology(newName);
+        sidebar.setActive(activeGraph);
+        if (activeGraph === newName) {
+          currentData = await loadGraph(newName);
           canvas.loadGraph(currentData);
           search.setLearningGraphData(currentData);
           toolsPane.setData(currentData);
         }
       },
       onEditTags: async (graphName) => {
-        const res = await fetch(`/api/ontologies/${encodeURIComponent(graphName)}/tags`);
+        const res = await fetch(`/api/graphs/${encodeURIComponent(graphName)}/tags`);
         const current: string[] = res.ok ? (await res.json()).tags ?? [] : [];
         const input = prompt("Tags (comma-separated):", current.join(", "));
         if (input === null) return; // cancelled
         const tags = input.split(",").map(t => t.trim()).filter(Boolean);
-        await fetch(`/api/ontologies/${encodeURIComponent(graphName)}/tags`, {
+        await fetch(`/api/graphs/${encodeURIComponent(graphName)}/tags`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ tags }),
         });
-        const updated = await listOntologies();
+        const updated = await listGraphs();
         sidebar.setSummaries(updated);
-        sidebar.setActive(activeOntology);
+        sidebar.setActive(activeGraph);
       },
       onBranchSwitch: async (graphName, branchName) => {
         await switchBranch(graphName, branchName);
         await refreshBranches(graphName);
-        currentData = await loadOntology(graphName);
+        currentData = await loadGraph(graphName);
         canvas.loadGraph(currentData);
         search.setLearningGraphData(currentData);
         toolsPane.setData(currentData);
@@ -837,6 +838,19 @@ async function main() {
       },
       onSignalsTabSelect: async () => {
         await signalsPanel.show();
+      },
+      onKnowledgeGraphSelect: async (scope?: string) => {
+        const data = await getKnowledgeGraph(scope);
+        if (!data) {
+          showToast("Knowledge Graph not available — ensure ArcadeDB is running and graphs are projected", 4000);
+          return;
+        }
+        activeGraph = "__knowledge_graph__";
+        currentData = data as LearningGraphData;
+        canvas.loadGraph(currentData);
+        search.setLearningGraphData(currentData);
+        updateUrl("__knowledge_graph__");
+        eventBus.emit("graph-switched");
       },
       onKBMountAdd: async (name, mountPath, writable) => {
         const res = await fetch("/api/kb/mounts", {
@@ -884,9 +898,9 @@ async function main() {
       },
       onSyncGraph: async (graphName, encrypted = true) => {
         try {
-          const data = graphName === activeOntology && currentData
+          const data = graphName === activeGraph && currentData
             ? currentData
-            : await loadOntology(graphName);
+            : await loadGraph(graphName);
           const res = await fetch(`/api/cloud-sync/${encodeURIComponent(graphName)}?encrypted=${encrypted}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -916,7 +930,7 @@ async function main() {
         const refreshResult = await res.json();
         // If cloud is active, refresh the graph list from cache
         if (isCloudActive) {
-          const summaries = await fetch("/api/ontologies").then(r => r.json());
+          const summaries = await fetch("/api/graphs").then(r => r.json());
           sidebar.setSummaries(summaries);
           refreshKB();
         }
@@ -927,7 +941,7 @@ async function main() {
         const result = await res.json();
         // Refresh sidebar if cloud is active
         if (isCloudActive) {
-          const summaries = await fetch("/api/ontologies").then(r => r.json());
+          const summaries = await fetch("/api/graphs").then(r => r.json());
           sidebar.setSummaries(summaries);
           refreshKB();
         }
@@ -972,6 +986,24 @@ async function main() {
           const { documents } = await kbRes.json();
           sidebar.setKBDocuments(documents);
         }
+      },
+      onDelete: async (graphName: string) => {
+        const ok = await showDangerConfirm("Delete graph", `Delete "${graphName}"? This cannot be undone.`);
+        if (!ok) return;
+        const res = await fetch(`/api/graphs/${encodeURIComponent(graphName)}`, { method: "DELETE" });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({ error: "Delete failed" }));
+          showToast((d as { error?: string }).error ?? "Delete failed");
+          return;
+        }
+        if (activeGraph === graphName) {
+          activeGraph = "";
+          currentData = { metadata: { name: "", description: "", createdAt: "", updatedAt: "" }, nodes: [], edges: [] };
+          canvas.loadGraph(currentData);
+        }
+        const updated = await listGraphs();
+        sidebar.setSummaries(updated);
+        sidebar.setActive(activeGraph);
       },
     }
   );
@@ -1098,7 +1130,7 @@ async function main() {
   // Dashboard: wire focus-nodes events from dashboard bridge to canvas
   window.addEventListener("backpack-signals-focus-nodes", (e) => {
     const { nodeIds, hops } = (e as CustomEvent<{ nodeIds: string[]; hops: number }>).detail;
-    if (nodeIds.length > 0 && activeOntology) {
+    if (nodeIds.length > 0 && activeGraph) {
       canvas.enterFocus(nodeIds, hops ?? 2);
     }
   });
@@ -1116,11 +1148,11 @@ async function main() {
     } catch {}
     // Re-fetch ontology list from the (possibly new) active backpack
     try {
-      const updated = await listOntologies();
+      const updated = await listGraphs();
       sidebar.setSummaries(updated);
       // If the previously-active graph no longer exists, clear it
-      if (activeOntology && !updated.some((g) => g.name === activeOntology)) {
-        activeOntology = "";
+      if (activeGraph && !updated.some((g) => g.name === activeGraph)) {
+        activeGraph = "";
         currentData = null;
         canvas.loadGraph({
           metadata: { name: "", description: "", createdAt: "", updatedAt: "" },
@@ -1207,9 +1239,9 @@ async function main() {
     },
     async onDone(summary) {
       if (summary.error || summary.mutations === 0) return;
-      if (!activeOntology) return;
+      if (!activeGraph) return;
       try {
-        currentData = await loadOntology(activeOntology);
+        currentData = await loadGraph(activeGraph);
         if (currentData) canvas.loadGraph(currentData);
       } catch (err) {
         console.warn("[enrich] reload after done failed:", err);
@@ -1226,7 +1258,7 @@ async function main() {
       if (!node) return;
       const starred = node.properties._starred === true;
       node.properties._starred = !starred;
-      saveOntology(activeOntology, currentData);
+      saveGraph(activeGraph, currentData);
       canvas.loadGraph(currentData);
     },
     onFocusNode(nodeId) {
@@ -1234,10 +1266,10 @@ async function main() {
     },
     onExploreInBranch(nodeId) {
       // Create a branch and enter focus
-      if (activeOntology) {
+      if (activeGraph) {
         const branchName = `explore-${nodeId.slice(0, 8)}`;
-        createBranch(activeOntology, branchName).then(() => {
-          switchBranch(activeOntology, branchName).then(() => {
+        createBranch(activeGraph, branchName).then(() => {
+          switchBranch(activeGraph, branchName).then(() => {
             canvas.enterFocus([nodeId], 1);
           });
         });
@@ -1248,12 +1280,12 @@ async function main() {
     },
     onEnrich: enrichEnabled
       ? (nodeId: string) => {
-          if (!currentData || !activeOntology) return;
+          if (!currentData || !activeGraph) return;
           const node = currentData.nodes.find((n) => n.id === nodeId);
           if (!node) return;
           const label =
             (Object.values(node.properties).find((v) => typeof v === "string") as string) ?? nodeId;
-          enrichPanel.start(activeOntology, nodeId, label);
+          enrichPanel.start(activeGraph, nodeId, label);
         }
       : undefined,
   });
@@ -1323,7 +1355,7 @@ async function main() {
     focusSeedIds?: string[],
     focusHops?: number
   ) {
-    activeOntology = name;
+    activeGraph = name;
     activeIsRemote = remoteNames.has(name) || cloudNames.has(name);
     sidebar.setActive(name);
     infoPanel.hide();
@@ -1335,7 +1367,7 @@ async function main() {
       if (!r.ok) throw new Error(`Failed to load cloud graph: ${name}`);
       currentData = await r.json() as LearningGraphData;
     } else {
-      currentData = activeIsRemote ? await loadRemote(name) : await loadOntology(name);
+      currentData = activeIsRemote ? await loadRemote(name) : await loadGraph(name);
     }
     const autoParams = autoLayoutParams(currentData!.nodes.length);
     setLayoutParams({
@@ -1470,19 +1502,19 @@ async function main() {
       }
 
       // Render in read-only mode
-      activeOntology = meta.backpack_name || "Shared Backpack";
+      activeGraph = meta.backpack_name || "Shared Backpack";
       currentData = graphData;
       canvas.loadGraph(graphData);
       search.setLearningGraphData(graphData);
       sidebar.setSummaries([{
-        name: activeOntology,
+        name: activeGraph,
         description: "",
         nodeCount: graphData.nodes?.length ?? 0,
         edgeCount: graphData.edges?.length ?? 0,
         nodeTypes: [],
       }]);
-      sidebar.setActive(activeOntology);
-      document.title = `${activeOntology} — Backpack`;
+      sidebar.setActive(activeGraph);
+      document.title = `${activeGraph} — Backpack`;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load shared backpack";
       showToast(msg, 5000);
@@ -1510,7 +1542,7 @@ async function main() {
       } catch { /* if init switch fails, the existing flow still works for local-only users */ }
     }
     const [summaries, remotes, kbResult, kbMounts] = await Promise.all([
-      listOntologies(),
+      listGraphs(),
       listRemotes().catch(() => [] as RemoteSummary[]),
       listKBDocuments({ limit: 50 }).catch(() => ({ documents: [], total: 0, hasMore: false })),
       listKBMounts().catch(() => []),
@@ -1629,7 +1661,7 @@ async function main() {
   // populated graph (not a startup race).
   const host: ViewerHost = {
     getGraph: () => currentData,
-    getGraphName: () => activeOntology,
+    getGraphName: () => activeGraph,
     getSelection: () => [...currentSelection],
     getFocus: (): ViewerFocusSnapshot | null => canvas.getFocusInfo(),
     saveCurrentGraph: async () => {
@@ -1751,7 +1783,7 @@ async function main() {
   // Handle browser back/forward
   window.addEventListener("hashchange", () => {
     const url = parseUrl();
-    if (url.graph && url.graph !== activeOntology) {
+    if (url.graph && url.graph !== activeGraph) {
       selectGraph(
         url.graph,
         url.nodes.length ? url.nodes : undefined,
@@ -1791,7 +1823,7 @@ async function main() {
       const hadPins = canvas.hasPinnedNodes();
 
       const [updated, updatedRemotes, updatedKB] = await Promise.all([
-        listOntologies(),
+        listGraphs(),
         listRemotes().catch(() => [] as RemoteSummary[]),
         listKBDocuments({ limit: 50 }).catch(() => ({ documents: [], total: 0, hasMore: false })),
       ]);
@@ -1802,11 +1834,11 @@ async function main() {
 
       if (updated.length > 0 || updatedRemotes.length > 0) emptyState.hide();
 
-      if (activeOntology) {
+      if (activeGraph) {
         try {
           currentData = activeIsRemote
-            ? await loadRemote(activeOntology)
-            : await loadOntology(activeOntology);
+            ? await loadRemote(activeGraph)
+            : await loadGraph(activeGraph);
           canvas.loadGraph(currentData);
           search.setLearningGraphData(currentData);
           toolsPane.setData(currentData);
@@ -1814,10 +1846,10 @@ async function main() {
           // Ontology may have been deleted
         }
       } else if (updated.length > 0) {
-        activeOntology = updated[0].name;
+        activeGraph = updated[0].name;
         activeIsRemote = false;
-        sidebar.setActive(activeOntology);
-        currentData = await loadOntology(activeOntology);
+        sidebar.setActive(activeGraph);
+        currentData = await loadGraph(activeGraph);
         canvas.loadGraph(currentData);
         search.setLearningGraphData(currentData);
         toolsPane.setData(currentData);
@@ -1829,7 +1861,7 @@ async function main() {
     });
   }
 
-  initMobileFab({ getActiveBackpackName: () => activeOntology || null });
+  initMobileFab({ getActiveBackpackName: () => activeGraph || null });
 }
 
 main();

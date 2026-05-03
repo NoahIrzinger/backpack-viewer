@@ -1,14 +1,14 @@
 import type { LearningGraphData, LearningGraphSummary, KBDocumentSummary, KBListResult, KBMountInfo, KBDocument, SignalResult } from "backpack-ontology";
 
-export async function listOntologies(): Promise<LearningGraphSummary[]> {
-  const res = await fetch("/api/ontologies");
+export async function listGraphs(): Promise<LearningGraphSummary[]> {
+  const res = await fetch("/api/graphs");
   if (!res.ok) return [];
   return res.json();
 }
 
-export async function loadOntology(name: string): Promise<LearningGraphData> {
-  const res = await fetch(`/api/ontologies/${encodeURIComponent(name)}`);
-  if (!res.ok) throw new Error(`Failed to load ontology: ${name}`);
+export async function loadGraph(name: string): Promise<LearningGraphData> {
+  const res = await fetch(`/api/graphs/${encodeURIComponent(name)}`);
+  if (!res.ok) throw new Error(`Failed to load graph: ${name}`);
   return res.json();
 }
 
@@ -38,31 +38,31 @@ export async function loadRemote(name: string): Promise<LearningGraphData> {
   return res.json();
 }
 
-export async function saveOntology(
+export async function saveGraph(
   name: string,
   data: LearningGraphData
 ): Promise<void> {
-  const res = await fetch(`/api/ontologies/${encodeURIComponent(name)}`, {
+  const res = await fetch(`/api/graphs/${encodeURIComponent(name)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error(`Failed to save ontology: ${name}`);
+  if (!res.ok) throw new Error(`Failed to save graph: ${name}`);
 }
 
-export async function renameOntology(
+export async function renameGraph(
   oldName: string,
   newName: string
 ): Promise<void> {
   const res = await fetch(
-    `/api/ontologies/${encodeURIComponent(oldName)}/rename`,
+    `/api/graphs/${encodeURIComponent(oldName)}/rename`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: newName }),
     }
   );
-  if (!res.ok) throw new Error(`Failed to rename ontology: ${oldName}`);
+  if (!res.ok) throw new Error(`Failed to rename graph: ${oldName}`);
 }
 
 // --- Branch API ---
@@ -303,6 +303,42 @@ export async function dismissSignal(signalId: string): Promise<void> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ signalId }),
   });
+}
+
+export interface KGBackpackSummary {
+  name: string;
+  nodeCount: number;
+  graphCount: number;
+}
+
+export interface KGStatus {
+  available: boolean;
+  nodeCount: number;
+  graphCount: number;
+  backpacks?: KGBackpackSummary[];
+}
+
+export async function getKnowledgeGraph(backpack?: string): Promise<import("backpack-ontology").LearningGraphData | null> {
+  try {
+    const url = backpack
+      ? `/api/connector/knowledge-graph?backpack=${encodeURIComponent(backpack)}`
+      : "/api/connector/knowledge-graph";
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function getKnowledgeGraphStatus(): Promise<KGStatus> {
+  try {
+    const res = await fetch("/api/connector/knowledge-graph/status");
+    if (!res.ok) return { available: false, nodeCount: 0, graphCount: 0 };
+    return res.json();
+  } catch {
+    return { available: false, nodeCount: 0, graphCount: 0 };
+  }
 }
 
 export async function getSignalsView(): Promise<{ spec: import("./signals-spec.js").SignalsViewSpec | null; version: string } | null> {
