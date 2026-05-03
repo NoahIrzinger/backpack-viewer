@@ -6,7 +6,7 @@ import {
   listSnippets, saveSnippet, loadSnippet, deleteSnippet,
   listRemotes, loadRemote,
   listKBDocuments, searchKBDocuments, listKBMounts,
-  getKnowledgeGraph,
+  getKnowledgeGraph, projectAllGraphs, projectBackpackGraphs,
   type RemoteSummary,
 } from "./api";
 import { initKBPanel } from "./kb-panel";
@@ -40,6 +40,7 @@ import "./style.css";
 let activeGraph = "";
 let currentData: LearningGraphData | null = null;
 let isCloudActive = false;
+let pickerAllMode = false;
 let remoteNames = new Set<string>();
 let cloudNames = new Set<string>();
 type CloudGraphSummary = { name: string; description?: string; encrypted: boolean; nodeCount?: number; edgeCount?: number; sourceBackpack?: string; source?: string };
@@ -685,6 +686,7 @@ async function main() {
     const mySeq = ++backpackSwitchSeq;
     const stale = () => mySeq !== backpackSwitchSeq;
     if (name === "__all__") {
+      pickerAllMode = true;
       activeCloudContainer = null;
       localStorage.removeItem("backpack-viewer-cloud-container");
       try {
@@ -706,6 +708,7 @@ async function main() {
       return;
     }
     if (name === "__cloud__" || name.startsWith("__cloud__:")) {
+      pickerAllMode = false;
       const container = name.startsWith("__cloud__:") ? name.slice("__cloud__:".length) : null;
       activeCloudContainer = container;
       if (container) localStorage.setItem("backpack-viewer-cloud-container", container);
@@ -748,6 +751,7 @@ async function main() {
       refreshKB();
       return;
     }
+    pickerAllMode = false;
     activeCloudContainer = null;
     localStorage.removeItem("backpack-viewer-cloud-container");
     sidebar.setCloudBackpacks([]);
@@ -839,8 +843,22 @@ async function main() {
       onSignalsTabSelect: async () => {
         await signalsPanel.show();
       },
-      onKnowledgeGraphSelect: async (scope?: string) => {
-        const data = await getKnowledgeGraph(scope);
+      onKgSyncAll: async () => {
+        const result = await projectAllGraphs();
+        if (result.errorCount > 0) {
+          showToast(`Synced ${result.graphCount} graphs, ${result.errorCount} errors — check console`, 5000);
+        }
+        return result;
+      },
+      onKgSyncBackpack: async (backpackName: string) => {
+        const result = await projectBackpackGraphs(backpackName);
+        if (result.errorCount > 0) {
+          showToast(`Synced ${result.graphCount} graphs, ${result.errorCount} errors`, 5000);
+        }
+        return result;
+      },
+      onKnowledgeGraphSelect: async (backpack?: string, graph?: string) => {
+        const data = await getKnowledgeGraph(backpack, graph);
         if (!data) {
           showToast("Knowledge Graph not available — ensure ArcadeDB is running and graphs are projected", 4000);
           return;
@@ -1139,6 +1157,22 @@ async function main() {
     canvas.panToNode(nodeId);
   });
 
+  async function refreshGraphList() {
+    if (pickerAllMode) {
+      try {
+        const allRes = await fetch("/api/backpacks/all-graphs");
+        if (allRes.ok) { sidebar.setSummaries(await allRes.json()); return; }
+      } catch {}
+    }
+    const updated = await listGraphs();
+    sidebar.setSummaries(updated);
+    if (activeGraph && !updated.some((g) => g.name === activeGraph)) {
+      activeGraph = "";
+      currentData = null;
+      canvas.loadGraph({ metadata: { name: "", description: "", createdAt: "", updatedAt: "" }, nodes: [], edges: [] });
+    }
+  }
+
   async function refreshBackpacksAndGraphs() {
     if (isCloudActive) return; // Cloud mode manages its own state
     try {
@@ -1147,20 +1181,7 @@ async function main() {
       sidebar.setBackpacks(list);
     } catch {}
     // Re-fetch ontology list from the (possibly new) active backpack
-    try {
-      const updated = await listGraphs();
-      sidebar.setSummaries(updated);
-      // If the previously-active graph no longer exists, clear it
-      if (activeGraph && !updated.some((g) => g.name === activeGraph)) {
-        activeGraph = "";
-        currentData = null;
-        canvas.loadGraph({
-          metadata: { name: "", description: "", createdAt: "", updatedAt: "" },
-          nodes: [],
-          edges: [],
-        });
-      }
-    } catch {}
+    try { await refreshGraphList(); } catch {}
   }
 
   function syncWalkTrail() {

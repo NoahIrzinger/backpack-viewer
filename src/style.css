@@ -4812,21 +4812,6 @@ body {
 
 .sv-table tr:hover td { background: var(--bg-hover); }
 
-.sv-unify-btn {
-  background: var(--bg-inset);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-size: 11px;
-  padding: 7px 10px;
-  width: 100%;
-  text-align: left;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-}
-
-.sv-unify-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--accent); }
-.sv-unify-btn:disabled { opacity: 0.45; cursor: default; }
 
 /* Knowledge Graph sticky section — appears at top of Graphs pane */
 
@@ -4889,6 +4874,41 @@ body {
   gap: 2px;
   min-width: 0;
   flex: 1;
+}
+
+.kg-icon-btn {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 3px 4px;
+  border-radius: 4px;
+  line-height: 0;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.kg-icon-btn:hover:not(:disabled) {
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.kg-icon-btn:disabled {
+  cursor: default;
+  opacity: 0.3;
+}
+
+.kg-icon-btn--spinning svg {
+  animation: kg-spin 1s linear infinite;
+}
+
+@keyframes kg-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .kg-scope-select {

@@ -1634,10 +1634,13 @@ export async function handleApiRequest(
 
         const qp = new URLSearchParams((req.url ?? "").replace(/^[^?]*/, ""));
         const bpParam = qp.get("backpack");
+        const graphParam = qp.get("graph");
         const bpFilter = bpParam && /^[a-zA-Z0-9_-]+$/.test(bpParam) ? bpParam : null;
-        const whereClause = bpFilter
-          ? `n.bk_id IS NOT NULL AND n.bk_backpack = '${bpFilter}'`
-          : "n.bk_id IS NOT NULL";
+        const graphFilter = graphParam && /^[a-zA-Z0-9_\- ]+$/.test(graphParam) ? graphParam : null;
+        const esc = (s: string) => s.replace(/'/g, "\\'");
+        let whereClause = "n.bk_id IS NOT NULL";
+        if (bpFilter) whereClause += ` AND n.bk_backpack = '${esc(bpFilter)}'`;
+        if (graphFilter) whereClause += ` AND n.bk_graph = '${esc(graphFilter)}'`;
 
         const database = "backpack";
         const nodeRows = await adapter.execute(database, "opencypher",
@@ -1720,8 +1723,8 @@ export async function handleApiRequest(
         const rows = await adapter.execute("backpack", "opencypher",
           "MATCH (n) WHERE n.bk_id IS NOT NULL WITH n.bk_backpack AS bp, n.bk_graph AS g, count(n) AS c RETURN bp, g, c");
 
-        // Aggregate by backpack
-        const bpMap = new Map<string, { nodeCount: number; graphs: Set<string> }>();
+        // Aggregate by backpack, preserving per-graph detail
+        const bpMap = new Map<string, { nodeCount: number; graphs: Map<string, number> }>();
         const graphSet = new Set<string>();
         let totalNodes = 0;
         for (const row of rows) {
@@ -1729,10 +1732,10 @@ export async function handleApiRequest(
           const bp = String(r.bp ?? "unknown");
           const g = String(r.g ?? "");
           const c = Number(r.c ?? 0);
-          if (!bpMap.has(bp)) bpMap.set(bp, { nodeCount: 0, graphs: new Set() });
+          if (!bpMap.has(bp)) bpMap.set(bp, { nodeCount: 0, graphs: new Map() });
           const entry = bpMap.get(bp)!;
           entry.nodeCount += c;
-          if (g) entry.graphs.add(g);
+          if (g) entry.graphs.set(g, c);
           totalNodes += c;
           if (g) graphSet.add(g);
         }
@@ -1740,6 +1743,7 @@ export async function handleApiRequest(
           name,
           nodeCount: d.nodeCount,
           graphCount: d.graphs.size,
+          graphs: Array.from(d.graphs.entries()).map(([graphName, nodeCount]) => ({ name: graphName, nodeCount })),
         }));
         sendJson(res, 200, {
           available: true,
@@ -1749,6 +1753,109 @@ export async function handleApiRequest(
         });
       } catch {
         sendJson(res, 200, { available: false, nodeCount: 0, graphCount: 0, backpacks: [] });
+      }
+      return true;
+    }
+
+    // --- /api/connector/project-all ---
+    // Projects every graph in every registered local backpack into the shared ArcadeDB "backpack" database.
+    // Sequential to avoid ArcadeDB MVCC conflicts. Skips cloud and temp paths.
+
+    if (url === "/api/connector/project-all" && method === "POST") {
+      try {
+        // @ts-ignore — optional peer
+        const { ArcadeDBAdapter, ArcadeDBClient, project: connProject } = await import("backpack-connector")
+          .catch(() => { throw new Error("backpack-connector is not installed. Run: npm install -g backpack-connector"); });
+
+        const adapter = new ArcadeDBAdapter(new ArcadeDBClient({
+          url: process.env.ARCADEDB_URL ?? "http://localhost:2480",
+          username: process.env.ARCADEDB_USERNAME ?? "root",
+          password: process.env.ARCADEDB_PASSWORD ?? "arcadedb",
+        }));
+
+        const allBackpacks = await listBackpacks();
+        type ProjectRecord = { backpack: string; graph: string; nodeCount: number; status: "ok" | "error"; error?: string };
+        const results: ProjectRecord[] = [];
+
+        for (const bp of allBackpacks) {
+          // Skip cloud, temp, and unreachable paths
+          if (!bp.path || bp.path.startsWith("cloud://") || bp.path.startsWith("/private/tmp")) continue;
+          if (!bp.path.startsWith("/") && !bp.path.startsWith("~")) continue;
+
+          let graphs: { name: string }[] = [];
+          try {
+            const backend = new JsonFileBackend(bp.path);
+            await backend.initialize();
+            graphs = await backend.listOntologies();
+          } catch { continue; }
+
+          for (const g of graphs) {
+            try {
+              const result = await connProject(adapter, { backpackPath: bp.path, graph: g.name, branch: "main" });
+              results.push({ backpack: bp.name, graph: g.name, nodeCount: result.nodeOps, status: "ok" });
+            } catch (err) {
+              results.push({ backpack: bp.name, graph: g.name, nodeCount: 0, status: "error", error: (err as Error).message });
+            }
+          }
+        }
+
+        const okCount = results.filter((r) => r.status === "ok").length;
+        const errorCount = results.filter((r) => r.status === "error").length;
+        const totalNodes = results.filter((r) => r.status === "ok").reduce((s, r) => s + r.nodeCount, 0);
+        sendJson(res, 200, { results, graphCount: okCount, errorCount, totalNodes });
+      } catch (err) {
+        sendErr(res, 503, (err as Error).message);
+      }
+      return true;
+    }
+
+    // --- /api/connector/project-backpack ---
+    // Projects all graphs in one specific registered backpack into ArcadeDB.
+
+    if (url === "/api/connector/project-backpack" && method === "POST") {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const targetName: string = body.backpackName ?? "";
+        if (!targetName) { sendErr(res, 400, "backpackName required"); return true; }
+
+        // @ts-ignore — optional peer
+        const { ArcadeDBAdapter, ArcadeDBClient, project: connProject } = await import("backpack-connector")
+          .catch(() => { throw new Error("backpack-connector is not installed"); });
+
+        const adapter = new ArcadeDBAdapter(new ArcadeDBClient({
+          url: process.env.ARCADEDB_URL ?? "http://localhost:2480",
+          username: process.env.ARCADEDB_USERNAME ?? "root",
+          password: process.env.ARCADEDB_PASSWORD ?? "arcadedb",
+        }));
+
+        const allBackpacks = await listBackpacks();
+        const bp = allBackpacks.find((b) => b.name === targetName);
+        if (!bp) { sendErr(res, 404, `Backpack "${targetName}" not found`); return true; }
+        if (!bp.path || bp.path.startsWith("cloud://") || bp.path.startsWith("/private/tmp")) {
+          sendErr(res, 400, "Cannot project cloud or temp backpacks"); return true;
+        }
+
+        const backend = new JsonFileBackend(bp.path);
+        await backend.initialize();
+        const graphs = await backend.listOntologies();
+
+        type ProjectRecord = { backpack: string; graph: string; nodeCount: number; status: "ok" | "error"; error?: string };
+        const results: ProjectRecord[] = [];
+        for (const g of graphs) {
+          try {
+            const result = await connProject(adapter, { backpackPath: bp.path, graph: g.name, branch: "main" });
+            results.push({ backpack: bp.name, graph: g.name, nodeCount: result.nodeOps, status: "ok" });
+          } catch (err) {
+            results.push({ backpack: bp.name, graph: g.name, nodeCount: 0, status: "error", error: (err as Error).message });
+          }
+        }
+
+        const okCount = results.filter((r) => r.status === "ok").length;
+        const errorCount = results.filter((r) => r.status === "error").length;
+        const totalNodes = results.filter((r) => r.status === "ok").reduce((s, r) => s + r.nodeCount, 0);
+        sendJson(res, 200, { results, graphCount: okCount, errorCount, totalNodes });
+      } catch (err) {
+        sendErr(res, 503, (err as Error).message);
       }
       return true;
     }

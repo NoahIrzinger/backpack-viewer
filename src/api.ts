@@ -305,10 +305,16 @@ export async function dismissSignal(signalId: string): Promise<void> {
   });
 }
 
+export interface KGGraphSummary {
+  name: string;
+  nodeCount: number;
+}
+
 export interface KGBackpackSummary {
   name: string;
   nodeCount: number;
   graphCount: number;
+  graphs?: KGGraphSummary[];
 }
 
 export interface KGStatus {
@@ -318,12 +324,42 @@ export interface KGStatus {
   backpacks?: KGBackpackSummary[];
 }
 
-export async function getKnowledgeGraph(backpack?: string): Promise<import("backpack-ontology").LearningGraphData | null> {
+export interface ProjectAllResult {
+  results: Array<{ backpack: string; graph: string; nodeCount: number; status: "ok" | "error"; error?: string }>;
+  graphCount: number;
+  errorCount: number;
+  totalNodes: number;
+}
+
+export async function projectAllGraphs(): Promise<ProjectAllResult> {
+  const res = await fetch("/api/connector/project-all", { method: "POST" });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({ error: "Sync failed" }));
+    throw new Error((d as { error?: string }).error ?? `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function projectBackpackGraphs(backpackName: string): Promise<ProjectAllResult> {
+  const res = await fetch("/api/connector/project-backpack", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ backpackName }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({ error: "Sync failed" }));
+    throw new Error((d as { error?: string }).error ?? `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function getKnowledgeGraph(backpack?: string, graph?: string): Promise<import("backpack-ontology").LearningGraphData | null> {
   try {
-    const url = backpack
-      ? `/api/connector/knowledge-graph?backpack=${encodeURIComponent(backpack)}`
-      : "/api/connector/knowledge-graph";
-    const res = await fetch(url);
+    const params = new URLSearchParams();
+    if (backpack) params.set("backpack", backpack);
+    if (graph) params.set("graph", graph);
+    const qs = params.toString();
+    const res = await fetch(`/api/connector/knowledge-graph${qs ? `?${qs}` : ""}`);
     if (!res.ok) return null;
     return res.json();
   } catch {

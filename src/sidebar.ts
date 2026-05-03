@@ -48,7 +48,9 @@ export interface SidebarCallbacks {
   onAddBackpackClick?: () => void;
   onKBDocSelect?: (docId: string) => void;
   onSignalsTabSelect?: () => void;
-  onKnowledgeGraphSelect?: (scope?: string) => void;
+  onKnowledgeGraphSelect?: (backpack?: string, graph?: string) => void;
+  onKgSyncAll?: () => Promise<{ graphCount: number; errorCount: number; totalNodes: number }>;
+  onKgSyncBackpack?: (backpackName: string) => Promise<{ graphCount: number; errorCount: number; totalNodes: number }>;
   onKBMountAdd?: (name: string, path: string, writable: boolean) => void;
   onKBMountRemove?: (name: string) => void;
   onKBMountEdit?: (name: string, newPath: string) => void;
@@ -1187,7 +1189,7 @@ export function initSidebar(
 
   const kgEntry = document.createElement("div");
   kgEntry.className = "kg-entry kg-entry--offline";
-  kgEntry.title = "View all projected graphs as one knowledge graph";
+  kgEntry.title = "View knowledge graph";
 
   const kgIcon = document.createElement("span");
   kgIcon.className = "kg-icon";
@@ -1204,19 +1206,51 @@ export function initSidebar(
   kgMeta.className = "kg-meta";
   kgMeta.textContent = "Connect ArcadeDB to enable";
 
-  // Scope selector — only visible when 2+ backpacks are projected in ArcadeDB
+  // Scope selector — three levels: All / per-backpack / per-graph
   const kgScopeSelect = document.createElement("select");
   kgScopeSelect.className = "kg-scope-select";
   kgScopeSelect.hidden = true;
-  kgScopeSelect.title = "Filter knowledge graph to a specific backpack";
+  kgScopeSelect.title = "Filter knowledge graph scope";
   kgScopeSelect.addEventListener("click", (e) => e.stopPropagation());
   kgScopeSelect.addEventListener("change", () => { renderKgMeta(); });
+
+  // Sync button (↻ SVG)
+  const kgSyncBtn = document.createElement("button");
+  kgSyncBtn.className = "kg-icon-btn";
+  kgSyncBtn.type = "button";
+  kgSyncBtn.hidden = true;
+  kgSyncBtn.appendChild(makeSvgIcon(
+    { size: 13, strokeLinecap: "round", strokeLinejoin: "round" },
+    [
+      { tag: "polyline", attrs: { points: "1 4 1 10 7 10" } },
+      { tag: "polyline", attrs: { points: "23 20 23 14 17 14" } },
+      { tag: "path", attrs: { d: "M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" } },
+    ],
+  ));
+
+  // Query button (</> SVG)
+  const kgQueryBtn = document.createElement("button");
+  kgQueryBtn.className = "kg-icon-btn";
+  kgQueryBtn.type = "button";
+  kgQueryBtn.hidden = true;
+  kgQueryBtn.title = "Open Graph Query panel";
+  kgQueryBtn.appendChild(makeSvgIcon(
+    { size: 13, strokeLinecap: "round", strokeLinejoin: "round" },
+    [
+      { tag: "polyline", attrs: { points: "16 18 22 12 16 6" } },
+      { tag: "polyline", attrs: { points: "8 6 2 12 8 18" } },
+    ],
+  ));
+  kgQueryBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    window.dispatchEvent(new CustomEvent("backpack-kg-open", { detail: { openSettings: false } }));
+  });
 
   const kgDotTarget = document.createElement("span");
   kgDotTarget.className = "kg-conn-dot-target";
 
   kgInfo.append(kgName, kgMeta);
-  kgEntry.append(kgIcon, kgInfo, kgScopeSelect, kgDotTarget);
+  kgEntry.append(kgIcon, kgInfo, kgScopeSelect, kgSyncBtn, kgQueryBtn, kgDotTarget);
   kgSection.appendChild(kgEntry);
 
   let kgOnline = false;
@@ -1224,9 +1258,48 @@ export function initSidebar(
     available: boolean;
     nodeCount: number;
     graphCount: number;
-    backpacks: Array<{ name: string; nodeCount: number; graphCount: number }>;
+    backpacks: Array<{ name: string; nodeCount: number; graphCount: number; graphs?: Array<{ name: string; nodeCount: number }> }>;
   };
   let kgStatusCache: KGStatusCache | null = null;
+
+  function parseKgScope(val: string): { backpack?: string; graph?: string } {
+    if (!val || val === "all") return {};
+    const bpMatch = val.match(/^bp:([^/]+)/);
+    const gMatch = val.match(/\/g:(.+)$/);
+    return { backpack: bpMatch?.[1] ?? undefined, graph: gMatch?.[1] ?? undefined };
+  }
+
+  function rebuildScopeOptions() {
+    const backpacks = kgStatusCache?.backpacks ?? [];
+    const current = kgScopeSelect.value;
+    kgScopeSelect.replaceChildren();
+
+    const allOpt = document.createElement("option");
+    allOpt.value = "all";
+    allOpt.textContent = "All backpacks";
+    kgScopeSelect.appendChild(allOpt);
+
+    for (const bp of backpacks) {
+      const group = document.createElement("optgroup");
+      group.label = bp.name;
+
+      const bpAllOpt = document.createElement("option");
+      bpAllOpt.value = `bp:${bp.name}`;
+      bpAllOpt.textContent = "All graphs";
+      group.appendChild(bpAllOpt);
+
+      for (const g of bp.graphs ?? []) {
+        const gOpt = document.createElement("option");
+        gOpt.value = `bp:${bp.name}/g:${g.name}`;
+        gOpt.textContent = g.name;
+        group.appendChild(gOpt);
+      }
+      kgScopeSelect.appendChild(group);
+    }
+
+    const stillValid = [...kgScopeSelect.options].some((o) => o.value === current);
+    kgScopeSelect.value = stillValid ? current : "all";
+  }
 
   function renderKgMeta() {
     if (!kgStatusCache || !kgStatusCache.available) {
@@ -1234,66 +1307,97 @@ export function initSidebar(
       kgEntry.className = "kg-entry kg-entry--offline";
       kgMeta.textContent = "Connect ArcadeDB to enable";
       kgScopeSelect.hidden = true;
+      kgSyncBtn.hidden = true;
+      kgQueryBtn.hidden = true;
       return;
     }
 
+    kgSyncBtn.hidden = !(cbs.onKgSyncAll || cbs.onKgSyncBackpack);
+    kgQueryBtn.hidden = false;
+
     const scope = kgScopeSelect.value || "all";
+    const { backpack, graph } = parseKgScope(scope);
+
     let nodeCount: number;
     let graphCount: number;
+    let scopeLabel: string;
 
-    if (scope === "all") {
+    if (!backpack) {
       nodeCount = kgStatusCache.nodeCount;
       graphCount = kgStatusCache.graphCount;
-    } else {
-      const bp = (kgStatusCache.backpacks ?? []).find((b) => b.name === scope);
+      scopeLabel = "live";
+      kgSyncBtn.title = "Sync all backpacks to ArcadeDB";
+    } else if (!graph) {
+      const bp = (kgStatusCache.backpacks ?? []).find((b) => b.name === backpack);
       nodeCount = bp?.nodeCount ?? 0;
       graphCount = bp?.graphCount ?? 0;
+      scopeLabel = backpack;
+      kgSyncBtn.title = `Sync ${backpack} to ArcadeDB`;
+    } else {
+      const bp = (kgStatusCache.backpacks ?? []).find((b) => b.name === backpack);
+      const g = (bp?.graphs ?? []).find((gg) => gg.name === graph);
+      nodeCount = g?.nodeCount ?? 0;
+      graphCount = nodeCount > 0 ? 1 : 0;
+      scopeLabel = graph;
+      kgSyncBtn.title = `Sync ${backpack} to ArcadeDB`;
     }
 
     if (nodeCount > 0) {
       kgOnline = true;
       kgEntry.className = "kg-entry kg-entry--online";
-      const scopeLabel = scope === "all" ? "live" : scope;
       kgMeta.textContent = `${nodeCount} nodes · ${graphCount} graph${graphCount !== 1 ? "s" : ""} · ${scopeLabel}`;
     } else {
       kgOnline = kgStatusCache.available;
       kgEntry.className = "kg-entry kg-entry--empty";
       kgMeta.textContent = scope === "all"
-        ? "No graphs projected yet — run connector project"
-        : `Nothing projected from "${scope}" yet`;
+        ? "No graphs projected yet — click ↻ to sync"
+        : `Nothing projected${backpack ? ` from "${backpack}"` : ""} yet`;
     }
 
-    // Show scope selector only when multiple backpacks are projected
-    const backpacks = kgStatusCache.backpacks ?? [];
-    if (backpacks.length >= 2) {
-      // Rebuild options, preserving current selection
-      const current = kgScopeSelect.value;
-      kgScopeSelect.replaceChildren();
-      const allOpt = document.createElement("option");
-      allOpt.value = "all";
-      allOpt.textContent = "All";
-      kgScopeSelect.appendChild(allOpt);
-      for (const bp of backpacks) {
-        const opt = document.createElement("option");
-        opt.value = bp.name;
-        opt.textContent = bp.name;
-        kgScopeSelect.appendChild(opt);
+    const hasData = kgStatusCache.backpacks.length > 0;
+    kgScopeSelect.hidden = !hasData;
+    if (hasData) rebuildScopeOptions();
+  }
+
+  async function doKgSync(backpackName?: string) {
+    kgSyncBtn.disabled = true;
+    kgSyncBtn.classList.add("kg-icon-btn--spinning");
+    const prevMeta = kgMeta.textContent ?? "";
+    kgMeta.textContent = backpackName ? `Syncing ${backpackName}…` : "Syncing all backpacks…";
+    try {
+      let r: { graphCount: number; errorCount: number; totalNodes: number };
+      if (backpackName && cbs.onKgSyncBackpack) {
+        r = await cbs.onKgSyncBackpack(backpackName);
+      } else if (cbs.onKgSyncAll) {
+        r = await cbs.onKgSyncAll();
+      } else {
+        throw new Error("No sync handler");
       }
-      const stillValid = [...kgScopeSelect.options].some((o) => o.value === current);
-      kgScopeSelect.value = stillValid ? current : "all";
-      kgScopeSelect.hidden = false;
-    } else {
-      kgScopeSelect.hidden = true;
-      kgScopeSelect.value = "all";
+      kgMeta.textContent = r.errorCount > 0
+        ? `Synced ${r.graphCount} graphs (${r.errorCount} errors)`
+        : `Synced ${r.graphCount} graphs · ${r.totalNodes} nodes`;
+      await refreshKgStatus();
+    } catch (err) {
+      kgMeta.textContent = `Sync failed: ${(err as Error).message.slice(0, 60)}`;
+      setTimeout(() => refreshKgStatus(), 3000);
+    } finally {
+      kgSyncBtn.disabled = false;
+      kgSyncBtn.classList.remove("kg-icon-btn--spinning");
     }
   }
 
+  kgSyncBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const { backpack } = parseKgScope(kgScopeSelect.value || "all");
+    void doKgSync(backpack);
+  });
+
   kgEntry.addEventListener("click", () => {
-    const scope = kgScopeSelect.value === "all" ? undefined : kgScopeSelect.value;
+    const { backpack, graph } = parseKgScope(kgScopeSelect.value || "all");
     if (kgOnline) {
-      cbs.onKnowledgeGraphSelect?.(scope);
+      cbs.onKnowledgeGraphSelect?.(backpack, graph);
     }
-    window.dispatchEvent(new CustomEvent("backpack-kg-open", { detail: { openSettings: !kgOnline, scope } }));
+    window.dispatchEvent(new CustomEvent("backpack-kg-open", { detail: { openSettings: !kgOnline } }));
   });
 
   async function refreshKgStatus() {
@@ -1308,6 +1412,8 @@ export function initSidebar(
       kgEntry.className = "kg-entry kg-entry--offline";
       kgMeta.textContent = "Connect ArcadeDB to enable";
       kgScopeSelect.hidden = true;
+      kgSyncBtn.hidden = true;
+      kgQueryBtn.hidden = true;
     }
   }
 
@@ -1651,33 +1757,7 @@ export function initSidebar(
     if (!hidden) loadDetectorConfig();
   });
 
-  // "View all graphs together" — synthesizes all graphs and navigates to the unified canvas
-  const unifyBtn = document.createElement("button");
-  unifyBtn.type = "button";
-  unifyBtn.className = "sv-unify-btn";
-  unifyBtn.textContent = "⊕ View all graphs together";
-  unifyBtn.title = "Synthesize all learning graphs into one unified canvas view";
-
-  unifyBtn.addEventListener("click", async () => {
-    unifyBtn.disabled = true;
-    unifyBtn.textContent = "Synthesizing…";
-    try {
-      const res = await fetch("/api/connector/synthesize-all", { method: "POST" });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Failed" }));
-        throw new Error((err as { error: string }).error ?? `HTTP ${res.status}`);
-      }
-      const { graphName } = await res.json() as { graphName: string };
-      window.location.hash = graphName;
-    } catch (e) {
-      showToast(`Synthesis failed: ${e instanceof Error ? e.message : String(e)}`, 5000);
-    } finally {
-      unifyBtn.disabled = false;
-      unifyBtn.textContent = "⊕ View all graphs together";
-    }
-  });
-
-  dashContent.append(statsRow, openBtn, lastScanEl, unifyBtn, gearBtn, configOverlay);
+  dashContent.append(statsRow, openBtn, lastScanEl, gearBtn, configOverlay);
   signalsPane.appendChild(dashContent);
   container.appendChild(signalsPane);
 
