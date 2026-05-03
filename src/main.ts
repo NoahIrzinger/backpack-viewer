@@ -1024,6 +1024,50 @@ async function main() {
     }
   );
 
+  // --- Sidebar resize ---
+  {
+    const sidebarEl = document.getElementById("sidebar")!;
+    const STORAGE_KEY = "backpack-sidebar-width";
+    const MIN_W = 200;
+    const MAX_W = 600;
+
+    const saved = parseInt(localStorage.getItem(STORAGE_KEY) ?? "280", 10);
+    sidebarEl.style.setProperty("--sidebar-width", `${Math.max(MIN_W, Math.min(MAX_W, saved))}px`);
+
+    const handle = document.createElement("div");
+    handle.className = "sidebar-resize-handle";
+    sidebarEl.appendChild(handle);
+
+    let dragging = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    handle.addEventListener("mousedown", (e) => {
+      dragging = true;
+      startX = e.clientX;
+      startWidth = sidebarEl.offsetWidth;
+      handle.classList.add("dragging");
+      document.body.style.cursor = "ew-resize";
+      document.body.style.userSelect = "none";
+      e.preventDefault();
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      const w = Math.max(MIN_W, Math.min(MAX_W, startWidth + e.clientX - startX));
+      sidebarEl.style.setProperty("--sidebar-width", `${w}px`);
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false;
+      handle.classList.remove("dragging");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      localStorage.setItem(STORAGE_KEY, String(sidebarEl.offsetWidth));
+    });
+  }
+
   // --- Standalone OAuth sign-in (independent of Share extension) ---
   async function startStandaloneAuth() {
     const RELAY = "https://app.backpackontology.com";
