@@ -7,42 +7,108 @@ import type {
   ExtensionFetch,
 } from "./types.js";
 
-const DEFAULT_MODEL = "claude-sonnet-4-5";
-const MAX_TOKENS = 4096;
+const FALLBACK_MAX_TOKENS = 4096;
+
+export interface MessagesAPIProviderOptions {
+  /**
+   * Base URL the provider POSTs to. Either:
+   *  - a same-origin path like "/api/chat/messages" (backpack-app proxy
+   *    to a Claude deployment in the SaaS Foundry workspace; users
+   *    don't supply API keys), or
+   *  - "https://api.anthropic.com/v1/messages" (OSS standalone with
+   *    user-supplied ANTHROPIC_API_KEY in env, routed through the
+   *    extension's network proxy for header injection).
+   */
+  endpoint: string;
+  /** Default model id when callers don't override per turn. */
+  defaultModel: string;
+  /** Display name shown in chat UI / settings. */
+  displayName?: string;
+  /** Provider id used for storing per-provider settings. */
+  id?: string;
+  /**
+   * Fetch implementation. For cross-origin endpoints (api.anthropic.com)
+   * pass `viewer.fetch.bind(viewer)` so the request goes through the
+   * extension's server-side proxy and picks up manifest header
+   * injection. For same-origin endpoints, omit (plain `fetch` flows
+   * session cookies and skips the proxy).
+   */
+  fetcher?: ExtensionFetch;
+  /** Override max_tokens; defaults to 4096. */
+  maxTokens?: number;
+}
 
 /**
- * Anthropic Messages API provider.
- *
- * Uses `viewer.fetch()` (passed in as `extFetch`) to call
- * `https://api.anthropic.com/v1/messages` through the per-extension
- * server-side proxy. The chat extension's manifest declares
- * api.anthropic.com in `permissions.network` and configures
- * x-api-key/anthropic-version header injection. The browser never
- * touches the API key.
- *
- * Streams the SSE response and parses Anthropic's content_block_*
- * event types. Multi-turn tool use is driven by the panel — this
- * provider just handles one request/response cycle.
+ * Returns true if the last message in the array is a fresh user
+ * message (not a tool_result continuation). Used to decide when to
+ * roll over to a new X-Chat-Session-Id so the backend can group all
+ * LLM calls in one user-visible turn under one foundry_usage row.
  */
-export function createAnthropicProvider(extFetch: ExtensionFetch): LLMProvider {
+function isNewUserTurn(messages: ChatMessage[]): boolean {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "user") return false;
+  return last.content.every((c) => c.type !== "tool_result");
+}
+
+function makeSessionId(): string {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof (crypto as Crypto).randomUUID === "function"
+  ) {
+    return `chat-${(crypto as Crypto).randomUUID()}`;
+  }
+  return `chat-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+}
+
+/**
+ * Generic Anthropic Messages API provider. Speaks the wire protocol
+ * directly so it works against both Anthropic's hosted endpoint and our
+ * Foundry-fronting backpack-app proxy at /api/chat/messages.
+ *
+ * SSE parsing matches Anthropic's content_block_* event sequence,
+ * including input_json_delta for partial tool-use arguments. Multi-turn
+ * tool use is driven by the panel — this provider handles one
+ * request/response cycle.
+ */
+export function createMessagesAPIProvider(
+  opts: MessagesAPIProviderOptions,
+): LLMProvider {
+  const fetcher: ExtensionFetch =
+    opts.fetcher ?? ((url, init) => fetch(url, init));
+  const maxTokens = opts.maxTokens ?? FALLBACK_MAX_TOKENS;
+  let activeSessionId = makeSessionId();
+
   return {
-    id: "anthropic",
-    displayName: "Anthropic Claude",
-    defaultModel: DEFAULT_MODEL,
+    id: opts.id ?? "messages-api",
+    displayName: opts.displayName ?? "Claude",
+    defaultModel: opts.defaultModel,
 
-    async send(opts: ProviderSendOptions): Promise<ChatMessage> {
+    async send(send: ProviderSendOptions): Promise<ChatMessage> {
+      // Roll the session id at the start of every user-visible turn
+      // so the backend can group tool-loop calls into one usage row.
+      if (isNewUserTurn(send.messages)) {
+        activeSessionId = makeSessionId();
+      }
+
       const body: Record<string, unknown> = {
-        model: opts.model ?? DEFAULT_MODEL,
-        max_tokens: MAX_TOKENS,
+        model: send.model ?? opts.defaultModel,
+        max_tokens: maxTokens,
         stream: true,
-        messages: opts.messages,
+        messages: send.messages,
       };
-      if (opts.system) body.system = opts.system;
-      if (opts.tools.length > 0) body.tools = opts.tools;
+      if (send.system) body.system = send.system;
+      if (send.tools.length > 0) body.tools = send.tools;
 
-      const res = await extFetch("https://api.anthropic.com/v1/messages", {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "X-Chat-Session-Id": activeSessionId,
+      };
+
+      const res = await fetcher(opts.endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(body),
       });
 
@@ -124,8 +190,11 @@ export function createAnthropicProvider(extFetch: ExtensionFetch): LLMProvider {
               if (!inp) break;
               if (delta.type === "text_delta" && inp.type === "text") {
                 inp.text += delta.text;
-                opts.callbacks.onTextDelta?.(delta.text);
-              } else if (delta.type === "input_json_delta" && inp.type === "tool_use") {
+                send.callbacks.onTextDelta?.(delta.text);
+              } else if (
+                delta.type === "input_json_delta" &&
+                inp.type === "tool_use"
+              ) {
                 inp.inputJson += delta.partial_json ?? "";
               }
               break;
@@ -151,7 +220,7 @@ export function createAnthropicProvider(extFetch: ExtensionFetch): LLMProvider {
                   input: parsedInput,
                 };
                 blocks.push(block);
-                opts.callbacks.onToolUse?.(block);
+                send.callbacks.onToolUse?.(block);
               }
               inProgress.delete(idx);
               break;
@@ -159,7 +228,7 @@ export function createAnthropicProvider(extFetch: ExtensionFetch): LLMProvider {
 
             case "error": {
               throw new Error(
-                `Anthropic stream error: ${JSON.stringify(parsed.error ?? parsed)}`,
+                `Messages API stream error: ${JSON.stringify(parsed.error ?? parsed)}`,
               );
             }
           }

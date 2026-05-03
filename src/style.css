@@ -178,7 +178,7 @@ body {
   margin-bottom: 14px;
 }
 
-#sidebar input {
+#sidebar input:not([type="checkbox"]):not([type="radio"]) {
   width: 100%;
   padding: 8px 12px;
   border: 1px solid var(--border);

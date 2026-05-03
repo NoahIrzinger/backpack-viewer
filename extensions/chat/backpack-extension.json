@@ -1,9 +1,9 @@
 {
   "name": "chat",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "viewerApi": "1",
   "displayName": "Chat",
-  "description": "Chat with Claude (or another LLM provider) about your graph. The model can read nodes, follow edges, and add/edit/remove graph data with your approval.",
+  "description": "Chat with Claude about your graph. The model can read nodes, follow edges, and add/edit/remove graph data with your approval. Embedded in backpack-app it talks to the same-origin Foundry-backed proxy; standalone OSS mode falls back to api.anthropic.com with a user-supplied ANTHROPIC_API_KEY.",
   "entry": "src/index.js",
   "stylesheet": "style.css",
   "permissions": {

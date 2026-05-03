@@ -1,35 +1,59 @@
 import type { ViewerExtensionAPI } from "./viewer-api";
-import { createAnthropicProvider } from "./providers/anthropic.js";
+import { createMessagesAPIProvider } from "./providers/messages-api.js";
 import { createChatPanelController } from "./panel.js";
 
 /**
  * Chat extension entry. The viewer's loader dynamic-imports this file
  * and calls `activate(viewer)`.
  *
- * Wires up:
- *   - One LLM provider (Anthropic for v1; future: OpenAI, Ollama, …)
- *   - The chat panel controller (mounts/unmounts the panel)
- *   - A taskbar icon that toggles the panel
+ * One LLM provider, two deployment modes:
  *
- * Everything goes through the viewer extension API. There is no
- * special-case wiring into viewer internals — this extension uses
- * exactly the same surface a third-party extension would.
+ *  - Embedded in backpack-app: the host page sets
+ *    `window.BACKPACK_CHAT_PROXY = "/api/chat/messages"` before loading
+ *    the viewer bundle. The provider POSTs there and the backend talks
+ *    to a Claude deployment in the SaaS Foundry workspace. Users never
+ *    see Anthropic — auth is the existing app session cookie.
+ *
+ *  - Standalone OSS viewer: the global is unset. The provider falls
+ *    back to api.anthropic.com via the extension's network proxy and
+ *    the manifest injects the user's ANTHROPIC_API_KEY env var as
+ *    x-api-key.
  */
+
+declare global {
+  interface Window {
+    BACKPACK_CHAT_PROXY?: string;
+  }
+}
+
 export function activate(viewer: ViewerExtensionAPI): void {
-  const provider = createAnthropicProvider(viewer.fetch.bind(viewer));
+  const proxyPath =
+    typeof window !== "undefined" ? window.BACKPACK_CHAT_PROXY : undefined;
+
+  const provider =
+    typeof proxyPath === "string" && proxyPath
+      ? createMessagesAPIProvider({
+          id: "backpack-cloud",
+          displayName: "Backpack Cloud (Claude on Foundry)",
+          endpoint: proxyPath,
+          defaultModel: "claude-haiku-4-5",
+        })
+      : createMessagesAPIProvider({
+          id: "anthropic",
+          displayName: "Anthropic Claude",
+          endpoint: "https://api.anthropic.com/v1/messages",
+          defaultModel: "claude-sonnet-4-5",
+          fetcher: viewer.fetch.bind(viewer),
+        });
+
   const controller = createChatPanelController(viewer, provider);
 
   viewer.registerTaskbarIcon({
     label: "Chat",
-    // Top-right groups the chat toggle with the existing top-bar
-    // controls (zoom, copy-prompt, theme) and aligns visually with the
-    // chat panel itself, which docks to the right side of the canvas.
     position: "top-right",
     onClick: () => controller.toggle(),
   });
 
-  // Restore any persisted history before the user opens the panel.
-  // Errors are non-fatal — first run has nothing to restore.
   controller.loadHistory().catch((err) => {
     console.warn("[chat] failed to load history:", err);
   });

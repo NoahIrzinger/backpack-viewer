@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Chat extension: dual-mode provider
+- **One provider, two backends.** `extensions/chat/src/providers/anthropic.ts` is gone, replaced by `messages-api.ts`. Talks the Anthropic Messages API wire protocol and points at whatever endpoint the host configures: `window.BACKPACK_CHAT_PROXY` (set by backpack-app to `/api/chat/messages`) routes to a Foundry-backed Claude where the SaaS pays the bill, or falls back to `https://api.anthropic.com/v1/messages` via the extension's network proxy + manifest API-key injection for OSS-standalone users with their own `ANTHROPIC_API_KEY`. Provider id stays "anthropic" in OSS mode so saved settings carry over; cloud mode uses id "backpack-cloud" with default model `claude-haiku-4-5`. Manifest version bumped to 0.2.0; default OSS model unchanged at `claude-sonnet-4-5`.
+- **X-Chat-Session-Id header** sent on every call. The provider auto-rotates the id at the start of each user-visible turn (detected by checking whether the last message is a fresh user text vs a tool_result continuation), so multi-turn tool loops roll up into one usage row on the backend instead of N.
+
 ### Mobile polish (round two)
 - **Chip is now a full-width subheader** flush to the top with no side margin, no border-radius, weightier text — reads as a continuation of the host nav (or a standalone header in OSS) instead of a floating pill.
 - **Info-panel covers the full canvas on mobile** with `inset: 0` and `z-index: 56` so nothing — search bar, chat button, chip, host controls — obstructs node info while it's open. The `.info-panel-maximized` distinction collapses on mobile because there's no useful minimized state on a phone screen.
