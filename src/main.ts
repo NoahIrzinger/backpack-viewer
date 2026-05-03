@@ -163,9 +163,8 @@ async function main() {
     canvas.loadGraph(currentData);
     search.setLearningGraphData(currentData);
     toolsPane.setData(currentData);
-    // Refresh sidebar counts
-    const updated = await listGraphs();
-    sidebar.setSummaries(updated);
+    // Refresh sidebar counts — respect "All" mode
+    await refreshGraphList();
     eventBus.emit("graph-changed");
   }
 
@@ -181,8 +180,7 @@ async function main() {
     canvas.loadGraph(currentData);
     search.setLearningGraphData(currentData);
     toolsPane.setData(currentData);
-    const updated = await listGraphs();
-    sidebar.setSummaries(updated);
+    await refreshGraphList();
   }
 
   // --- Info panel with edit callbacks ---

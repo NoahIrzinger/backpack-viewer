@@ -1362,7 +1362,6 @@ export function initSidebar(
   async function doKgSync(backpackName?: string) {
     kgSyncBtn.disabled = true;
     kgSyncBtn.classList.add("kg-icon-btn--spinning");
-    const prevMeta = kgMeta.textContent ?? "";
     kgMeta.textContent = backpackName ? `Syncing ${backpackName}…` : "Syncing all backpacks…";
     try {
       let r: { graphCount: number; errorCount: number; totalNodes: number };

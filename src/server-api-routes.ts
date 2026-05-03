@@ -1777,21 +1777,23 @@ export async function handleApiRequest(
         type ProjectRecord = { backpack: string; graph: string; nodeCount: number; status: "ok" | "error"; error?: string };
         const results: ProjectRecord[] = [];
 
+        const homeDir = os.homedir();
         for (const bp of allBackpacks) {
-          // Skip cloud, temp, and unreachable paths
+          // Skip cloud, temp, and non-local paths
           if (!bp.path || bp.path.startsWith("cloud://") || bp.path.startsWith("/private/tmp")) continue;
-          if (!bp.path.startsWith("/") && !bp.path.startsWith("~")) continue;
+          const resolved = path.resolve(bp.path);
+          if (!resolved.startsWith("/") || (!resolved.startsWith(homeDir) && !resolved.startsWith("/Volumes"))) continue;
 
           let graphs: { name: string }[] = [];
           try {
-            const backend = new JsonFileBackend(undefined, { graphsDirOverride: bp.path });
+            const backend = new JsonFileBackend(undefined, { graphsDirOverride: resolved });
             await backend.initialize();
             graphs = await backend.listOntologies();
           } catch { continue; }
 
           for (const g of graphs) {
             try {
-              const result = await connProject(adapter, { backpackPath: bp.path, graph: g.name, branch: "main" });
+              const result = await connProject(adapter, { backpackPath: resolved, graph: g.name, branch: "main" });
               results.push({ backpack: bp.name, graph: g.name, nodeCount: result.nodeOps, status: "ok" });
             } catch (err) {
               results.push({ backpack: bp.name, graph: g.name, nodeCount: 0, status: "error", error: (err as Error).message });
@@ -1814,8 +1816,9 @@ export async function handleApiRequest(
 
     if (url === "/api/connector/project-backpack" && method === "POST") {
       try {
-        const body = JSON.parse(await readBody(req));
-        const targetName: string = body.backpackName ?? "";
+        let body: Record<string, unknown>;
+        try { body = JSON.parse(await readBody(req)); } catch { sendErr(res, 400, "invalid JSON body"); return true; }
+        const targetName: string = (body.backpackName as string) ?? "";
         if (!targetName) { sendErr(res, 400, "backpackName required"); return true; }
 
         // @ts-ignore — optional peer
@@ -1834,8 +1837,12 @@ export async function handleApiRequest(
         if (!bp.path || bp.path.startsWith("cloud://") || bp.path.startsWith("/private/tmp")) {
           sendErr(res, 400, "Cannot project cloud or temp backpacks"); return true;
         }
+        const resolvedBpPath = path.resolve(bp.path);
+        if (!resolvedBpPath.startsWith(os.homedir()) && !resolvedBpPath.startsWith("/Volumes")) {
+          sendErr(res, 400, "Backpack path is outside allowed directories"); return true;
+        }
 
-        const backend = new JsonFileBackend(bp.path);
+        const backend = new JsonFileBackend(undefined, { graphsDirOverride: resolvedBpPath });
         await backend.initialize();
         const graphs = await backend.listOntologies();
 
