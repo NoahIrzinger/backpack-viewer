@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Right-click enrich (cloud-only)
+- New `src/enrich-panel.ts` opens a small live-progress panel when the user right-clicks a node and picks "Enrich". It POSTs `{backpack, nodeId}` to `window.BACKPACK_ENRICH_ENDPOINT` (set by backpack-app to `/api/enrich/node`) and renders the SSE stream of agent events (`tool_call`, `tool_result`, `graph_change`, etc.). On `done` with mutations applied, the host reloads the ontology so the canvas reflects the agent's persisted changes. The right-click menu item is conditional on the global being set, so OSS-standalone keeps its existing menu items unchanged.
+
 ### Chat extension: intro copy
 - Reword the chat panel intro to reflect both deployment modes (cloud-backed when embedded, ANTHROPIC_API_KEY when standalone OSS) so users on backpack-app don't see "the viewer reads ANTHROPIC_API_KEY..." which is misleading there.
 

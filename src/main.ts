@@ -27,6 +27,7 @@ import { createHistory } from "./history";
 import { initMobileFab } from "./mobile-fab";
 import { matchKey, type KeybindingMap } from "./keybindings";
 import { initContextMenu } from "./context-menu";
+import { createEnrichPanel } from "./enrich-panel";
 import { initCopyPromptButton } from "./copy-prompt";
 import { publishViewerState } from "./bridge";
 import { createEventBus } from "./extensions/event-bus";
@@ -1193,7 +1194,31 @@ async function main() {
   const shortcuts = initShortcuts(canvasContainer, bindings);
   const emptyState = initEmptyState(canvasContainer);
 
+  // Right-click enrich panel (cloud-only — see enrich-panel.ts).
+  // Mutations applied by the agent are reloaded into `currentData`
+  // from the server when the loop ends, so the in-memory graph stays
+  // consistent with what the agent persisted via SaveData.
+  const enrichPanel = createEnrichPanel({
+    onGraphChange() {
+      // Per-event hint that something changed. We rely on the final
+      // reload at done time for canonical state — applying every
+      // graph_change to currentData here would be a duplicate write
+      // path and could drift from the server's persisted form.
+    },
+    async onDone(summary) {
+      if (summary.error || summary.mutations === 0) return;
+      if (!activeOntology) return;
+      try {
+        currentData = await loadOntology(activeOntology);
+        if (currentData) canvas.loadGraph(currentData);
+      } catch (err) {
+        console.warn("[enrich] reload after done failed:", err);
+      }
+    },
+  });
+
   // Context menu (right-click on nodes)
+  const enrichEnabled = typeof window !== "undefined" && !!window.BACKPACK_ENRICH_ENDPOINT;
   const contextMenu = initContextMenu(canvasContainer, {
     onStar(nodeId) {
       if (!currentData) return;
@@ -1221,6 +1246,16 @@ async function main() {
     onCopyId(nodeId) {
       navigator.clipboard.writeText(nodeId);
     },
+    onEnrich: enrichEnabled
+      ? (nodeId: string) => {
+          if (!currentData || !activeOntology) return;
+          const node = currentData.nodes.find((n) => n.id === nodeId);
+          if (!node) return;
+          const label =
+            (Object.values(node.properties).find((v) => typeof v === "string") as string) ?? nodeId;
+          enrichPanel.start(activeOntology, nodeId, label);
+        }
+      : undefined,
   });
 
   // Right-click handler for context menu
