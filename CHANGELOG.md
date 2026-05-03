@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Chat extension: intro copy
+- Reword the chat panel intro to reflect both deployment modes (cloud-backed when embedded, ANTHROPIC_API_KEY when standalone OSS) so users on backpack-app don't see "the viewer reads ANTHROPIC_API_KEY..." which is misleading there.
+
 ### Chat extension: dual-mode provider
 - **One provider, two backends.** `extensions/chat/src/providers/anthropic.ts` is gone, replaced by `messages-api.ts`. Talks the Anthropic Messages API wire protocol and points at whatever endpoint the host configures: `window.BACKPACK_CHAT_PROXY` (set by backpack-app to `/api/chat/messages`) routes to a Foundry-backed Claude where the SaaS pays the bill, or falls back to `https://api.anthropic.com/v1/messages` via the extension's network proxy + manifest API-key injection for OSS-standalone users with their own `ANTHROPIC_API_KEY`. Provider id stays "anthropic" in OSS mode so saved settings carry over; cloud mode uses id "backpack-cloud" with default model `claude-haiku-4-5`. Manifest version bumped to 0.2.0; default OSS model unchanged at `claude-sonnet-4-5`.
 - **X-Chat-Session-Id header** sent on every call. The provider auto-rotates the id at the start of each user-visible turn (detected by checking whether the last message is a fresh user text vs a tool_result continuation), so multi-turn tool loops roll up into one usage row on the backend instead of N.

@@ -311,7 +311,7 @@ function renderIntro(messageList: HTMLElement) {
   const intro = document.createElement("div");
   intro.className = "chat-ext-intro";
   intro.textContent =
-    "Ask questions about the graph you're looking at, or tell me to add/edit nodes. The viewer reads ANTHROPIC_API_KEY from the env var it was started with — the key never enters the browser.";
+    "Ask questions about the graph you're looking at, or tell me to add/edit nodes. Embedded in backpack-app the model runs on the SaaS backend; standalone OSS reads ANTHROPIC_API_KEY from the env it was started with. Either way the key never enters the browser.";
   messageList.appendChild(intro);
 }
 
