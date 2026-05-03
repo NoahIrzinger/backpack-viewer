@@ -524,7 +524,7 @@ export async function handleApiRequest(
         const all: (Record<string, unknown> & { backpack: string })[] = [];
         for (const bp of bpList) {
           try {
-            const backend = new JsonFileBackend(bp.path);
+            const backend = new JsonFileBackend(undefined, { graphsDirOverride: bp.path });
             await backend.initialize();
             const summaries = await backend.listOntologies();
             for (const s of summaries) all.push({ ...s, backpack: bp.name });
@@ -1784,7 +1784,7 @@ export async function handleApiRequest(
 
           let graphs: { name: string }[] = [];
           try {
-            const backend = new JsonFileBackend(bp.path);
+            const backend = new JsonFileBackend(undefined, { graphsDirOverride: bp.path });
             await backend.initialize();
             graphs = await backend.listOntologies();
           } catch { continue; }
