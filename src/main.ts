@@ -578,6 +578,21 @@ async function main() {
   const toolsToggle = canvasContainer.querySelector(".tools-pane-toggle");
   if (toolsToggle) topLeft.appendChild(toolsToggle);
 
+  // Knowledge Graph floating button — opens the KG panel (connector query/settings).
+  // Same size as the tools toggle. Cloud app passes window.BACKPACK_HIDE_KG_BUTTON=true
+  // to suppress it (cloud KG is accessed via the dashboard, not via connector).
+  if (!window.BACKPACK_HIDE_KG_BUTTON) {
+    const kgFloatBtn = document.createElement("button");
+    kgFloatBtn.className = "canvas-control-btn kg-float-btn";
+    kgFloatBtn.type = "button";
+    kgFloatBtn.title = "Knowledge Graph";
+    kgFloatBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>`;
+    kgFloatBtn.addEventListener("click", () => {
+      window.dispatchEvent(new CustomEvent("backpack-kg-open", { detail: { openSettings: false } }));
+    });
+    topLeft.appendChild(kgFloatBtn);
+  }
+
   // Move zoom controls and theme toggle into right slot
   const zoomControls = canvasContainer.querySelector(".zoom-controls");
   if (zoomControls) topRight.appendChild(zoomControls);

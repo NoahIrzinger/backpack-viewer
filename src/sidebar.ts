@@ -1419,15 +1419,53 @@ export function initSidebar(
   refreshKgStatus();
   setInterval(refreshKgStatus, 15000);
 
+  // Helper: collapsible sidebar section with a header toggle
+  function makeCollapsibleSection(label: string, startCollapsed = false) {
+    const header = document.createElement("div");
+    header.className = "sidebar-collapsible-header";
+
+    const chevron = document.createElement("span");
+    chevron.className = "sidebar-collapsible-chevron";
+    chevron.textContent = startCollapsed ? "▸" : "▾";
+
+    const title = document.createElement("span");
+    title.className = "sidebar-collapsible-title";
+    title.textContent = label;
+
+    header.appendChild(chevron);
+    header.appendChild(title);
+
+    const content = document.createElement("div");
+    content.className = "sidebar-collapsible-content";
+    if (startCollapsed) content.classList.add("sidebar-collapsible-content--collapsed");
+
+    header.addEventListener("click", () => {
+      const collapsed = content.classList.toggle("sidebar-collapsible-content--collapsed");
+      chevron.textContent = collapsed ? "▸" : "▾";
+    });
+
+    return { header, content };
+  }
+
   const graphsPane = document.createElement("div");
   graphsPane.className = "sidebar-tab-pane";
-  graphsPane.appendChild(kgSection);
-  graphsPane.appendChild(input);
-  graphsPane.appendChild(list);
-  graphsPane.appendChild(remoteHeading);
-  graphsPane.appendChild(remoteList);
 
-  // Cloud backpacks section (visible when SSO'd)
+  // Filter goes above both sections
+  graphsPane.appendChild(input);
+
+  // --- "Knowledge" collapsible section (ArcadeDB / Curiosity Engine) ---
+  const knowledgeSection = makeCollapsibleSection("Knowledge");
+  knowledgeSection.content.appendChild(kgSection);
+  graphsPane.appendChild(knowledgeSection.header);
+  graphsPane.appendChild(knowledgeSection.content);
+
+  // --- "Learning" collapsible section (individual graphs) ---
+  const learningSection = makeCollapsibleSection("Learning");
+  learningSection.content.appendChild(list);
+  learningSection.content.appendChild(remoteHeading);
+  learningSection.content.appendChild(remoteList);
+
+  // Cloud backpacks section (visible when SSO'd) — lives inside Learning
   const cloudHeading = document.createElement("h3");
   cloudHeading.className = "sidebar-section-heading";
   cloudHeading.textContent = "CLOUD";
@@ -1441,8 +1479,11 @@ export function initSidebar(
   cloudList.className = "cloud-list";
   cloudList.hidden = true;
 
-  graphsPane.appendChild(cloudHeading);
-  graphsPane.appendChild(cloudList);
+  learningSection.content.appendChild(cloudHeading);
+  learningSection.content.appendChild(cloudList);
+
+  graphsPane.appendChild(learningSection.header);
+  graphsPane.appendChild(learningSection.content);
   container.appendChild(graphsPane);
 
   // --- KB tab content ---

@@ -2354,6 +2354,63 @@ body {
   border-color: rgba(212, 162, 127, 0.4);
 }
 
+/* KG floating button — same visual weight as tools-pane-toggle */
+.kg-float-btn {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px 10px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  box-shadow: 0 2px 8px var(--shadow);
+}
+.kg-float-btn:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+  background: var(--bg-hover);
+}
+.kg-float-btn.active {
+  color: var(--accent);
+  border-color: rgba(212, 162, 127, 0.4);
+}
+
+/* Collapsible sidebar sections */
+.sidebar-collapsible-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 4px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.sidebar-collapsible-header:hover {
+  color: var(--text);
+}
+.sidebar-collapsible-chevron {
+  font-size: 9px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+.sidebar-collapsible-title {
+  flex: 1;
+}
+.sidebar-collapsible-content {
+  overflow: hidden;
+}
+.sidebar-collapsible-content--collapsed {
+  display: none;
+}
+
 .tools-pane-content {
   position: absolute;
   top: 56px;
