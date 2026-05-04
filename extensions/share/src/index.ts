@@ -1,11 +1,9 @@
-import type { ViewerExtensionAPI, MountedPanel, LearningGraphData } from "./viewer-api";
+import type { ViewerExtensionAPI, MountedPanel } from "./viewer-api";
 
 const DEFAULT_RELAY_URL = "https://app.backpackontology.com";
 let RELAY_URL = DEFAULT_RELAY_URL;
 let OAUTH_METADATA_URL = `${RELAY_URL}/.well-known/oauth-authorization-server`;
 
-const BPAK_MAGIC = new Uint8Array([0x42, 0x50, 0x41, 0x4b]);
-const BPAK_VERSION = 0x01;
 
 let panel: MountedPanel | null = null;
 
@@ -86,7 +84,7 @@ function renderUpsell(viewer: ViewerExtensionAPI, container: HTMLElement): void 
 
   const trust = document.createElement("p");
   trust.className = "share-trust";
-  trust.textContent = "Free account. Your graph is encrypted before upload \u2014 we can\u2019t read it.";
+  trust.textContent = "Free to share. Anyone with the link can view the graph.";
   w.appendChild(trust);
   container.replaceChildren(w);
 }
@@ -230,7 +228,7 @@ async function doShareOnly(viewer: ViewerExtensionAPI, container: HTMLElement, t
   }
 
   const shareData = (await shareRes.json()) as { token: string; url: string; expires_at?: string };
-  renderSuccess(container, shareData.url, false, shareData.expires_at);
+  renderSuccess(container, shareData.url, shareData.expires_at);
 }
 
 function renderAlreadySynced(viewer: ViewerExtensionAPI, container: HTMLElement, token: string, graph: GraphSummary): void {
@@ -250,7 +248,7 @@ function renderAlreadySynced(viewer: ViewerExtensionAPI, container: HTMLElement,
 
   const badge = document.createElement("p");
   badge.className = "share-note";
-  badge.textContent = graph.encrypted ? "Encrypted \u2014 server cannot read your data." : "Public \u2014 stored unencrypted.";
+  badge.textContent = "Stored in your cloud account.";
   w.appendChild(badge);
 
   const updateBtn = document.createElement("button");
@@ -258,9 +256,9 @@ function renderAlreadySynced(viewer: ViewerExtensionAPI, container: HTMLElement,
   updateBtn.textContent = "Update & Share";
   updateBtn.addEventListener("click", async () => {
     updateBtn.disabled = true;
-    updateBtn.textContent = graph.encrypted ? "Encrypting\u2026" : "Syncing\u2026";
+    updateBtn.textContent = "Uploading\u2026";
     try {
-      await doSyncAndShare(viewer, container, token, graph.encrypted);
+      await doSyncAndShare(viewer, container, token);
     } catch (err) {
       updateBtn.disabled = false;
       updateBtn.textContent = "Update & Share";
@@ -287,20 +285,20 @@ function renderSyncForm(viewer: ViewerExtensionAPI, container: HTMLElement, toke
 
   const desc = document.createElement("p");
   desc.className = "share-description";
-  desc.textContent = "Your graph will be encrypted and synced to your Backpack account. You\u2019ll get a shareable link.";
+  desc.textContent = "Upload this graph to your Backpack account and get a shareable link.";
   w.appendChild(desc);
 
   const syncBtn = document.createElement("button");
   syncBtn.className = "share-cta-btn";
-  syncBtn.textContent = "Sync & Share";
+  syncBtn.textContent = "Share";
   syncBtn.addEventListener("click", async () => {
     syncBtn.disabled = true;
-    syncBtn.textContent = "Encrypting\u2026";
+    syncBtn.textContent = "Uploading\u2026";
     try {
-      await doSyncAndShare(viewer, container, token, true);
+      await doSyncAndShare(viewer, container, token);
     } catch (err) {
       syncBtn.disabled = false;
-      syncBtn.textContent = "Sync & Share";
+      syncBtn.textContent = "Share";
       const msg = (err as Error).message;
       if (msg.includes("encrypted") && msg.includes("limit")) {
         renderQuotaExceeded(viewer, container, token);
@@ -314,7 +312,7 @@ function renderSyncForm(viewer: ViewerExtensionAPI, container: HTMLElement, toke
 
   const freeNote = document.createElement("p");
   freeNote.className = "share-trust";
-  freeNote.textContent = "Your first encrypted graph is free. Data is encrypted before upload\u200a\u2014\u200awe can\u2019t read it.";
+  freeNote.textContent = "Free to share. Anyone with the link can view the graph.";
   w.appendChild(freeNote);
 
   appendFooter(viewer, container, w, token);
@@ -376,7 +374,7 @@ function renderQuotaExceeded(viewer: ViewerExtensionAPI, container: HTMLElement,
     publicBtn.disabled = true;
     publicBtn.textContent = "Syncing\u2026";
     try {
-      await doSyncAndShare(viewer, container, token, false, "public");
+      await doSyncAndShare(viewer, container, token, "public");
     } catch (err) {
       publicBtn.disabled = false;
       publicBtn.textContent = "Share as public graph";
@@ -474,69 +472,27 @@ async function startOAuthFlow(viewer: ViewerExtensionAPI, container: HTMLElement
 
 async function doSyncAndShare(
   viewer: ViewerExtensionAPI, container: HTMLElement,
-  token: string, encrypted: boolean, visibility: "private" | "public" = "private",
+  token: string, visibility: "private" | "public" = "private",
 ): Promise<void> {
-  const graph = viewer.getGraph();
   const graphName = viewer.getGraphName();
-  if (!graph || !graphName) throw new Error("No graph loaded");
+  if (!graphName) throw new Error("No graph loaded");
 
-  // Step 1: Build BPAK envelope
-  const graphJSON = new TextEncoder().encode(JSON.stringify(graph));
-  let payload: Uint8Array;
-  let format: "plaintext" | "age-v1";
-  let fragmentKey = "";
-
-  if (encrypted) {
-    const age = await import("age-encryption");
-    const keys = await viewer.settings.get<Record<string, string>>("keys") || {};
-    let secretKey = keys[graphName];
-    if (!secretKey) {
-      secretKey = await age.generateX25519Identity();
-      keys[graphName] = secretKey;
-      await viewer.settings.set("keys", keys);
-    }
-    const publicKey = await age.identityToRecipient(secretKey);
-    const e = new age.Encrypter();
-    e.addRecipient(publicKey);
-    payload = await e.encrypt(graphJSON);
-    format = "age-v1";
-    fragmentKey = btoa(secretKey).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  } else {
-    payload = graphJSON;
-    format = "plaintext";
-  }
-
-  const envelope = await buildEnvelope(graphName, payload, format, graph);
-
-  // Step 2: Sync to cloud
-  const syncHeaders: Record<string, string> = { "Content-Type": "application/octet-stream" };
-  try {
-    const deviceRes = await fetch("/api/device-info");
-    if (deviceRes.ok) {
-      const device = (await deviceRes.json()) as { machineId: string; authorName: string; hostname: string; platform: string };
-      syncHeaders["X-Backpack-Device-Id"] = device.machineId;
-      syncHeaders["X-Backpack-Device-Name"] = device.hostname || device.authorName;
-      syncHeaders["X-Backpack-Device-Hostname"] = device.hostname;
-      syncHeaders["X-Backpack-Device-Platform"] = device.platform;
-    }
-  } catch { /* device info unavailable — sync without headers */ }
-
-  const syncUrl = `${RELAY_URL}/api/graphs/${encodeURIComponent(graphName)}/sync${visibility === "public" ? "?visibility=public" : ""}`;
-  const syncRes = await relayFetch(token, syncUrl, {
-    method: "PUT",
-    headers: syncHeaders,
-    body: envelope as unknown as BodyInit,
+  // Step 1: Push graph snapshot to cloud via event log API (server-side)
+  const pushRes = await fetch("/api/backpack/cloud-sync/push", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ graphName, visibility }),
   });
 
-  if (!syncRes.ok) {
-    if (syncRes.status === 401) {
+  if (!pushRes.ok) {
+    if (pushRes.status === 401) {
       await viewer.settings.remove("relay_token");
       renderSharePanel(viewer, container);
       throw new Error("Session expired. Please sign in again.");
     }
-    let errorMsg = `Sync failed (${syncRes.status})`;
+    let errorMsg = `Upload failed (${pushRes.status})`;
     try {
-      const body = await syncRes.json();
+      const body = await pushRes.json();
       if (body.error) errorMsg = body.error;
     } catch { /* ignore */ }
     throw new Error(errorMsg);
@@ -549,20 +505,18 @@ async function doSyncAndShare(
     await viewer.settings.set("synced", synced);
   }
 
-  // Step 3: Create share link
+  // Step 2: Create share link
   const shareRes = await relayFetch(token, `${RELAY_URL}/api/graphs/${encodeURIComponent(graphName)}/share`, {
     method: "POST",
   });
 
   if (!shareRes.ok) {
-    // Sync succeeded but share link creation failed — still show success without link
-    renderSuccess(container, null, encrypted, undefined);
+    renderSuccess(container, null, undefined);
     return;
   }
 
   const shareData = (await shareRes.json()) as { token: string; url: string; expires_at?: string };
-  const shareLink = fragmentKey ? `${shareData.url}#k=${fragmentKey}` : shareData.url;
-  renderSuccess(container, shareLink, encrypted, shareData.expires_at);
+  renderSuccess(container, shareData.url, shareData.expires_at);
 }
 
 async function relayFetch(token: string, url: string, init: RequestInit = {}): Promise<Response> {
@@ -571,46 +525,9 @@ async function relayFetch(token: string, url: string, init: RequestInit = {}): P
   return fetch(url, { ...init, headers });
 }
 
-// --- BPAK envelope builder ---
-
-async function buildEnvelope(
-  name: string, payload: Uint8Array, format: string, graph: LearningGraphData,
-): Promise<Uint8Array> {
-  const payloadCopy = new Uint8Array(payload).buffer as ArrayBuffer;
-  const hash = await crypto.subtle.digest("SHA-256", payloadCopy);
-  const checksum = "sha256:" + Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
-
-  // Collect node type names for dashboard stats
-  const typeSet = new Set<string>();
-  for (const node of graph.nodes) typeSet.add(node.type);
-
-  const header = JSON.stringify({
-    format,
-    created_at: new Date().toISOString(),
-    backpack_name: name,
-    graph_count: 1,
-    checksum,
-    node_count: graph.nodes.length,
-    edge_count: graph.edges.length,
-    node_types: Array.from(typeSet),
-  });
-  const headerBytes = new TextEncoder().encode(header);
-  const headerLenBuf = new ArrayBuffer(4);
-  new DataView(headerLenBuf).setUint32(0, headerBytes.length, false);
-
-  const result = new Uint8Array(4 + 1 + 4 + headerBytes.length + payload.length);
-  let off = 0;
-  result.set(BPAK_MAGIC, off); off += 4;
-  result[off] = BPAK_VERSION; off += 1;
-  result.set(new Uint8Array(headerLenBuf), off); off += 4;
-  result.set(headerBytes, off); off += headerBytes.length;
-  result.set(payload, off);
-  return result;
-}
-
 // --- Success state ---
 
-function renderSuccess(container: HTMLElement, shareLink: string | null, encrypted: boolean, expiresAt?: string): void {
+function renderSuccess(container: HTMLElement, shareLink: string | null, expiresAt?: string): void {
   const w = document.createElement("div");
   w.className = "share-success";
   const h = document.createElement("h4");
@@ -642,15 +559,10 @@ function renderSuccess(container: HTMLElement, shareLink: string | null, encrypt
     w.appendChild(row);
   }
 
-  if (encrypted) {
+  if (shareLink) {
     const note = document.createElement("p");
     note.className = "share-note";
-    note.textContent = "The decryption key is embedded in the link. Share the complete link \u2014 if the #k= part is removed, recipients won\u2019t be able to decrypt. The server cannot read your data.";
-    w.appendChild(note);
-  } else {
-    const note = document.createElement("p");
-    note.className = "share-note";
-    note.textContent = "This graph is stored unencrypted. Anyone with the link can view it.";
+    note.textContent = "Anyone with the link can view this graph.";
     w.appendChild(note);
   }
 

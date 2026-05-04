@@ -20,9 +20,6 @@ import {
   configDir,
   resolveAuthorName,
   CloudCacheBackend,
-  SyncClient,
-  SyncRelayClient,
-  readSyncState,
   GRAPH_DETECTORS,
   CROSS_CUTTING_DETECTORS,
 } from "backpack-ontology";
@@ -95,125 +92,31 @@ function urlPath(req: IncomingMessage): string {
   return (req.url ?? "/").replace(/\?.*$/, "");
 }
 
-// --- Shared sync helpers ---
+// --- Cloud push helper ---
 
-/**
- * Sync a single graph to the cloud relay using BPAK envelope format.
- * Handles encryption, envelope building, device headers, and synced-status tracking.
- */
-/** Read or generate the persistent machine-id (same logic as /api/device-info). */
-async function getMachineId(): Promise<string> {
-  const idPath = path.join(configDir(), "machine-id");
-  try {
-    return (await fs.readFile(idPath, "utf-8")).trim();
-  } catch {
-    const hash = crypto.createHash("sha256").update(os.hostname() + os.platform()).digest("hex").slice(0, 16);
-    try { await fs.mkdir(configDir(), { recursive: true }); } catch {}
-    await fs.writeFile(idPath, hash, "utf-8");
-    return hash;
-  }
-}
-
-async function syncGraphToRelay(
+async function pushGraphToCloud(
   name: string,
   data: Record<string, unknown>,
   token: string,
   relayUrl: string,
-  encrypted: boolean = true,
-  kind: string = "learning_graph",
-  machineId?: string,
-  sourceBackpackName?: string,
+  visibility?: string,
 ): Promise<void> {
-  const graphJSON = new TextEncoder().encode(JSON.stringify(data));
-  let payload: Uint8Array;
-  let format: string;
-
-  if (encrypted) {
-    const age = await import("age-encryption");
-    const settings = await readExtensionSettings("share");
-    const keys = ((settings.keys as Record<string, string>) || {});
-    let secretKey = keys[name];
-    if (!secretKey) {
-      secretKey = await age.generateX25519Identity();
-      keys[name] = secretKey;
-      await writeExtensionSetting("share", "keys", keys);
-    }
-    const publicKey = await age.identityToRecipient(secretKey);
-    const e = new age.Encrypter();
-    e.addRecipient(publicKey);
-    payload = await e.encrypt(graphJSON);
-    format = "age-v1";
-  } else {
-    payload = graphJSON;
-    format = "plaintext";
-    // Remove stale key if switching from encrypted to unencrypted
-    const settings = await readExtensionSettings("share");
-    const keys = ((settings.keys as Record<string, string>) || {});
-    if (keys[name]) {
-      delete keys[name];
-      await writeExtensionSetting("share", "keys", keys);
-    }
-  }
-
-  // Build BPAK envelope
-  const typeSet = new Set<string>();
-  const nodes = (data as Record<string, unknown>).nodes as { type: string }[] | undefined;
-  if (nodes) for (const n of nodes) typeSet.add(n.type);
-  const checksumBuf = await crypto.subtle.digest("SHA-256", new Uint8Array(payload).buffer as ArrayBuffer);
-  const checksum = "sha256:" + Array.from(new Uint8Array(checksumBuf)).map(b => b.toString(16).padStart(2, "0")).join("");
-  const headerObj: Record<string, unknown> = {
-    format,
-    kind,
-    created_at: new Date().toISOString(),
-    backpack_name: name,
-    checksum,
-  };
-  if (kind === "knowledge_base") {
-    headerObj.document_count = ((data as Record<string, unknown>).documents as unknown[] || []).length;
-  } else {
-    headerObj.graph_count = 1;
-    headerObj.node_count = (nodes || []).length;
-    headerObj.edge_count = ((data as Record<string, unknown>).edges as unknown[] || []).length;
-    headerObj.node_types = Array.from(typeSet);
-  }
-  const header = JSON.stringify(headerObj);
-  const headerBytes = new TextEncoder().encode(header);
-  const headerLenBuf = new ArrayBuffer(4);
-  new DataView(headerLenBuf).setUint32(0, headerBytes.length, false);
-  const envelope = new Uint8Array(4 + 1 + 4 + headerBytes.length + payload.length);
-  let off = 0;
-  envelope.set(new Uint8Array([0x42, 0x50, 0x41, 0x4b]), off); off += 4;
-  envelope[off] = 0x01; off += 1;
-  envelope.set(new Uint8Array(headerLenBuf), off); off += 4;
-  envelope.set(headerBytes, off); off += headerBytes.length;
-  envelope.set(payload, off);
-
-  // Send to relay
-  const syncHeaders: Record<string, string> = {
-    "Authorization": `Bearer ${token}`,
-    "Content-Type": "application/octet-stream",
-  };
-  try {
-    syncHeaders["X-Backpack-Device-Name"] = os.hostname();
-    syncHeaders["X-Backpack-Device-Hostname"] = os.hostname();
-    syncHeaders["X-Backpack-Device-Platform"] = os.platform();
-    if (machineId) syncHeaders["X-Backpack-Device-Id"] = machineId;
-    if (sourceBackpackName) syncHeaders["X-Backpack-Source-Name"] = sourceBackpackName;
-  } catch { /* device info unavailable */ }
-
-  const relayRes = await fetch(`${relayUrl}/api/graphs/${encodeURIComponent(name)}/sync`, {
-    method: "PUT",
-    headers: syncHeaders,
-    body: envelope,
+  const pushUrl = `${relayUrl}/api/graphs/${encodeURIComponent(name)}/events${visibility === "public" ? "?visibility=public" : ""}`;
+  const res = await fetch(pushUrl, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name,
+      description: (data.metadata as Record<string, string> | undefined)?.description ?? "",
+      snapshot: data,
+      events: [],
+    }),
   });
-
-  if (!relayRes.ok) {
-    let msg = `Sync failed (${relayRes.status})`;
-    try { const b = await relayRes.json() as Record<string, string>; if (b.error) msg = b.error; } catch {}
+  if (!res.ok) {
+    let msg = `Push failed (${res.status})`;
+    try { const b = await res.json() as Record<string, string>; if (b.error) msg = b.error; } catch {}
     throw new Error(msg);
   }
-
-  // Mark as synced
   const syncedSettings = await readExtensionSettings("share");
   const synced = ((syncedSettings.synced as Record<string, boolean>) || {});
   synced[name] = true;
@@ -851,7 +754,7 @@ export async function handleApiRequest(
     if (url === "/api/backpack/sync" && method === "POST") {
       const body = await readBody(req);
       try {
-        const { direction, encrypted: wantEncrypted = true } = JSON.parse(body) as { direction: "push" | "pull"; encrypted?: boolean };
+        const { direction } = JSON.parse(body) as { direction: "push" | "pull"; encrypted?: boolean };
         const settings = await readExtensionSettings("share");
         const token = settings.relay_token;
         if (!token || typeof token !== "string") {
@@ -864,35 +767,13 @@ export async function handleApiRequest(
         interface SyncItem { name: string; kind: "graph" | "kb"; status: SyncItemStatus; error?: string }
         const result = { total: 0, synced: 0, skipped: 0, failed: 0, errors: [] as string[], items: [] as SyncItem[] };
 
-        const bulkMachineId = await getMachineId().catch(() => undefined);
-        const bulkSourceName = ctx.storage.activeEntry?.name;
-
         if (direction === "push") {
-          // Fetch existing cloud graphs to preserve their encryption status
-          let cloudEncryptionMap = new Map<string, boolean>();
-          try {
-            const cloudRes = await fetch(`${relayUrl}/api/graphs`, { headers: { "Authorization": `Bearer ${token}` } });
-            if (cloudRes.ok) {
-              const cloudGraphs = await cloudRes.json() as { name: string; encrypted?: boolean }[];
-              for (const g of cloudGraphs) cloudEncryptionMap.set(g.name, g.encrypted === true);
-            }
-          } catch { /* cloud unreachable, fall through to wantEncrypted default */ }
-
-          // Push graphs via BPAK envelopes — preserve existing encryption status
           const summaries = await ctx.storage.current.listOntologies();
           result.total += summaries.length;
           for (const s of summaries) {
             try {
               const data = await ctx.storage.current.loadOntology(s.name);
-              // If user explicitly chose unencrypted, force plaintext (fixes corrupted graphs).
-              // Otherwise, preserve cloud encryption status for existing graphs.
-              // New graphs use the user's default preference.
-              const encrypt = !wantEncrypted
-                ? false
-                : cloudEncryptionMap.has(s.name)
-                  ? cloudEncryptionMap.get(s.name)!
-                  : wantEncrypted;
-              await syncGraphToRelay(s.name, data as unknown as Record<string, unknown>, token, relayUrl, encrypt, "learning_graph", bulkMachineId, bulkSourceName);
+              await pushGraphToCloud(s.name, data as unknown as Record<string, unknown>, token, relayUrl);
               result.synced++;
               result.items.push({ name: s.name, kind: "graph", status: "synced" });
             } catch (err) {
@@ -902,30 +783,6 @@ export async function handleApiRequest(
               result.items.push({ name: s.name, kind: "graph", status: "failed", error: msg });
             }
           }
-
-          // Push KB docs as encrypted BPAK envelope (same as graphs)
-          try {
-            const docs = await getDocStore();
-            const kbResult = await docs.list();
-            if (kbResult.documents.length > 0) {
-              const allDocs = await Promise.all(kbResult.documents.map(s => docs.read(s.id)));
-              result.total++;
-              try {
-                await syncGraphToRelay(
-                  "knowledge-base",
-                  { documents: allDocs } as unknown as Record<string, unknown>,
-                  token, relayUrl, wantEncrypted, "knowledge_base",
-                  bulkMachineId, bulkSourceName,
-                );
-                result.synced++;
-                result.items.push({ name: `KB (${allDocs.length} docs)`, kind: "kb", status: "synced" });
-              } catch (err) {
-                result.failed++;
-                result.errors.push(`KB: ${(err as Error).message}`);
-                result.items.push({ name: `KB (${allDocs.length} docs)`, kind: "kb", status: "failed", error: (err as Error).message });
-              }
-            }
-          } catch { /* no KB mount configured */ }
         } else {
           // Pull graphs + KB into cloud cache (never into local backpacks)
           try {
@@ -1007,46 +864,19 @@ export async function handleApiRequest(
       return true;
     }
 
-    // --- /api/backpack/v2-sync — Sync Protocol v0.1 (artifact-versioned) ---
-    if (url === "/api/backpack/v2-sync/status" && method === "GET") {
-      try {
-        const settings = await readExtensionSettings("share");
-        const authenticated = typeof settings.relay_token === "string" && settings.relay_token.length > 0;
-
-        const active = ctx.storage.activeEntry;
-        if (!active || active.path.startsWith("cloud://")) {
-          sendJson(res, 200, {
-            authenticated,
-            registered: false,
-            reason: "no_local_active",
-          });
-          return true;
-        }
-        const state = await readSyncState(active.path);
-        if (!state) {
-          sendJson(res, 200, {
-            authenticated,
-            registered: false,
-            backpack_name: active.name,
-          });
-          return true;
-        }
-        sendJson(res, 200, {
-          authenticated,
-          registered: true,
-          backpack_id: state.backpack_id,
-          backpack_name: state.name,
-          relay_url: state.relay_url,
-          last_sync_at: state.last_sync_at,
-          artifact_count: Object.keys(state.artifacts).length,
-        });
-      } catch (err) {
-        sendErr(res, 500, (err as Error).message);
-      }
+    // --- /api/backpack/cloud-sync — event-log-based cloud push ---
+    if (url === "/api/backpack/cloud-sync/status" && method === "GET") {
+      const settings = await readExtensionSettings("share");
+      sendJson(res, 200, {
+        authenticated: typeof settings.relay_token === "string" && settings.relay_token.length > 0,
+        backpack_name: ctx.storage.activeEntry?.name ?? null,
+        is_local: !ctx.storage.activeEntry?.path.startsWith("cloud://"),
+      });
       return true;
     }
 
-    if (url === "/api/backpack/v2-sync/register" && method === "POST") {
+    // Push the active graph (or a named graph) to cloud using the event log API.
+    if (url === "/api/backpack/cloud-sync/push" && method === "POST") {
       try {
         const active = ctx.storage.activeEntry;
         if (!active || active.path.startsWith("cloud://")) {
@@ -1056,225 +886,39 @@ export async function handleApiRequest(
         const settings = await readExtensionSettings("share");
         const token = settings.relay_token as string | undefined;
         if (!token) {
-          sendErr(res, 401, "Sign in to enable cloud sync");
+          sendErr(res, 401, "Sign in first");
           return true;
         }
         const relayUrl = (settings.relay_url as string) || "https://app.backpackontology.com";
         const body = await readBody(req).catch(() => "{}");
-        const reqBody = JSON.parse(body || "{}") as {
-          name?: string; color?: string; tags?: string[];
-          autoPush?: boolean;
-        };
-        const relay = new SyncRelayClient({ baseUrl: relayUrl, token });
-        const client = new SyncClient({ backpackPath: active.path, relay });
-        const state = await client.register({
-          name: reqBody.name ?? active.name,
-          color: reqBody.color ?? active.color,
-          tags: reqBody.tags ?? [],
+        const { graphName, visibility } = JSON.parse(body || "{}") as { graphName?: string; visibility?: "public" | "private" };
+        if (!graphName) {
+          sendErr(res, 400, "graphName is required");
+          return true;
+        }
+        if (/[/\\]|\.\./.test(graphName)) {
+          sendErr(res, 400, "invalid graph name");
+          return true;
+        }
+        const data = await ctx.storage.current.loadOntology(graphName);
+        const pushUrl = `${relayUrl}/api/graphs/${encodeURIComponent(graphName)}/events${visibility === "public" ? "?visibility=public" : ""}`;
+        const pushRes = await fetch(pushUrl, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: graphName,
+            description: data.metadata?.description ?? "",
+            snapshot: data,
+            events: [],
+          }),
         });
-
-        // Auto-push: by default, register also pushes all local artifacts
-        // so the user's first click does the obvious thing. Pass
-        // autoPush=false to opt out.
-        let push;
-        if (reqBody.autoPush !== false) {
-          push = await client.push();
-        }
-        sendJson(res, 200, { state, push });
-      } catch (err) {
-        const msg = (err as Error).message;
-        const status = /relay token rejected/i.test(msg) ? 401 : 500;
-        sendErr(res, status, msg);
-      }
-      return true;
-    }
-
-    if (url === "/api/backpack/v2-sync/sync" && method === "POST") {
-      try {
-        const active = ctx.storage.activeEntry;
-        if (!active || active.path.startsWith("cloud://")) {
-          sendErr(res, 400, "no local backpack active");
+        if (!pushRes.ok) {
+          if (pushRes.status === 401) { sendErr(res, 401, "Session expired"); return true; }
+          const errBody = await pushRes.text().catch(() => "");
+          sendErr(res, pushRes.status, errBody || `Push failed (${pushRes.status})`);
           return true;
         }
-        const state = await readSyncState(active.path);
-        if (!state) {
-          sendErr(res, 400, "backpack is not registered for sync");
-          return true;
-        }
-        const settings = await readExtensionSettings("share");
-        const token = settings.relay_token as string | undefined;
-        if (!token) {
-          sendErr(res, 401, "Sign in via Share extension first to set relay token");
-          return true;
-        }
-        const relay = new SyncRelayClient({ baseUrl: state.relay_url, token });
-        const client = new SyncClient({ backpackPath: active.path, relay });
-        const body = await readBody(req).catch(() => "{}");
-        const { direction = "sync" } = JSON.parse(body || "{}") as { direction?: "push" | "pull" | "sync" };
-        let result;
-        if (direction === "push") result = await client.push();
-        else if (direction === "pull") result = await client.pull();
-        else result = await client.sync();
-        sendJson(res, 200, result);
-      } catch (err) {
-        const msg = (err as Error).message;
-        const status = /relay token rejected/i.test(msg) ? 401 : 500;
-        sendErr(res, status, msg);
-      }
-      return true;
-    }
-
-    // Daemon status — sidebar polls this every few seconds while the
-    // sync row is visible to render the live state ("Auto-syncing", "↑3 ↓1
-    // 12 sec ago", etc).
-    if (url === "/api/backpack/v2-sync/daemon-status" && method === "GET") {
-      const daemon = (ctx as { syncDaemon?: { status: () => unknown } }).syncDaemon;
-      sendJson(res, 200, daemon ? daemon.status() : { enabled: false, state: "disabled" });
-      return true;
-    }
-
-    // Re-arm the daemon after the user signs in (or signs out and
-    // back in). Idempotent.
-    if (url === "/api/backpack/v2-sync/daemon-arm" && method === "POST") {
-      const daemon = (ctx as { syncDaemon?: { handleAuthChange: () => Promise<void> } }).syncDaemon;
-      if (daemon) {
-        daemon.handleAuthChange().catch(() => {});
-      }
-      sendJson(res, 200, { ok: true });
-      return true;
-    }
-
-    // List cloud sync_backpacks (containers) the user owns. Different
-    // from /api/cloud-backpacks (which lists graphs); this surfaces
-    // the parent containers so the user can pick one to pull down.
-    if (url === "/api/cloud-sync-backpacks" && method === "GET") {
-      try {
-        const settings = await readExtensionSettings("share");
-        const token = settings.relay_token;
-        if (!token || typeof token !== "string") {
-          sendJson(res, 200, { authenticated: false, backpacks: [] });
-          return true;
-        }
-        const relayUrl = (settings.relay_url as string) || "https://app.backpackontology.com";
-        const relayRes = await fetch(`${relayUrl}/api/sync/backpacks`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!relayRes.ok) {
-          sendJson(res, 200, { authenticated: false, backpacks: [] });
-          return true;
-        }
-        const data = await relayRes.json() as { backpacks?: unknown[] };
-        sendJson(res, 200, { authenticated: true, backpacks: data.backpacks ?? [] });
-      } catch {
-        sendJson(res, 200, { authenticated: false, backpacks: [] });
-      }
-      return true;
-    }
-
-    // Clone a remote sync_backpack into a new local folder. The local
-    // folder is created under the parent of the currently-active
-    // backpack (so pulled backpacks land alongside existing ones), or
-    // ~/.local/share/backpack/<name> as a fallback. Idempotent: if the
-    // user already has this remote id locally, returns its path.
-    if (url === "/api/backpack/v2-sync/clone" && method === "POST") {
-      try {
-        const settings = await readExtensionSettings("share");
-        const token = settings.relay_token as string | undefined;
-        if (!token) {
-          sendErr(res, 401, "Sign in to enable cloud sync");
-          return true;
-        }
-        const relayUrl = (settings.relay_url as string) || "https://app.backpackontology.com";
-        const body = await readBody(req).catch(() => "{}");
-        const reqBody = JSON.parse(body || "{}") as { backpack_id?: string; name?: string; color?: string; parent_path?: string; activate?: boolean };
-        if (!reqBody.backpack_id) {
-          sendErr(res, 400, "backpack_id is required");
-          return true;
-        }
-
-        // Resolve remote metadata so we have the canonical name.
-        const relay = new SyncRelayClient({ baseUrl: relayUrl, token });
-        const manifest = await relay.manifest(reqBody.backpack_id) as { name: string; color?: string; tags?: string[] };
-        const remoteName = reqBody.name || manifest.name;
-
-        // Pick local path. Default = sibling of active backpack's
-        // folder if local; else ~/.local/share/backpack/<name>.
-        const safeName = remoteName.replace(/[^a-zA-Z0-9._-]/g, "_");
-        let parent = reqBody.parent_path;
-        if (!parent) {
-          const active = ctx.storage.activeEntry;
-          if (active && !active.path.startsWith("cloud://")) {
-            parent = path.dirname(active.path);
-          } else {
-            parent = path.join(os.homedir(), ".local", "share", "backpack");
-          }
-        }
-        const localPath = path.join(parent, safeName);
-
-        // Check if already registered locally — if so just return it.
-        const existing = await listBackpacks();
-        const already = existing.find((b) => b.path === localPath);
-        if (already) {
-          // Make sure remote state is attached even if folder existed already.
-          const state = await readSyncState(localPath);
-          if (state && state.backpack_id === reqBody.backpack_id) {
-            sendJson(res, 200, { path: localPath, name: already.name, alreadyExists: true });
-            return true;
-          }
-        }
-
-        // Create folder + clone.
-        await fs.mkdir(localPath, { recursive: true });
-        const client = new SyncClient({ backpackPath: localPath, relay });
-        const cloned = await client.clone(reqBody.backpack_id, remoteName, reqBody.color || manifest.color, manifest.tags);
-
-        // Register in the local backpack registry so it appears in pickers.
-        const registered = await registerBackpack(localPath);
-        if (reqBody.activate !== false) {
-          await setActiveBackpack(registered.path);
-          // Hot-swap server storage so subsequent reads/writes use the new path.
-          ctx.storage.current = new JsonFileBackend(undefined, { graphsDirOverride: registered.path });
-          await ctx.storage.current.initialize();
-          ctx.storage.activeEntry = registered;
-          if (ctx.onActiveBackpackChange) ctx.onActiveBackpackChange();
-        }
-
-        sendJson(res, 201, {
-          path: registered.path,
-          name: registered.name,
-          activated: reqBody.activate !== false,
-          pulled: cloned.pull.pulled.length,
-          skipped: (cloned.pull.skipped ?? []).length,
-          errors: cloned.pull.errors.length,
-        });
-      } catch (err) {
-        const msg = (err as Error).message;
-        const status = /\b401\b|relay token rejected/i.test(msg) ? 401 : 500;
-        sendErr(res, status, msg);
-      }
-      return true;
-    }
-
-    if (url === "/api/backpack/v2-sync/conflicts" && method === "GET") {
-      try {
-        const active = ctx.storage.activeEntry;
-        if (!active || active.path.startsWith("cloud://")) {
-          sendJson(res, 200, { conflicts: [] });
-          return true;
-        }
-        const dir = path.join(active.path, ".sync", "conflicts");
-        let entries: string[] = [];
-        try {
-          entries = (await fs.readdir(dir)).filter((f) => f.endsWith(".json"));
-        } catch {
-          entries = [];
-        }
-        sendJson(res, 200, {
-          conflicts: entries.map((name) => ({
-            name,
-            path: path.join(dir, name),
-          })),
-        });
+        sendJson(res, 200, { ok: true, nodes: data.nodes.length, edges: data.edges.length });
       } catch (err) {
         sendErr(res, 500, (err as Error).message);
       }
@@ -1520,6 +1164,7 @@ export async function handleApiRequest(
     const syncMatch = url.match(/^\/api\/cloud-sync\/([^?]+)/);
     if (syncMatch && method === "PUT") {
       const name = decodeURIComponent(syncMatch[1]);
+      if (/[/\\]|\.\./.test(name)) { sendErr(res, 400, "invalid graph name"); return true; }
       try {
         const settings = await readExtensionSettings("share");
         const token = settings.relay_token;
@@ -1529,16 +1174,10 @@ export async function handleApiRequest(
         }
         const relayUrl = (settings.relay_url as string) || "https://app.backpackontology.com";
         const body = await readBody(req);
-        const parsed = JSON.parse(body);
-
-        // Parse query params from the raw URL (urlPath() strips the query string)
+        const parsed = JSON.parse(body) as Record<string, unknown>;
         const params = new URLSearchParams((req.url || "").split("?")[1] || "");
-        const wantEncrypted = params.get("encrypted") !== "false";
-        const kind = params.get("kind") || "learning_graph";
-
-        const mid = await getMachineId().catch(() => undefined);
-        const srcName = ctx.storage.activeEntry?.name;
-        await syncGraphToRelay(name, parsed, token, relayUrl, wantEncrypted, kind, mid, srcName);
+        const visibility = params.get("visibility") ?? undefined;
+        await pushGraphToCloud(name, parsed, token, relayUrl, visibility);
         sendJson(res, 200, { ok: true });
       } catch (err) {
         sendErr(res, 500, (err as Error).message);
