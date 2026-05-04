@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.8.9 (2026-05-04)
+
+### Breaking: BPAK sync replaced with event-log push
+- `sync-daemon.ts` replaced with a no-op stub; background auto-sync is removed.
+- `/api/backpack/v2-sync/*` routes removed. New routes: `GET /api/backpack/cloud-sync/status`, `POST /api/backpack/cloud-sync/push`.
+- Share extension: client-side age encryption and BPAK envelope building removed. "Sync & Share" is now "Share" — pushes a plaintext snapshot server-side then creates a share link.
+- `syncGraphToRelay()` / `getMachineId()` removed; replaced by `pushGraphToCloud()` which calls `POST /api/graphs/{name}/events` with `snapshot` field.
+- `/api/cloud-sync-backpacks` (sync_backpacks container list) removed.
 
 ### Right-click enrich (cloud-only)
 - New `src/enrich-panel.ts` opens a small live-progress panel when the user right-clicks a node and picks "Enrich". It POSTs `{backpack, nodeId}` to `window.BACKPACK_ENRICH_ENDPOINT` (set by backpack-app to `/api/enrich/node`) and renders the SSE stream of agent events (`tool_call`, `tool_result`, `graph_change`, etc.). On `done` with mutations applied, the host reloads the ontology so the canvas reflects the agent's persisted changes. The right-click menu item is conditional on the global being set, so OSS-standalone keeps its existing menu items unchanged.
