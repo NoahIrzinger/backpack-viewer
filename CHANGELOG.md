@@ -477,3 +477,9 @@ versions are migrated automatically on first start.
 ## 0.2.16 (2026-03-26)
 
 - Initial public release with Canvas 2D renderer, force-directed layout, live reload
+
+## 0.8.11 (2026-05-05)
+
+### Sidebar KG entry: buttons removed, null guard added
+- Removed sync (↻) and query (</>) buttons from the `kgEntry` sidebar element. Query/sync access is now exclusively via the floating canvas KG button (OSS) or the dashboard Knowledge Graph tab (cloud).
+- Fixed `kgStatusCache.backpacks?.length` null guard — cloud status response does not include a `backpacks` array, causing a throw that silently reset the KG entry to "Connect ArcadeDB to enable". Now uses `(kgStatusCache.backpacks ?? []).length`.
