@@ -1214,43 +1214,13 @@ export function initSidebar(
   kgScopeSelect.addEventListener("click", (e) => e.stopPropagation());
   kgScopeSelect.addEventListener("change", () => { renderKgMeta(); });
 
-  // Sync button (↻ SVG)
-  const kgSyncBtn = document.createElement("button");
-  kgSyncBtn.className = "kg-icon-btn";
-  kgSyncBtn.type = "button";
-  kgSyncBtn.hidden = true;
-  kgSyncBtn.appendChild(makeSvgIcon(
-    { size: 13, strokeLinecap: "round", strokeLinejoin: "round" },
-    [
-      { tag: "polyline", attrs: { points: "1 4 1 10 7 10" } },
-      { tag: "polyline", attrs: { points: "23 20 23 14 17 14" } },
-      { tag: "path", attrs: { d: "M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" } },
-    ],
-  ));
-
-  // Query button (</> SVG)
-  const kgQueryBtn = document.createElement("button");
-  kgQueryBtn.className = "kg-icon-btn";
-  kgQueryBtn.type = "button";
-  kgQueryBtn.hidden = true;
-  kgQueryBtn.title = "Open Graph Query panel";
-  kgQueryBtn.appendChild(makeSvgIcon(
-    { size: 13, strokeLinecap: "round", strokeLinejoin: "round" },
-    [
-      { tag: "polyline", attrs: { points: "16 18 22 12 16 6" } },
-      { tag: "polyline", attrs: { points: "8 6 2 12 8 18" } },
-    ],
-  ));
-  kgQueryBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    window.dispatchEvent(new CustomEvent("backpack-kg-open", { detail: { openSettings: false } }));
-  });
-
+  // Query/sync access moved to the floating canvas button (main.ts).
+  // The sidebar entry is status-only — click opens the KG panel or settings.
   const kgDotTarget = document.createElement("span");
   kgDotTarget.className = "kg-conn-dot-target";
 
   kgInfo.append(kgName, kgMeta);
-  kgEntry.append(kgIcon, kgInfo, kgScopeSelect, kgSyncBtn, kgQueryBtn, kgDotTarget);
+  kgEntry.append(kgIcon, kgInfo, kgScopeSelect, kgDotTarget);
   kgSection.appendChild(kgEntry);
 
   let kgOnline = false;
@@ -1307,13 +1277,8 @@ export function initSidebar(
       kgEntry.className = "kg-entry kg-entry--offline";
       kgMeta.textContent = "Connect ArcadeDB to enable";
       kgScopeSelect.hidden = true;
-      kgSyncBtn.hidden = true;
-      kgQueryBtn.hidden = true;
       return;
     }
-
-    kgSyncBtn.hidden = !(cbs.onKgSyncAll || cbs.onKgSyncBackpack);
-    kgQueryBtn.hidden = false;
 
     const scope = kgScopeSelect.value || "all";
     const { backpack, graph } = parseKgScope(scope);
@@ -1326,20 +1291,17 @@ export function initSidebar(
       nodeCount = kgStatusCache.nodeCount;
       graphCount = kgStatusCache.graphCount;
       scopeLabel = "live";
-      kgSyncBtn.title = "Sync all backpacks to ArcadeDB";
     } else if (!graph) {
       const bp = (kgStatusCache.backpacks ?? []).find((b) => b.name === backpack);
       nodeCount = bp?.nodeCount ?? 0;
       graphCount = bp?.graphCount ?? 0;
       scopeLabel = backpack;
-      kgSyncBtn.title = `Sync ${backpack} to ArcadeDB`;
     } else {
       const bp = (kgStatusCache.backpacks ?? []).find((b) => b.name === backpack);
       const g = (bp?.graphs ?? []).find((gg) => gg.name === graph);
       nodeCount = g?.nodeCount ?? 0;
       graphCount = nodeCount > 0 ? 1 : 0;
       scopeLabel = graph;
-      kgSyncBtn.title = `Sync ${backpack} to ArcadeDB`;
     }
 
     if (nodeCount > 0) {
@@ -1350,46 +1312,14 @@ export function initSidebar(
       kgOnline = kgStatusCache.available;
       kgEntry.className = "kg-entry kg-entry--empty";
       kgMeta.textContent = scope === "all"
-        ? "No graphs projected yet — click ↻ to sync"
+        ? "No graphs projected yet — use the ⬡ button to sync"
         : `Nothing projected${backpack ? ` from "${backpack}"` : ""} yet`;
     }
 
-    const hasData = kgStatusCache.backpacks.length > 0;
+    const hasData = (kgStatusCache.backpacks ?? []).length > 0;
     kgScopeSelect.hidden = !hasData;
     if (hasData) rebuildScopeOptions();
   }
-
-  async function doKgSync(backpackName?: string) {
-    kgSyncBtn.disabled = true;
-    kgSyncBtn.classList.add("kg-icon-btn--spinning");
-    kgMeta.textContent = backpackName ? `Syncing ${backpackName}…` : "Syncing all backpacks…";
-    try {
-      let r: { graphCount: number; errorCount: number; totalNodes: number };
-      if (backpackName && cbs.onKgSyncBackpack) {
-        r = await cbs.onKgSyncBackpack(backpackName);
-      } else if (cbs.onKgSyncAll) {
-        r = await cbs.onKgSyncAll();
-      } else {
-        throw new Error("No sync handler");
-      }
-      kgMeta.textContent = r.errorCount > 0
-        ? `Synced ${r.graphCount} graphs (${r.errorCount} errors)`
-        : `Synced ${r.graphCount} graphs · ${r.totalNodes} nodes`;
-      await refreshKgStatus();
-    } catch (err) {
-      kgMeta.textContent = `Sync failed: ${(err as Error).message.slice(0, 60)}`;
-      setTimeout(() => refreshKgStatus(), 3000);
-    } finally {
-      kgSyncBtn.disabled = false;
-      kgSyncBtn.classList.remove("kg-icon-btn--spinning");
-    }
-  }
-
-  kgSyncBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    const { backpack } = parseKgScope(kgScopeSelect.value || "all");
-    void doKgSync(backpack);
-  });
 
   kgEntry.addEventListener("click", () => {
     const { backpack, graph } = parseKgScope(kgScopeSelect.value || "all");
@@ -1411,8 +1341,6 @@ export function initSidebar(
       kgEntry.className = "kg-entry kg-entry--offline";
       kgMeta.textContent = "Connect ArcadeDB to enable";
       kgScopeSelect.hidden = true;
-      kgSyncBtn.hidden = true;
-      kgQueryBtn.hidden = true;
     }
   }
 

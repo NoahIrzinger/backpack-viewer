@@ -483,3 +483,9 @@ versions are migrated automatically on first start.
 ### Sidebar KG entry: buttons removed, null guard added
 - Removed sync (↻) and query (</>) buttons from the `kgEntry` sidebar element. Query/sync access is now exclusively via the floating canvas KG button (OSS) or the dashboard Knowledge Graph tab (cloud).
 - Fixed `kgStatusCache.backpacks?.length` null guard — cloud status response does not include a `backpacks` array, causing a throw that silently reset the KG entry to "Connect ArcadeDB to enable". Now uses `(kgStatusCache.backpacks ?? []).length`.
+
+## 0.8.12 (2026-05-05)
+
+### Sidebar: sync/query buttons removed from kgEntry
+- Removed the sync (↻) and query (</>) buttons from the Knowledge Graph sidebar entry. These were a regression from the initial implementation of the collapsible sections in 0.8.10 — the buttons were included but are now exclusively available via the floating canvas KG button (OSS users) or the dashboard Knowledge Graph tab (cloud).
+- The sidebar `kgEntry` is now status-only: shows connection state, node/graph count, and the scope selector. Click navigates to the KG or opens settings.
