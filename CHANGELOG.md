@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.10 (2026-05-05)
+
+### Sidebar: Knowledge / Learning collapsible sections
+- Graphs tab restructured into two collapsible sections: **Knowledge** (ArcadeDB/Curiosity Engine status entry) and **Learning** (individual learning graphs, remotes, cloud).
+- Filter input moved above both sections.
+- Floating KG button added to canvas top-left (right of tools toggle) — dispatches `backpack-kg-open`. Hidden when `window.BACKPACK_HIDE_KG_BUTTON = true` (cloud app).
+- `Window.BACKPACK_HIDE_KG_BUTTON` declared in `env.d.ts`.
+
 ## 0.8.9 (2026-05-04)
 
 ### Breaking: BPAK sync replaced with event-log push
