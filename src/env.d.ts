@@ -4,4 +4,5 @@ interface Window {
   BACKPACK_HIDE_KG_BUTTON?: boolean;
   BACKPACK_ENRICH_ENDPOINT?: string;
   BACKPACK_CHAT_PROXY?: string;
+  BACKPACK_ID?: string; // UUID of the currently viewed backpack, set by cloud app
 }

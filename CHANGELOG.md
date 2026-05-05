@@ -489,3 +489,9 @@ versions are migrated automatically on first start.
 ### Sidebar: sync/query buttons removed from kgEntry
 - Removed the sync (↻) and query (</>) buttons from the Knowledge Graph sidebar entry. These were a regression from the initial implementation of the collapsible sections in 0.8.10 — the buttons were included but are now exclusively available via the floating canvas KG button (OSS users) or the dashboard Knowledge Graph tab (cloud).
 - The sidebar `kgEntry` is now status-only: shows connection state, node/graph count, and the scope selector. Click navigates to the KG or opens settings.
+
+## 0.8.13 (2026-05-05)
+
+### Sidebar: per-backpack KG status scoping
+- When `window.BACKPACK_ID` is set (cloud app injects the current backpack's UUID), the sidebar's KG status request uses `/api/connector/knowledge-graph/status?backpackId={id}` so the Knowledge section shows node/graph counts specific to the current backpack rather than the user's full corpus.
+- `BACKPACK_ID` declared on the Window interface in `env.d.ts`.

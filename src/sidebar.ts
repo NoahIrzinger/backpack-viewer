@@ -1331,7 +1331,12 @@ export function initSidebar(
 
   async function refreshKgStatus() {
     try {
-      const res = await fetch("/api/connector/knowledge-graph/status");
+      // Scope to the current backpack when one is active (cloud app injects BACKPACK_ID).
+      const bpId = window.BACKPACK_ID;
+      const statusUrl = bpId
+        ? `/api/connector/knowledge-graph/status?backpackId=${encodeURIComponent(bpId)}`
+        : "/api/connector/knowledge-graph/status";
+      const res = await fetch(statusUrl);
       if (!res.ok) throw new Error("unavailable");
       kgStatusCache = await res.json() as KGStatusCache;
       renderKgMeta();
